@@ -6,11 +6,17 @@ create extension if not exists "pgcrypto";
 create table if not exists people (
   id uuid primary key default gen_random_uuid(),
   name text not null unique,
+  email text,
+  auth_user_id uuid unique,
   room text,
   gender text check (gender in ('m', 'f')),
   active boolean not null default true,
   created_at timestamptz not null default now()
 );
+
+create unique index if not exists people_email_unique_idx
+  on people (lower(email))
+  where email is not null;
 
 -- Cadet-submitted unavailability / constraints
 create table if not exists issues (

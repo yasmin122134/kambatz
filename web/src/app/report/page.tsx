@@ -1,7 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/PageShell";
+import { NameCombobox } from "@/components/NameCombobox";
+import { createClient } from "@/lib/supabase/client";
 import {
   ISSUE_TYPE_LABELS,
   ISSUE_TYPE_NOTE_PLACEHOLDERS,
@@ -36,6 +38,19 @@ export default function ReportPage() {
       .then((r) => r.json())
       .then(setPeople)
       .catch(() => setMessage({ ok: false, text: "לא הצלחתי לטעון רשימת שמות" }));
+
+    (async () => {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) return;
+      const me = await fetch("/api/me");
+      if (me.ok) {
+        const p = await me.json();
+        if (p.name) setPersonName(p.name);
+      }
+    })();
   }, []);
 
   useEffect(() => {
@@ -89,19 +104,13 @@ export default function ReportPage() {
       <form onSubmit={onSubmit} className="card space-y-4">
         <div className="field">
           <label htmlFor="person">השם שלי</label>
-          <select
+          <NameCombobox
             id="person"
             required
             value={personName}
-            onChange={(e) => setPersonName(e.target.value)}
-          >
-            <option value="">— בחרו שם —</option>
-            {people.map((p) => (
-              <option key={p.id} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            onChange={setPersonName}
+            placeholder="הקלידו או בחרו מהרשימה"
+          />
           {people.length === 0 && (
             <p className="hint">אין שמות עדיין — המפקד צריך להוסיף את המחזור בלשונית ניהול.</p>
           )}

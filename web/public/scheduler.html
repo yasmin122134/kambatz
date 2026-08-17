@@ -540,19 +540,22 @@
         display: inline-flex;
         margin: 2px 3px 2px 0;
       }
-      .seat select {
+      .seat select,
+      .seat input[type="text"] {
         width: auto;
         min-width: 112px;
         padding: 4px 7px;
         font-size: 13px;
         border-radius: 2px;
       }
-      .seat select.locked {
+      .seat select.locked,
+      .seat input.locked {
         border-color: var(--slate);
         background: #edf1f3;
         font-weight: 700;
       }
-      .seat select.clash {
+      .seat select.clash,
+      .seat input.clash {
         border-color: var(--brick);
         background: #fbeeea;
       }
@@ -719,6 +722,27 @@
         border-color: var(--olive);
         box-shadow: inset 3px 0 0 var(--olive);
       }
+      .bt-mode {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 6px 12px;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background: var(--bone2);
+        font-size: 13px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .bt-mode input {
+        width: auto;
+        margin: 0;
+      }
+      .bt-mode.on {
+        border-color: var(--olive);
+        background: #eef2e8;
+        font-weight: 600;
+      }
       footer {
         max-width: 1380px;
         margin: 34px auto 0;
@@ -761,6 +785,7 @@
     </style>
   </head>
   <body>
+    <datalist id="bahadix-names"></datalist>
     <header>
       <div class="wrap">
         <div>
@@ -815,12 +840,11 @@
             <div class="field">
               <textarea
                 id="bulk"
-                placeholder="אוהד שמעוני&#10;דניאל כהן&#10;יונתן לוי"
+                placeholder="שם אחד בכל שורה — הקלדה מציעה שמות מהמחזור"
               ></textarea>
             </div>
             <div class="bar">
               <button class="pri" id="addBulk">הוסף לרשימה</button>
-              <button id="demoNames">מלא 52 שמות לדוגמה</button>
               <button class="link" id="clearPeople">מחק הכל</button>
             </div>
           </div>
@@ -890,7 +914,7 @@
               <textarea
                 id="roomsPaste"
                 style="min-height: 120px"
-                placeholder="Room A&#9;Room B&#9;Room C&#10;אוהד שמעוני&#9;דניאל כהן&#9;יונתן לוי"
+                placeholder="Room A&#9;Room B&#10;שם1&#9;שם2"
               ></textarea>
             </div>
             <button class="sm pri" id="roomsParse">פענח</button>
@@ -957,7 +981,6 @@
           <div class="wrapx"><table id="tblPatrols"></table></div>
           <div class="bar" style="margin-top: 12px">
             <button id="addPatrol">+ פטרול</button>
-            <button id="resetPatrols">שחזר מהפקודה</button>
           </div>
         </div>
       </section>
@@ -1319,22 +1342,37 @@
         <div class="card">
           <h2>בלת״ם</h2>
           <p class="lede">
-            צוער נפל משמירה? בחרו אותו ואת המשמרת, והמערכת תציע את התיקון הקטן
-            ביותר האפשרי — מחליף פנוי, או החלפה הדדית שבה שניכם מחליפים משמרת.
-            שום שיבוץ אחר בלוח לא זז, ושתי המשבצות ננעלות אחרי הביצוע.
+            צוער נפל משמירה? בחרו אותו, את המשמרת, ואת סוג התיקון. שום שיבוץ
+            אחר בלוח לא זז — רק המשבצות שבחרתם, ואחרי הביצוע הן ננעלות.
           </p>
+          <div class="bar" style="margin-bottom: 14px; flex-wrap: wrap; gap: 8px">
+            <label class="bt-mode on" data-mode="replace">
+              <input type="radio" name="btMode" value="replace" checked />
+              הסר שמירה ומצא מחליף
+            </label>
+            <label class="bt-mode" data-mode="swap">
+              <input type="radio" name="btMode" value="swap" />
+              החלפה ראש בראש
+            </label>
+          </div>
           <div class="rowf">
             <div class="field">
               <label>צוער</label>
-              <select id="btPerson"></select>
+              <input
+                type="text"
+                id="btPerson"
+                list="bahadix-names"
+                autocomplete="off"
+                placeholder="הקלידו שם…"
+              />
             </div>
             <div class="field">
               <label>המשמרת שנפלה</label>
               <select id="btSlot"></select>
             </div>
-            <div class="field" style="flex: 0 0 150px; align-self: end">
+            <div class="field" style="flex: 0 0 170px; align-self: end">
               <button class="pri" id="btFind" style="width: 100%">
-                מצא החלפה
+                מצא מחליף
               </button>
             </div>
           </div>
@@ -1500,51 +1538,6 @@
           cOverlap(b[0], b[1], sl.p, sl.dur),
         );
 
-      const PATROLS = () => [
-        {
-          id: uid(),
-          name: "סיור פנים גדר",
-          time: "09:30",
-          who: "מפק״ץ · ק׳ תורן מתרגל / סמל תורן",
-          note: "סיור על גדר היקפית ברכב",
-        },
-        {
-          id: uid(),
-          name: "סיור פנים גדר + סבב עמדות",
-          time: "13:00",
-          who: "מפק״ץ · ק׳ תורן מתרגל / סמל תורן",
-          note: "סיור על גדר היקפית ברכב ומעבר בכלל העמדות",
-        },
-        {
-          id: uid(),
-          name: "זמן דמדומים + יזומות + סבב עמדות",
-          time: "17:00–19:00",
-          who: "מפק״ץ כ״כ א׳/ב׳ · 3 צוערי כ״כ",
-          note: "פטרול רכוב — בין צומת הרוחות לסוף שטחי האימונים של בה״ד 1",
-        },
-        {
-          id: uid(),
-          name: "סבב עמדות מ׳ תורן",
-          time: "20:00",
-          who: "—",
-          note: "סבב עמדות",
-        },
-        {
-          id: uid(),
-          name: "סיור פנים גדר + חתימות",
-          time: "23:00 · 02:00",
-          who: "מ״פ הגנה · ק׳ תורן מתרגל / סמל תורן",
-          note: "סבב עמדות וחתימות בבונקר, ימ״ח ונשקייה",
-        },
-        {
-          id: uid(),
-          name: "כוננות עם שחר + יזומות + סבב עמדות",
-          time: "06:00–08:00",
-          who: "מפק״ץ כ״כ א׳/ב׳ · 3 צוערי כ״כ",
-          note: "פטרול רכוב — בין צומת הרוחות לסוף שטחי האימונים של בה״ד 1",
-        },
-      ];
-
       /* חסימות שעות — מתמלאות מדיווחי צוערים מאושרים + הוספה ידנית */
       const TRIALS = () => [];
 
@@ -1553,7 +1546,7 @@
         jobs: [],
         locks: {},
         result: null,
-        patrols: PATROLS(),
+        patrols: [],
         rooms: [],
         trials: [],
         cutoff: null,
@@ -1626,6 +1619,46 @@
           )
           .replace(/\s+/g, " ")
           .trim();
+
+      let extraApiNames = [];
+
+      function allKnownNames() {
+        const merged = new Set(
+          S.people
+            .map((p) => cleanName(p.name))
+            .concat(extraApiNames.map(cleanName))
+            .filter(Boolean),
+        );
+        return [...merged].sort((a, b) => a.localeCompare(b, "he"));
+      }
+
+      function syncNameDatalist() {
+        const dl = document.getElementById("bahadix-names");
+        if (!dl) return;
+        dl.innerHTML = allKnownNames()
+          .map((n) => `<option value="${esc(n)}">`)
+          .join("");
+      }
+
+      function wireNameInput(el, opts = {}) {
+        if (!el || el.tagName !== "INPUT") return;
+        el.setAttribute("list", "bahadix-names");
+        el.setAttribute("autocomplete", "off");
+        if (opts.placeholder) el.placeholder = opts.placeholder;
+        if (opts.onCommit) {
+          const commit = () => opts.onCommit(cleanName(el.value));
+          el.addEventListener("change", commit);
+          el.addEventListener("blur", commit);
+        }
+      }
+
+      async function refreshApiNames() {
+        const raw = await fetchPeopleFromApi();
+        if (!Array.isArray(raw)) return;
+        extraApiNames = raw.map((p) => cleanName(p.name)).filter(Boolean);
+        syncNameDatalist();
+      }
+
       const esc = (s) =>
         String(s).replace(
           /[&<>"]/g,
@@ -2783,6 +2816,7 @@
           : "";
         if (typeof renderRooms === "function") renderRooms();
         if (typeof renderTrials === "function") renderTrials();
+        syncNameDatalist();
         scheduleSave();
       }
 
@@ -3330,23 +3364,19 @@
             for (let i = 0; i < t.count; i++) {
               const w = document.createElement("span");
               w.className = "seat";
-              const sel = document.createElement("select");
-              sel.innerHTML =
-                '<option value="">— צוער —</option>' +
-                names
-                  .map(
-                    (n) =>
-                      `<option ${t.who[i] === n ? "selected" : ""}>${esc(markName(n))}</option>`,
-                  )
-                  .join("");
-              sel.dataset.i = i;
-              sel.onchange = (e) => {
-                const i = +e.target.dataset.i,
-                  k = e.target.selectedIndex;
-                t.who[i] = k > 0 ? names[k - 1] : "";
+              const inp = document.createElement("input");
+              inp.type = "text";
+              inp.placeholder = "— צוער —";
+              inp.value = t.who[i] || "";
+              wireNameInput(inp);
+              inp.dataset.i = i;
+              inp.oninput = (e) => {
+                t.who[+e.target.dataset.i] = cleanName(e.target.value);
+              };
+              inp.onchange = () => {
                 renderTrials();
               };
-              w.appendChild(sel);
+              w.appendChild(inp);
               bd.appendChild(w);
             }
             d.querySelector(".tn").oninput = (e) => {
@@ -3398,8 +3428,14 @@
             f.className = "field";
             f.style.flex = "1 1 190px";
             f.innerHTML = `<label>${esc(j.name)} · ${esc(w.start)}–${esc(w.end)}</label><input value="${esc(w.holder || "")}" placeholder="שם">`;
-            f.querySelector("input").oninput = (e) => {
+            const inp = f.querySelector("input");
+            wireNameInput(inp, { placeholder: "שם" });
+            inp.oninput = (e) => {
               w.holder = e.target.value;
+            };
+            inp.onchange = () => {
+              w.holder = cleanName(w.holder || "");
+              inp.value = w.holder;
             };
             box.appendChild(f);
           }),
@@ -3424,12 +3460,18 @@
         t.innerHTML = h + "</tbody>";
         S.patrols.forEach((p) => {
           const tr = t.querySelector(`tr[data-id="${p.id}"]`);
-          tr.querySelectorAll("input").forEach(
-            (inp) =>
-              (inp.oninput = (e) => {
-                p[e.target.dataset.k] = e.target.value;
-              }),
-          );
+          tr.querySelectorAll("input").forEach((inp) => {
+            if (inp.dataset.k === "who") wireNameInput(inp);
+            inp.oninput = (e) => {
+              p[e.target.dataset.k] = e.target.value;
+            };
+            if (inp.dataset.k === "who") {
+              inp.onchange = () => {
+                p.who = cleanName(p.who || "");
+                inp.value = p.who;
+              };
+            }
+          });
           tr.querySelector(".dp").onclick = () => {
             S.patrols = S.patrols.filter((x) => x.id !== p.id);
             renderPatrols();
@@ -4373,20 +4415,15 @@
          בלת״ם — smallest possible fix for one dropped shift
          ============================================================ */
       function renderBaltam() {
-        const pSel = document.getElementById("btPerson");
-        const keep = pSel.value;
-        const list = S.people.filter((p) => p.on);
-        pSel.innerHTML = list
-          .map((p, i) => `<option value="${i}">${esc(p.name)}</option>`)
-          .join("");
-        if (keep && [...pSel.options].some((o) => o.value === keep))
-          pSel.value = keep;
+        const inp = document.getElementById("btPerson");
+        const keep = cleanName(inp.value);
+        wireNameInput(inp, { placeholder: "הקלידו שם…" });
+        if (keep && allKnownNames().includes(keep)) inp.value = keep;
+        syncBtModeUi();
         fillBtSlots();
       }
       function btPersonName() {
-        const list = S.people.filter((p) => p.on);
-        const i = +document.getElementById("btPerson").value;
-        return list[i] ? list[i].name : "";
+        return cleanName(document.getElementById("btPerson").value);
       }
       function fillBtSlots() {
         const sSel = document.getElementById("btSlot"),
@@ -4411,6 +4448,21 @@
           ? opts.join("")
           : '<option value="">— הצוער הזה לא משובץ לשום משמרת —</option>';
       }
+      function btMode() {
+        const el = document.querySelector('input[name="btMode"]:checked');
+        return el ? el.value : "replace";
+      }
+      function syncBtModeUi() {
+        const mode = btMode();
+        document.querySelectorAll(".bt-mode").forEach((lb) => {
+          lb.classList.toggle("on", lb.dataset.mode === mode);
+        });
+        const btn = document.getElementById("btFind");
+        if (btn) {
+          btn.textContent =
+            mode === "swap" ? "מצא החלפה ראש בראש" : "מצא מחליף";
+        }
+      }
       function findBaltam() {
         const box = document.getElementById("btResults");
         box.innerHTML = "";
@@ -4418,7 +4470,12 @@
           box.innerHTML = '<p class="hint">בנו לוח קודם.</p>';
           return;
         }
+        const mode = btMode();
         const nm = btPersonName();
+        if (!nm) {
+          box.innerHTML = '<p class="hint">הקלידו שם צוער.</p>';
+          return;
+        }
         const raw = document.getElementById("btSlot").value;
         if (!raw) {
           box.innerHTML =
@@ -4475,34 +4532,38 @@
         });
         swaps.sort((a, b) => a.cost - b.cost);
 
-        const bestDirect = direct.length ? X.dur : Infinity;
-        const bestSwap = swaps.length
-          ? Math.abs(swaps[0].Y.dur - X.dur)
-          : Infinity;
-        const swapWins = bestSwap <= bestDirect;
+        let h = `<p class="lede" style="margin-bottom:10px">משמרת: <b>${esc(X.job)}</b> ${X.label} · <b>${esc(nm)}</b> ${mode === "swap" ? "↔ מחליף" : "יוסר מהמשמרת"}</p>`;
 
-        let h = `<p class="lede" style="margin-bottom:10px">משמרת: <b>${esc(X.job)}</b> ${X.label} · במקום <b>${esc(nm)}</b></p>`;
-        if (!direct.length && !swaps.length)
-          h +=
-            '<div class="issues"><h3>אין פתרון חוקי</h3><ul><li>כל אפשרות מפרה חפיפה, כלל 4־8 או מכסת מנוחה. שחררו נעילות או הריצו את הלוח מחדש.</li></ul></div>';
-        if (direct.length) {
-          h +=
-            '<h3 style="font-size:15px;margin:12px 0 8px">מחליף פנוי — שינוי של שורה אחת</h3>';
-          direct.slice(0, 5).forEach((o, i) => {
-            h += `<div class="opt${!i && !swapWins ? " best" : ""}"><span class="rank">${i + 1}</span>
-        <span class="why"><b>${esc(o.q)}</b> נכנס במקומו — תפוס כרגע ${hrs(o.cost)} שעות, יעלה ל־${hrs(o.cost + X.dur)}.</span>
-        <button class="sm pri" data-act="direct" data-q="${esc(o.q)}">בצע</button></div>`;
-          });
+        if (mode === "replace") {
+          if (!direct.length) {
+            h +=
+              '<div class="issues"><h3>אין מחליף פנוי</h3><ul><li>לא נמצא צוער שיכול לקחת את המשמרת בלי לשבור חפיפה, כלל 4־8 או מנוחה. נסו «החלפה ראש בראש» או הריצו את הלוח מחדש.</li></ul></div>';
+          } else {
+            h +=
+              '<h3 style="font-size:15px;margin:12px 0 8px">מחליפים פנויים — ' +
+              esc(nm) +
+              " יורד, המחליף נכנס</h3>";
+            direct.slice(0, 8).forEach((o, i) => {
+              h += `<div class="opt${i === 0 ? " best" : ""}"><span class="rank">${i + 1}</span>
+        <span class="why"><b>${esc(o.q)}</b> ייכנס במקום ${esc(nm)} · כרגע ${hrs(o.cost)} שעות, אחרי — ${hrs(o.cost + X.dur)}.</span>
+        <button class="sm pri" data-act="direct" data-q="${esc(o.q)}">הסר ושבץ מחליף</button></div>`;
+            });
+          }
+        } else {
+          if (!swaps.length) {
+            h +=
+              '<div class="issues"><h3>אין החלפה ראש בראש</h3><ul><li>לא נמצא צוער שיכול להחליף משמרת איתו בלי לשבור חפיפה, כלל 4־8 או מנוחה. נסו «הסר שמירה ומצא מחליף».</li></ul></div>';
+          } else {
+            h +=
+              '<h3 style="font-size:15px;margin:12px 0 8px">החלפות ראש בראש — שניכם מחליפים משמרת</h3>';
+            swaps.slice(0, 8).forEach((o, i) => {
+              h += `<div class="opt${i === 0 ? " best" : ""}"><span class="rank">${i + 1}</span>
+        <span class="why"><b>${esc(o.q)}</b> ייקח ${esc(X.job)} ${X.label}, ו<b>${esc(nm)}</b> ייקח ${esc(o.Y.job)} ${o.Y.label}.</span>
+        <button class="sm pri" data-act="swap" data-q="${esc(o.q)}" data-y="${esc(o.Y.id)}" data-yi="${o.yi}">בצע החלפה</button></div>`;
+            });
+          }
         }
-        if (swaps.length) {
-          h +=
-            '<h3 style="font-size:15px;margin:16px 0 8px">החלפה הדדית — שניכם מתחלפים</h3>';
-          swaps.slice(0, 5).forEach((o, i) => {
-            h += `<div class="opt${!i && swapWins ? " best" : ""}"><span class="rank">${i + 1}</span>
-        <span class="why"><b>${esc(o.q)}</b> ייקח את ${esc(X.job)} ${X.label}, ו<b>${esc(nm)}</b> ייקח במקומו ${esc(o.Y.job)} ${o.Y.label}.</span>
-        <button class="sm pri" data-act="swap" data-q="${esc(o.q)}" data-y="${esc(o.Y.id)}" data-yi="${o.yi}">בצע</button></div>`;
-          });
-        }
+
         box.innerHTML = h;
         const lock = (id, i, val) => {
           const sl = S.result.slots.find((s) => s.id === id);
@@ -5666,6 +5727,7 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         if (!S.rooms?.length) {
           S.rooms = buildRoomsFromPeople(S.people);
         }
+        syncNameDatalist();
         return true;
       }
 
@@ -5894,8 +5956,10 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         document.getElementById("ticks").innerHTML = "<i></i>".repeat(48);
         S.trials = TRIALS();
         defaults();
+        await refreshApiNames();
         const ok = await loadFromServer(true);
         if (!ok) refreshAllViews();
+        syncNameDatalist();
         setInterval(() => loadFromServer(false), 30000);
         document.addEventListener("visibilitychange", () => {
           if (document.visibilityState === "visible") loadFromServer(false);
@@ -5950,68 +6014,6 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
               S.people.push({ id: uid(), name: n, on: true });
           });
         document.getElementById("bulk").value = "";
-        renderPeople();
-      };
-      document.getElementById("demoNames").onclick = () => {
-        const f = [
-          "אורי",
-          "נועם",
-          "איתי",
-          "יהונתן",
-          "אלון",
-          "גיא",
-          "שחר",
-          "רועי",
-          "עידו",
-          "תומר",
-          "אביב",
-          "ניר",
-          "עומר",
-          "דור",
-          "יובל",
-          "אסף",
-          "מתן",
-          "ליאור",
-          "אמיר",
-          "רן",
-          "אורן",
-          "גל",
-          "עדן",
-          "ארז",
-          "נדב",
-          "שי",
-          "בר",
-          "טל",
-          "יואב",
-          "הראל",
-          "אלעד",
-          "עמית",
-          "דניאל",
-          "יאיר",
-          "אריאל",
-          "חן",
-          "מאור",
-          "שקד",
-          "זיו",
-          "רם",
-          "איל",
-          "עידן",
-          "יונתן",
-          "אדם",
-          "רוני",
-          "אופיר",
-          "איתן",
-          "יהב",
-          "ספיר",
-          "נבו",
-          "אלמוג",
-          "עופר",
-        ];
-        f.forEach((n, i) => {
-          const nm = n + " " + String(i + 1).padStart(2, "0");
-          if (!S.people.some((p) => p.name === nm))
-            S.people.push({ id: uid(), name: nm, on: true });
-        });
         renderPeople();
       };
       document.getElementById("clearPeople").onclick = () => {
@@ -6225,10 +6227,6 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         S.patrols.push({ id: uid(), name: "", time: "", who: "", note: "" });
         renderPatrols();
       };
-      document.getElementById("resetPatrols").onclick = () => {
-        S.patrols = PATROLS();
-        renderPatrols();
-      };
       document.getElementById("gen").onclick = () => generate(true);
       document.getElementById("regen").onclick = () => {
         S.cfg.seed = "";
@@ -6337,7 +6335,24 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       document.getElementById("expCsv").onclick = csv;
       document.getElementById("expWb").onclick = workbook;
       document.getElementById("printBtn").onclick = () => window.print();
-      document.getElementById("btPerson").onchange = fillBtSlots;
+      document.getElementById("btPerson").oninput = fillBtSlots;
+      document.querySelectorAll('input[name="btMode"]').forEach((inp) => {
+        inp.onchange = () => {
+          syncBtModeUi();
+          document.getElementById("btResults").innerHTML = "";
+        };
+      });
+      document.querySelectorAll(".bt-mode").forEach((lb) => {
+        lb.onclick = () => {
+          const radio = lb.querySelector('input[type="radio"]');
+          if (radio) {
+            radio.checked = true;
+            syncBtModeUi();
+            document.getElementById("btResults").innerHTML = "";
+          }
+        };
+      });
+      syncBtModeUi();
       document.getElementById("btFind").onclick = findBaltam;
       document.getElementById("saveState").onclick = () =>
         dl(

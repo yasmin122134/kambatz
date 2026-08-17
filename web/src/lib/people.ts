@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Columns always present after initial schema.sql */
 export const PEOPLE_BASE_SELECT =
-  "id,name,room,gender,active,created_at" as const;
+  "id,name,email,room,gender,active,created_at" as const;
 
 export const PEOPLE_FLAG_SELECT =
   "km,exam,no_weapon,no_guard,no_mag,prior_score" as const;
@@ -82,6 +82,13 @@ export async function probePeopleFlags(
   supabase: SupabaseClient,
 ): Promise<boolean> {
   const { error } = await supabase.from("people").select("km").limit(1);
+  return !error;
+}
+
+export async function probePeopleEmail(
+  supabase: SupabaseClient,
+): Promise<boolean> {
+  const { error } = await supabase.from("people").select("email").limit(1);
   return !error;
 }
 

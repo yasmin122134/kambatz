@@ -1,11 +1,35 @@
 import Link from "next/link";
 import { SiteHeader } from "@/components/SiteHeader";
+import { HomeGuest } from "@/components/HomeGuest";
+import { HomeUpcoming } from "@/components/HomeUpcoming";
+import { HomeUnknownUser } from "@/components/HomeUnknownUser";
+import { getUpcomingForPerson } from "@/lib/upcoming";
+import { getAuthUser, getSessionPerson } from "@/lib/session";
 
-export default function HomePage() {
+export default async function HomePage() {
+  const user = await getAuthUser();
+  const session = await getSessionPerson();
+  const upcoming = session
+    ? await getUpcomingForPerson(session.person.name)
+    : null;
+
   return (
     <>
       <SiteHeader />
       <main className="mx-auto max-w-3xl px-5 py-10">
+        {session && upcoming ? (
+          <HomeUpcoming
+            personName={session.person.name}
+            boardReady={upcoming.boardReady}
+            boardStart={upcoming.boardStart}
+            events={upcoming.events}
+          />
+        ) : user?.email ? (
+          <HomeUnknownUser email={user.email} />
+        ) : (
+          <HomeGuest />
+        )}
+
         <div className="card mb-6">
           <h2 className="font-display text-2xl mb-2">ברוכים הבאים</h2>
           <p className="lede">
@@ -22,10 +46,17 @@ export default function HomePage() {
             </p>
           </Link>
 
+          <Link href="/profile" className="card card-link">
+            <h3 className="font-display text-lg text-olive">הפרופיל שלי</h3>
+            <p className="text-sm text-ink2 mt-2">
+              התחברות עם Google — עדכון כ״מ, פטור שמירה, ללא נשק ועוד.
+            </p>
+          </Link>
+
           <Link href="/admin" className="card card-link">
             <h3 className="font-display text-lg text-olive">ניהול</h3>
             <p className="text-sm text-ink2 mt-2">
-              מפקד: אישור דיווחים, רשימת מחזור, ייצוא למחולל.
+              מפקד: אישור דיווחים ורשימת מחזור. מאושרים נכנסים אוטומטית למחולל.
             </p>
           </Link>
 

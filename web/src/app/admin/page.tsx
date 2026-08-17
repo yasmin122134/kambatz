@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { PageShell } from "@/components/PageShell";
+import { NameCombobox } from "@/components/NameCombobox";
 import {
   ISSUE_TYPE_LABELS,
   ISSUE_STATUS_LABELS,
@@ -18,19 +19,14 @@ export default function AdminPage() {
   const [newName, setNewName] = useState("");
   const [bulkNames, setBulkNames] = useState("");
   const [filter, setFilter] = useState<"pending" | "approved" | "all">("pending");
-  const [exportJson, setExportJson] = useState("");
-  const [approvedForExport, setApprovedForExport] = useState<Issue[]>([]);
+  const [syncMsg, setSyncMsg] = useState("");
+  const [syncing, setSyncing] = useState(false);
 
   const loadIssues = useCallback(async () => {
     const q = filter === "all" ? "" : `?status=${filter}`;
     const res = await fetch(`/api/issues${q}`);
     if (res.ok) setIssues(await res.json());
   }, [filter]);
-
-  const loadApproved = useCallback(async () => {
-    const res = await fetch("/api/issues?status=approved");
-    if (res.ok) setApprovedForExport(await res.json());
-  }, []);
 
   const loadPeople = useCallback(async () => {
     const res = await fetch("/api/people");
@@ -59,19 +55,8 @@ export default function AdminPage() {
     if (authed) {
       loadIssues();
       loadPeople();
-      loadApproved();
     }
-  }, [authed, loadIssues, loadPeople, loadApproved]);
-
-  useEffect(() => {
-    const trials = approvedForExport.map((i) => ({
-      name: [ISSUE_TYPE_LABELS[i.issue_type], i.note].filter(Boolean).join(" | ") || i.person_name,
-      start: i.start_time,
-      end: i.end_time,
-      who: [i.person_name],
-    }));
-    setExportJson(JSON.stringify(trials, null, 2));
-  }, [approvedForExport]);
+  }, [authed, loadIssues, loadPeople]);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -107,8 +92,24 @@ export default function AdminPage() {
     });
     if (res.ok) {
       loadIssues();
-      loadApproved();
     }
+  }
+
+  async function syncRoster() {
+    setSyncing(true);
+    setSyncMsg("");
+    const res = await fetch("/api/people/sync-roster", { method: "POST" });
+    const data = await res.json();
+    setSyncing(false);
+    if (!res.ok) {
+      setSyncMsg(data.error || "שגיאה בסנכרון");
+      return;
+    }
+    setSyncMsg(
+      `סונכרנו ${data.total} צוערים (${data.updated} עודכנו, ${data.inserted} חדשים)` +
+        (data.errors?.length ? ` · ${data.errors.length} שגיאות` : ""),
+    );
+    loadPeople();
   }
 
   async function addPerson(e: FormEvent) {
@@ -183,7 +184,7 @@ export default function AdminPage() {
   return (
     <PageShell
       title="לוח בקרה"
-      lede="אשרו דיווחי צוערים, נהלו את רשימת המחזור, וייצאו חסימות מאושרות למחולל."
+      lede="אשרו דיווחי צוערים ונהלו את רשימת המחזור. חסימות מאושרות נכנסות אוטומטית למחולל."
     >
       <div className="bar mb-6">
         <a href="/scheduler.html" className="btn-pri">
@@ -195,12 +196,29 @@ export default function AdminPage() {
       </div>
 
       <section className="card mb-6">
+        <h3 className="font-display text-base mb-2">סנכרון דוק פלוגה</h3>
+        <p className="lede mb-3">
+          מייבא 53 צוערים מהדוק — שמות, מיילים, ותיקון שמות ישנים. דורש הרצת{" "}
+          <code className="mono text-xs">migration_email_auth.sql</code> ב-Supabase.
+        </p>
+        <button
+          type="button"
+          className="btn-pri btn-sm"
+          disabled={syncing}
+          onClick={syncRoster}
+        >
+          {syncing ? "מסנכרן…" : "סנכרן מיילים מהדוק"}
+        </button>
+        {syncMsg && <p className="hint mt-2">{syncMsg}</p>}
+      </section>
+
+      <section className="card mb-6">
         <h3 className="font-display text-base mb-2">מחזור ({people.length})</h3>
         <form onSubmit={addPerson} className="bar mb-3">
-          <input
-            placeholder="שם חדש"
+          <NameCombobox
             value={newName}
-            onChange={(e) => setNewName(e.target.value)}
+            onChange={setNewName}
+            placeholder="הקלידו שם חדש או קיים"
             className="flex-1"
           />
           <button type="submit" className="btn-pri btn-sm">
@@ -281,15 +299,9 @@ export default function AdminPage() {
             ))}
           </ul>
         )}
-      </section>
-
-      <section className="card">
-        <h3 className="font-display text-base mb-2">ייצוא למחולל (התנסויות)</h3>
-        <p className="lede mb-3">
-          העתיקו את ה-JSON למחולל — לשונית 06 → הוסיפו ידנית, או שמרו לשימוש עתידי.
-          דיווחים <b>מאושרים</b> בלבד.
+        <p className="hint mt-4">
+          דיווחים מאושרים מופיעים אוטומטית במחולל — לשונית 06 · חסימות.
         </p>
-        <textarea readOnly rows={8} className="mono text-xs" value={exportJson} />
       </section>
     </PageShell>
   );

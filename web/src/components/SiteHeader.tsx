@@ -14,6 +14,12 @@ export function SiteHeader() {
           <Link href="/report" className="stamp">
             דיווח חסימה
           </Link>
+          <Link href="/profile" className="stamp">
+            הפרופיל שלי
+          </Link>
+          <Link href="/login" className="stamp">
+            התחברות
+          </Link>
           <Link href="/admin" className="stamp">
             ניהול
           </Link>
