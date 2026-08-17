@@ -771,6 +771,7 @@
           <div class="stamp" id="stampPeople">0 צוערים</div>
           <div class="stamp" id="stampSeats">0 משבצות</div>
           <div class="stamp" id="stampSeed">SEED —</div>
+          <div class="stamp" id="syncHint" title="סנכרון עם מסד הנתונים">טוען…</div>
         </div>
       </div>
       <div class="ticks" id="ticks"></div>
@@ -800,7 +801,7 @@
         </button>
         <button class="tabbtn" data-tab="p6">
           <span class="n">06</span>
-          התנסויות
+          חסימות
         </button>
       </div>
 
@@ -1156,9 +1157,13 @@
               <li>שיבוץ שננעל ידנית לא יוחלף בהרצה חוזרת.</li>
             </ul>
             <h2 style="font-size: 16px">שמירה וייבוא</h2>
+            <p class="lede" style="margin-bottom: 10px">
+              הלוח נשמר אוטומטית במסד הנתונים — כל מכונה רואה את אותו מצב.
+              אפשר גם לייצא/לטעון קובץ גיבוי מקומי.
+            </p>
             <div class="bar">
-              <button id="saveState">שמור קובץ מצב</button>
-              <button id="loadStateBtn">טען קובץ מצב</button>
+              <button id="saveState">ייצוא גיבוי (JSON)</button>
+              <button id="loadStateBtn">טען גיבוי מקומי</button>
               <input
                 type="file"
                 id="loadState"
@@ -1338,18 +1343,17 @@
       </section>
       <section class="page" id="p6">
         <div class="card">
-          <h2>התנסויות · בלת״ם לוזים</h2>
+          <h2>חסימות שעות</h2>
           <p class="lede">
             כל שורה כאן היא חלון שבו הצוערים הרשומים
             <b>אינם זמינים</b>
-            לשמירה, לתורנות או לכל משבצת אחרת. המחולל מכבד את זה אוטומטית. מלאו
-            את השמות במשבצות —
-            <b>"התנסות צוותית"</b>
-            נפתחת לארבעה צוותים.
+            לשמירה, לתורנות או לכל משבצת אחרת. דיווחים
+            <b>מאושרים</b>
+            מגיעים אוטומטית מטופס הצוערים (מבחן, התנסות, רפואי…). אפשר גם
+            להוסיף חסימות ידנית למפקד.
           </p>
           <div class="bar spread">
-            <button id="addTrial">+ התנסות</button>
-            <button id="resetTrials">שחזר מהיומן</button>
+            <button id="addTrial">+ חסימה ידנית</button>
             <span style="flex: 1"></span>
             <span class="hint" id="trialHint" style="margin: 0"></span>
           </div>
@@ -1541,37 +1545,8 @@
         },
       ];
 
-      /* בלת״ם לוזים — ההתנסויות מהיומן. כל שורה חוסמת את מי שישובץ אליה. */
-      const TRIALS = () =>
-        [
-          ["הורדת התנסות קמ״צ גדודי | משרד מפק״ץ 16", "09:30", "10:30", 1],
-          [
-            "הורדת התנסות קמ״צ גדודי + פלוגתיים | כיתה 312 א׳",
-            "10:45",
-            "12:45",
-            1,
-          ],
-          ["הורדת התנסות | כיתה 155", "10:45", "12:45", 1],
-          ["הורדת התנסות ק.ניווט גדודי | משרד מפק״ץ 16", "14:15", "15:30", 1],
-          ["הורדת התנסות קמב״ץ פלוגתי | משרד מ״פ ד׳", "16:00", "17:00", 1],
-          ["הורדת התנסות | משרד מפק״ץ 16", "16:00", "17:00", 1],
-          ["הורדת התנסות שטח | כיתה 506", "16:00", "17:30", 1],
-          ["הורדת התנסות קל״פים + קל״ג | כיתה 310", "17:30", "18:45", 1],
-          ["הורדת התנסות קא״ר פלוגתי | משרד מ״פ ד׳", "19:15", "20:00", 1],
-          ["התנסות צוותית | כיתה 406 (ארבעת הצוותים)", "20:00", "21:30", 4],
-          ["הורדת התנסות פלוגתיים + צוותים | כיתה 310", "20:00", "21:30", 1],
-          ["הורדת התנסות קא״גים פלוגתיים | כיתה 307 א׳", "20:00", "21:30", 1],
-          ["הורדת התנסות ז.יזומות גדודי | משרד מפק״ץ 14", "20:15", "21:15", 1],
-          ["הורדת התנסות קב״טים פלוגתיים | משרד סמג״ד", "20:30", "21:30", 1],
-          ["הורדת התנסות ק.הגנ״ש פלוגתיים | כיתה 405", "20:45", "21:30", 1],
-        ].map((x) => ({
-          id: uid(),
-          name: x[0],
-          start: x[1],
-          end: x[2],
-          count: x[3],
-          who: new Array(x[3]).fill(""),
-        }));
+      /* חסימות שעות — מתמלאות מדיווחי צוערים מאושרים + הוספה ידנית */
+      const TRIALS = () => [];
 
       const S = {
         people: [],
@@ -1963,6 +1938,7 @@
         S.result = best;
         renderBoard();
         renderBaltam();
+        scheduleSave();
       }
 
       function attempt(people, slots, rng, keepLocks, deep) {
@@ -2807,6 +2783,7 @@
           : "";
         if (typeof renderRooms === "function") renderRooms();
         if (typeof renderTrials === "function") renderTrials();
+        scheduleSave();
       }
 
       function renderMeals() {
@@ -3321,12 +3298,23 @@
         const names = S.people.filter((p) => p.on).map((p) => p.name);
         if (!S.trials.length) {
           box.innerHTML =
-            '<p class="hint">אין התנסויות. הוסיפו שורה או שחזרו מהיומן.</p>';
+            '<p class="hint">אין חסימות. צוערים מדווחים ב-/report — אחרי אישור מפקד הן יופיעו כאן.</p>';
         } else {
           box.innerHTML = "";
           S.trials.forEach((t) => {
+            const fromIssue = String(t.id || "").startsWith("issue-");
             const d = document.createElement("div");
             d.className = "job";
+            if (fromIssue) {
+              d.innerHTML = `<div class="hd">
+          <span class="swatch" style="background:var(--mustard)"></span>
+          <span style="font-weight:600">${esc(t.name)}</span>
+          <span class="mono" style="margin-inline-start:8px">${esc(t.start)}–${esc(t.end)}</span>
+          <span class="tag g" style="margin-inline-start:auto;font-size:10px">דיווח מאושר</span>
+        </div><div class="bd">${(t.who || []).filter(Boolean).map((n) => `<span class="tag">${esc(markName(n))}</span>`).join(" ")}</div>`;
+              box.appendChild(d);
+              return;
+            }
             d.innerHTML = `<div class="hd">
           <span class="swatch" style="background:var(--plum)"></span>
           <input type="text" class="tn" value="${esc(t.name)}">
@@ -3389,7 +3377,8 @@
         );
         const el = document.getElementById("trialHint");
         if (el)
-          el.textContent = `${S.trials.length} התנסויות · ${filled}/${seats} משבצות מולאו`;
+          el.textContent = `${S.trials.length} חסימות · ${filled}/${seats} משבצות מולאו`;
+        scheduleSave();
       }
 
       /* ============================================================
@@ -5626,47 +5615,87 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         a.click();
       }
 
-      async function loadPeopleFromServer() {
-        try {
-          const res = await fetch("/api/people");
-          if (!res.ok) return;
-          const data = await res.json();
-          if (!Array.isArray(data) || !data.length) return;
+      let cloudLoading = false;
+      let cloudUpdatedAt = null;
+      let saveTimer = null;
 
-          S.people = data.map((p) => ({
-            id: p.id || uid(),
-            name: p.name,
-            on: p.active !== false,
-            room: p.room || undefined,
-            gender: p.gender || undefined,
-          }));
-
-          const rooms = {};
-          data.forEach((p) => {
-            if (!p.room) return;
-            if (!rooms[p.room]) {
-              rooms[p.room] = {
-                name: p.room,
-                members: [],
-                gender: p.gender || "",
-              };
-            }
-            rooms[p.room].members.push(p.name);
-            if (p.gender && !rooms[p.room].gender) {
-              rooms[p.room].gender = p.gender;
-            }
-          });
-          S.rooms = Object.values(rooms);
-        } catch {
-          /* offline or not logged in — keep empty roster */
-        }
+      function setSyncHint(msg) {
+        const el = document.getElementById("syncHint");
+        if (el) el.textContent = msg;
       }
 
-      async function boot() {
-        document.getElementById("ticks").innerHTML = "<i></i>".repeat(48);
-        S.trials = TRIALS();
-        defaults();
-        await loadPeopleFromServer();
+      function applyCfgToForm() {
+        const map = {
+          cfgStart: "start",
+          cfgLen: "len",
+          cfgRatio: "ratio",
+          cfgRest: "rest",
+          cfgTries: "tries",
+          cfgSeed: "seed",
+          cfgHam: "hamCount",
+        };
+        Object.keys(map).forEach((id) => {
+          const el = document.getElementById(id);
+          if (el) el.value = S.cfg[map[id]];
+        });
+        const f = fairW();
+        [
+          ["fSolo", "solo"],
+          ["fPair", "pair"],
+          ["fSb", "standby"],
+          ["fDuty", "duty"],
+          ["fHist", "hist"],
+        ].forEach(([id, k]) => {
+          const el = document.getElementById(id);
+          if (el) el.value = f[k];
+        });
+        document.getElementById("dayType").value = S.cfg.dayType;
+        document.getElementById("season").value = S.cfg.season;
+      }
+
+      function applySnapshot(o) {
+        if (o.people) {
+          S.people = o.people.map((p) =>
+            Object.assign({}, p, { name: cleanName(p.name) }),
+          );
+        }
+        if (o.jobs) S.jobs = o.jobs;
+        if (o.patrols) S.patrols = o.patrols;
+        if (o.cfg) S.cfg = Object.assign(S.cfg, o.cfg);
+        if (o.locks) S.locks = o.locks;
+        if (o.rooms) S.rooms = o.rooms;
+        if (o.cutoff !== undefined) S.cutoff = o.cutoff;
+        if (o.trials) {
+          S.trials = o.trials.map((t) =>
+            Object.assign({}, t, { who: (t.who || []).map(cleanName) }),
+          );
+        }
+        if (o.result !== undefined) S.result = o.result;
+        Object.keys(S.locks).forEach((k) => {
+          S.locks[k] = (S.locks[k] || []).map((v) => (v ? cleanName(v) : v));
+        });
+        applyCfgToForm();
+      }
+
+      function snapshotPayload() {
+        return {
+          people: S.people,
+          state: {
+            jobs: S.jobs,
+            cfg: S.cfg,
+            locks: S.locks,
+            patrols: S.patrols,
+            rooms: S.rooms,
+            trials: S.trials.filter(
+              (t) => !String(t.id || "").startsWith("issue-"),
+            ),
+            cutoff: S.cutoff,
+            result: S.result,
+          },
+        };
+      }
+
+      function refreshAllViews() {
         renderMeals();
         renderPatrols();
         renderJobs();
@@ -5675,6 +5704,77 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         renderTrials();
         renderBoard();
         renderBaltam();
+      }
+
+      async function saveToServer() {
+        try {
+          const res = await fetch("/api/scheduler", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(snapshotPayload()),
+          });
+          if (!res.ok) throw new Error("save failed");
+          const data = await res.json();
+          cloudUpdatedAt = data.updated_at;
+          setSyncHint("נשמר");
+        } catch {
+          setSyncHint("שגיאת שמירה");
+        }
+      }
+
+      function scheduleSave() {
+        if (cloudLoading) return;
+        setSyncHint("שומר…");
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => {
+          saveTimer = null;
+          saveToServer();
+        }, 900);
+      }
+
+      async function loadFromServer(force) {
+        if (!force && saveTimer) return false;
+        try {
+          const res = await fetch("/api/scheduler");
+          if (!res.ok) {
+            setSyncHint("לא מחובר");
+            return false;
+          }
+          const data = await res.json();
+          if (
+            !force &&
+            cloudUpdatedAt &&
+            data.updated_at === cloudUpdatedAt
+          ) {
+            return false;
+          }
+          cloudLoading = true;
+          cloudUpdatedAt = data.updated_at;
+          applySnapshot({
+            people: data.people,
+            ...data.state,
+          });
+          refreshAllViews();
+          cloudLoading = false;
+          setSyncHint("מסונכרן");
+          return true;
+        } catch {
+          setSyncHint("שגיאת טעינה");
+          cloudLoading = false;
+          return false;
+        }
+      }
+
+      async function boot() {
+        document.getElementById("ticks").innerHTML = "<i></i>".repeat(48);
+        S.trials = TRIALS();
+        defaults();
+        const ok = await loadFromServer(true);
+        if (!ok) refreshAllViews();
+        setInterval(() => loadFromServer(false), 30000);
+        document.addEventListener("visibilitychange", () => {
+          if (document.visibilityState === "visible") loadFromServer(false);
+        });
       }
 
       /* ============================================================
@@ -5980,19 +6080,13 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       document.getElementById("addTrial").onclick = () => {
         S.trials.push({
           id: uid(),
-          name: "התנסות חדשה",
+          name: "חסימה",
           start: "20:00",
           end: "21:30",
           count: 1,
           who: [""],
         });
         renderTrials();
-      };
-      document.getElementById("resetTrials").onclick = () => {
-        if (confirm("לשחזר את רשימת ההתנסויות מהיומן? שמות שמילאתם יימחקו.")) {
-          S.trials = TRIALS();
-          renderTrials();
-        }
       };
       document.getElementById("addPatrol").onclick = () => {
         S.patrols.push({ id: uid(), name: "", time: "", who: "", note: "" });
@@ -6140,59 +6234,19 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         rd.onload = () => {
           try {
             const o = JSON.parse(rd.result);
-            S.people = (o.people || []).map((p) =>
-              Object.assign({}, p, { name: cleanName(p.name) }),
-            );
-            S.jobs = o.jobs || [];
-            S.patrols = o.patrols || PATROLS();
-            S.cfg = Object.assign(S.cfg, o.cfg || {});
-            S.locks = o.locks || {};
-            S.rooms = o.rooms || [];
-            S.cutoff = o.cutoff === undefined ? null : o.cutoff;
-            S.trials = (o.trials || TRIALS()).map((t) =>
-              Object.assign({}, t, { who: (t.who || []).map(cleanName) }),
-            );
-            Object.keys(S.locks).forEach((k) => {
-              S.locks[k] = (S.locks[k] || []).map((v) =>
-                v ? cleanName(v) : v,
-              );
+            applySnapshot({
+              people: o.people,
+              jobs: o.jobs,
+              patrols: o.patrols,
+              cfg: o.cfg,
+              locks: o.locks,
+              rooms: o.rooms,
+              cutoff: o.cutoff,
+              trials: o.trials,
+              result: null,
             });
-            const map = {
-              cfgStart: "start",
-              cfgLen: "len",
-              cfgRatio: "ratio",
-              cfgRest: "rest",
-              cfgTries: "tries",
-              cfgSeed: "seed",
-              cfgHam: "hamCount",
-            };
-            Object.keys(map).forEach(
-              (id) => (document.getElementById(id).value = S.cfg[map[id]]),
-            );
-            {
-              const f = fairW();
-              [
-                ["fSolo", "solo"],
-                ["fPair", "pair"],
-                ["fSb", "standby"],
-                ["fDuty", "duty"],
-                ["fHist", "hist"],
-              ].forEach(([id, k]) => {
-                const el = document.getElementById(id);
-                if (el) el.value = f[k];
-              });
-            }
-            document.getElementById("dayType").value = S.cfg.dayType;
-            document.getElementById("season").value = S.cfg.season;
-            renderMeals();
-            renderPatrols();
-            renderJobs();
-            renderPeople();
-            renderRooms();
-            renderTrials();
-            S.result = null;
-            renderBoard();
-            renderBaltam();
+            refreshAllViews();
+            scheduleSave();
           } catch (err) {
             alert("הקובץ לא נקרא. ודאו שזה קובץ מצב שנשמר מכאן.");
           }

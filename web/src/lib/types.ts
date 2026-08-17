@@ -7,6 +7,12 @@ export interface Person {
   room: string | null;
   gender: "m" | "f" | null;
   active: boolean;
+  km: boolean;
+  exam: boolean;
+  no_weapon: boolean;
+  no_guard: boolean;
+  no_mag: boolean;
+  prior_score: number;
   created_at: string;
 }
 
@@ -24,10 +30,18 @@ export interface Issue {
 
 export const ISSUE_TYPE_LABELS: Record<IssueType, string> = {
   exam: "מבחן",
-  trial: "התנסות / בלת״ם לוז",
-  medical: "רפואי / פטור זמני",
-  weapon: "ללא נשק / החזרת נשק",
+  trial: "התנסות",
+  medical: "רפואי",
+  weapon: "ללא נשק",
   other: "אחר",
+};
+
+export const ISSUE_TYPE_NOTE_PLACEHOLDERS: Record<IssueType, string> = {
+  exam: "למשל: מבחן מתמatics, כיתה 312",
+  trial: "למשל: התנסות קמ״צ, משרד מפק״ץ",
+  medical: "למשל: תור רפואי, פטור ליום",
+  weapon: "למשל: החזרת נשק זמנית",
+  other: "פרט בקצרה מה החסימה",
 };
 
 export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {

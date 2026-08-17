@@ -37,6 +37,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "חסרים שדות חובה" }, { status: 400 });
   }
 
+  if (!note) {
+    return NextResponse.json({ error: "יש לכתוב הערה קצרה שמסבירה את החסימה" }, { status: 400 });
+  }
+
   if (!/^\d{1,2}:\d{2}$/.test(start_time) || !/^\d{1,2}:\d{2}$/.test(end_time)) {
     return NextResponse.json({ error: "פורמט שעה לא תקין (HH:MM)" }, { status: 400 });
   }

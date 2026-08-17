@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { PageShell } from "@/components/PageShell";
 import {
   ISSUE_TYPE_LABELS,
+  ISSUE_TYPE_NOTE_PLACEHOLDERS,
   ISSUE_STATUS_LABELS,
   type Issue,
   type IssueType,
@@ -23,7 +24,7 @@ export default function ReportPage() {
   const [personName, setPersonName] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
-  const [issueType, setIssueType] = useState<IssueType>("exam");
+  const [issueType, setIssueType] = useState<IssueType>("trial");
   const [note, setNote] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(
@@ -83,7 +84,7 @@ export default function ReportPage() {
   return (
     <PageShell
       title="דיווח חסימת שעות"
-      lede="בחרו את השם שלכם, את השעות שבהן לא תהיו זמינים לשמירה/תורנות, וסיבה קצרה. המפקד יאשר — ואז המחולל יכבד את זה אוטומטית."
+      lede="בחרו שם, שעות, סוג חסימה (מבחן, התנסות, רפואי…), והסבירו בקצרה למה. המפקד יאשר — ואז המחולל יכבד את זה אוטומטית."
     >
       <form onSubmit={onSubmit} className="card space-y-4">
         <div className="field">
@@ -151,9 +152,10 @@ export default function ReportPage() {
         </div>
 
         <div className="field">
-          <label htmlFor="type">סוג</label>
+          <label htmlFor="type">סוג החסימה</label>
           <select
             id="type"
+            required
             value={issueType}
             onChange={(e) => setIssueType(e.target.value as IssueType)}
           >
@@ -166,21 +168,23 @@ export default function ReportPage() {
         </div>
 
         <div className="field">
-          <label htmlFor="note">הערה (אופציונלי)</label>
+          <label htmlFor="note">הסבר קצר</label>
           <textarea
             id="note"
             rows={2}
-            placeholder="למשל: מבחן מתמatics, התנסות בכיתה 312"
+            required
+            placeholder={ISSUE_TYPE_NOTE_PLACEHOLDERS[issueType]}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
+          <p className="hint">למשל: שם קורס, חדר, או סיבה — כדי שהמפקד יבין.</p>
         </div>
 
         {message && (
           <p className={message.ok ? "msg-ok" : "msg-err"}>{message.text}</p>
         )}
 
-        <button type="submit" className="btn-pri" disabled={loading || !personName}>
+        <button type="submit" className="btn-pri" disabled={loading || !personName || !note.trim()}>
           {loading ? "שולח…" : "שלח דיווח"}
         </button>
       </form>

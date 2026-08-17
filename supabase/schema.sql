@@ -42,3 +42,27 @@ create policy "issues_read" on issues for select using (true);
 create policy "issues_insert" on issues for insert with check (true);
 create policy "issues_update" on issues for update using (true);
 create policy "issues_delete" on issues for delete using (true);
+
+-- Scheduler flags per cadet (shared across machines)
+alter table people add column if not exists km boolean not null default false;
+alter table people add column if not exists exam boolean not null default false;
+alter table people add column if not exists no_weapon boolean not null default false;
+alter table people add column if not exists no_guard boolean not null default false;
+alter table people add column if not exists no_mag boolean not null default false;
+alter table people add column if not exists prior_score numeric not null default 0;
+
+-- Shared scheduler board (jobs, rules, assignments, trials, etc.)
+create table if not exists scheduler_state (
+  id int primary key default 1 check (id = 1),
+  state jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+insert into scheduler_state (id, state) values (1, '{}'::jsonb)
+on conflict (id) do nothing;
+
+alter table scheduler_state enable row level security;
+
+create policy "scheduler_state_read" on scheduler_state for select using (true);
+create policy "scheduler_state_write" on scheduler_state for insert with check (true);
+create policy "scheduler_state_update" on scheduler_state for update using (true);
