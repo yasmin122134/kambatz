@@ -1,0 +1,240 @@
+@import "tailwindcss";
+
+@import url("https://fonts.googleapis.com/css2?family=Secular+One&family=Assistant:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+@theme inline {
+  --color-bone: #e7e3d6;
+  --color-bone2: #f3f0e7;
+  --color-card: #fbf9f3;
+  --color-ink: #171b16;
+  --color-ink2: #5a6155;
+  --color-ink3: #8b9083;
+  --color-line: #c8c2af;
+  --color-line2: #ded9c9;
+  --color-olive: #3e5135;
+  --color-olive-light: #b9c6a6;
+  --color-brick: #a73d27;
+  --color-ok: #3e6b4a;
+  --font-display: "Secular One", sans-serif;
+  --font-sans: "Assistant", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+}
+
+body {
+  background: var(--color-bone);
+  background-image:
+    linear-gradient(var(--color-line2) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line2) 1px, transparent 1px);
+  background-size: 26px 26px;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 400;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.card {
+  background: var(--color-card);
+  border: 1px solid var(--color-line);
+  border-radius: 4px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 0 var(--color-line2);
+}
+
+.card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s;
+}
+
+.card-link:hover {
+  border-color: var(--color-olive);
+}
+
+.lede {
+  color: var(--color-ink2);
+  font-size: 13.5px;
+  margin-top: 8px;
+  max-width: 65ch;
+}
+
+.hint {
+  font-size: 12.5px;
+  color: var(--color-ink3);
+}
+
+.field {
+  margin-bottom: 12px;
+}
+
+.field label {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink3);
+  margin-bottom: 4px;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  padding: 8px 10px;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  color: var(--color-ink);
+  outline: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--color-olive);
+  box-shadow: 0 0 0 2px rgba(62, 81, 53, 0.14);
+}
+
+.rowf {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rowf > * {
+  flex: 1 1 130px;
+}
+
+.bar {
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.bar.spread {
+  justify-content: space-between;
+}
+
+button,
+.btn,
+.btn-pri,
+.btn-sm {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  background: var(--color-bone2);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+  border-radius: 3px;
+  padding: 9px 15px;
+  text-decoration: none;
+  display: inline-block;
+}
+
+button:hover,
+.btn:hover {
+  border-color: var(--color-olive);
+  background: #fff;
+}
+
+.btn-pri {
+  background: var(--color-olive);
+  color: #f2efe3;
+  border-color: var(--color-olive);
+}
+
+.btn-pri:hover {
+  background: #4a6040;
+  color: #fff;
+}
+
+.btn-sm {
+  padding: 5px 9px;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.btn-sm.on {
+  background: var(--color-ink);
+  color: var(--color-bone2);
+  border-color: var(--color-ink);
+}
+
+.stamp {
+  border: 2px solid var(--color-olive-light);
+  color: #dce4ce;
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  padding: 5px 10px;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.stamp:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.msg-ok {
+  color: var(--color-ok);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.msg-err {
+  color: var(--color-brick);
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  border-radius: 2px;
+  border: 1px solid;
+}
+
+.tag-pending {
+  color: #b98a20;
+  border-color: #b98a20;
+  background: #faf5ea;
+}
+
+.tag-approved {
+  color: var(--color-ok);
+  border-color: var(--color-ok);
+  background: #edf4ee;
+}
+
+.tag-rejected {
+  color: var(--color-brick);
+  border-color: var(--color-brick);
+  background: #fbeeea;
+}
+
+.issue-row {
+  border: 1px solid var(--color-line2);
+  border-radius: 3px;
+  padding: 10px 12px;
+  background: #fff;
+}
