@@ -6,6 +6,11 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const mine = searchParams.get("person_name");
+  const admin = await isAdmin();
+
+  if (!admin && !mine) {
+    return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
+  }
 
   const supabase = await createClient();
   let query = supabase.from("issues").select("*").order("created_at", { ascending: false });
@@ -42,12 +47,17 @@ export async function POST(request: Request) {
     .from("people")
     .select("id")
     .eq("name", person_name)
+    .eq("active", true)
     .maybeSingle();
+
+  if (!person) {
+    return NextResponse.json({ error: "השם לא ברשימת המחזור" }, { status: 400 });
+  }
 
   const { data, error } = await supabase
     .from("issues")
     .insert({
-      person_id: person?.id ?? null,
+      person_id: person.id,
       person_name,
       start_time,
       end_time,

@@ -40,9 +40,20 @@ export default function AdminPage() {
   useEffect(() => {
     fetch("/api/admin/me")
       .then((r) => r.json())
-      .then((d) => setAuthed(!!d.admin))
+      .then((d) => {
+        const ok = !!d.admin;
+        setAuthed(ok);
+        if (ok) redirectAfterLogin();
+      })
       .catch(() => setAuthed(false));
   }, []);
+
+  function redirectAfterLogin() {
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next?.startsWith("/") && !next.startsWith("//")) {
+      window.location.href = next;
+    }
+  }
 
   useEffect(() => {
     if (authed) {
@@ -72,6 +83,11 @@ export default function AdminPage() {
     });
     if (!res.ok) {
       setLoginErr("סיסמה שגויה");
+      return;
+    }
+    const next = new URLSearchParams(window.location.search).get("next");
+    if (next?.startsWith("/") && !next.startsWith("//")) {
+      window.location.href = next;
       return;
     }
     setAuthed(true);
@@ -131,8 +147,19 @@ export default function AdminPage() {
   }
 
   if (!authed) {
+    const needsScheduler =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("next") === "/scheduler.html";
+
     return (
-      <PageShell title="כניסת מפקד" lede="הזינו את סיסמת הניהול.">
+      <PageShell
+        title="כניסת מפקד"
+        lede={
+          needsScheduler
+            ? "יש להתחבר כדי לפתוח את המחולל."
+            : "הזינו את סיסמת הניהול."
+        }
+      >
         <form onSubmit={login} className="card max-w-sm space-y-4">
           <div className="field">
             <label htmlFor="pw">סיסמה</label>

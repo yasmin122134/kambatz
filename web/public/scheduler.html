@@ -5626,6 +5626,57 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         a.click();
       }
 
+      async function loadPeopleFromServer() {
+        try {
+          const res = await fetch("/api/people");
+          if (!res.ok) return;
+          const data = await res.json();
+          if (!Array.isArray(data) || !data.length) return;
+
+          S.people = data.map((p) => ({
+            id: p.id || uid(),
+            name: p.name,
+            on: p.active !== false,
+            room: p.room || undefined,
+            gender: p.gender || undefined,
+          }));
+
+          const rooms = {};
+          data.forEach((p) => {
+            if (!p.room) return;
+            if (!rooms[p.room]) {
+              rooms[p.room] = {
+                name: p.room,
+                members: [],
+                gender: p.gender || "",
+              };
+            }
+            rooms[p.room].members.push(p.name);
+            if (p.gender && !rooms[p.room].gender) {
+              rooms[p.room].gender = p.gender;
+            }
+          });
+          S.rooms = Object.values(rooms);
+        } catch {
+          /* offline or not logged in — keep empty roster */
+        }
+      }
+
+      async function boot() {
+        document.getElementById("ticks").innerHTML = "<i></i>".repeat(48);
+        S.trials = TRIALS();
+        defaults();
+        await loadPeopleFromServer();
+        renderMeals();
+        renderPatrols();
+        renderJobs();
+        renderPeople();
+        renderRooms();
+        renderTrials();
+        renderBoard();
+        renderBaltam();
+      }
+
       /* ============================================================
          WIRING
          ============================================================ */
@@ -6148,17 +6199,7 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
         };
         rd.readAsText(f);
       };
-      document.getElementById("ticks").innerHTML = "<i></i>".repeat(48);
-      S.trials = TRIALS();
-      defaults();
-      renderMeals();
-      renderPatrols();
-      renderJobs();
-      renderPeople();
-      renderRooms();
-      renderTrials();
-      renderBoard();
-      renderBaltam();
+      boot();
     </script>
   </body>
 </html>
