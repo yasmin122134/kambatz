@@ -5618,10 +5618,96 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       let cloudLoading = false;
       let cloudUpdatedAt = null;
       let saveTimer = null;
+      let backendReady = false;
 
       function setSyncHint(msg) {
         const el = document.getElementById("syncHint");
         if (el) el.textContent = msg;
+      }
+
+      function mapDbPerson(p) {
+        return {
+          id: p.id || uid(),
+          name: cleanName(p.name),
+          on: p.active !== false && p.on !== false,
+          room: p.room || undefined,
+          gender: p.gender || undefined,
+          km: !!p.km,
+          exam: !!p.exam,
+          noWeapon: !!(p.noWeapon ?? p.no_weapon),
+          noGuard: !!(p.noGuard ?? p.no_guard),
+          noMag: !!(p.noMag ?? p.no_mag),
+          prior: Number(p.prior ?? p.prior_score ?? 0),
+        };
+      }
+
+      function buildRoomsFromPeople(people) {
+        const rooms = {};
+        people.forEach((p) => {
+          if (!p.room) return;
+          if (!rooms[p.room]) {
+            rooms[p.room] = {
+              name: p.room,
+              members: [],
+              gender: p.gender || "",
+            };
+          }
+          rooms[p.room].members.push(p.name);
+          if (p.gender && !rooms[p.room].gender) {
+            rooms[p.room].gender = p.gender;
+          }
+        });
+        return Object.values(rooms);
+      }
+
+      function applyPeopleList(raw) {
+        if (!Array.isArray(raw) || !raw.length) return false;
+        S.people = raw.map(mapDbPerson);
+        if (!S.rooms?.length) {
+          S.rooms = buildRoomsFromPeople(S.people);
+        }
+        return true;
+      }
+
+      async function fetchPeopleFromApi() {
+        const res = await fetch("/api/people");
+        if (!res.ok) return null;
+        return res.json();
+      }
+
+      async function fetchApprovedIssues() {
+        const res = await fetch("/api/issues?status=approved");
+        if (!res.ok) return [];
+        const data = await res.json();
+        return Array.isArray(data) ? data : [];
+      }
+
+      function approvedToTrials(issues) {
+        const labels = {
+          exam: "מבחן",
+          trial: "התנסות",
+          medical: "רפואי",
+          weapon: "ללא נשק",
+          other: "אחר",
+        };
+        return issues.map((i) => ({
+          id: `issue-${i.id}`,
+          name: [labels[i.issue_type] || i.issue_type, i.note]
+            .filter(Boolean)
+            .join(" | "),
+          start: i.start_time,
+          end: i.end_time,
+          count: 1,
+          who: [i.person_name],
+          _fromIssue: true,
+        }));
+      }
+
+      function mergeApprovedTrials(manual) {
+        const base = (manual || S.trials || []).filter(
+          (t) => !String(t.id || "").startsWith("issue-"),
+        );
+        return base;
       }
 
       function applyCfgToForm() {
@@ -5654,16 +5740,14 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       }
 
       function applySnapshot(o) {
-        if (o.people) {
-          S.people = o.people.map((p) =>
-            Object.assign({}, p, { name: cleanName(p.name) }),
-          );
+        if (o.people?.length) {
+          applyPeopleList(o.people);
         }
-        if (o.jobs) S.jobs = o.jobs;
-        if (o.patrols) S.patrols = o.patrols;
+        if (o.jobs?.length) S.jobs = o.jobs;
+        if (o.patrols?.length) S.patrols = o.patrols;
         if (o.cfg) S.cfg = Object.assign(S.cfg, o.cfg);
         if (o.locks) S.locks = o.locks;
-        if (o.rooms) S.rooms = o.rooms;
+        if (o.rooms?.length) S.rooms = o.rooms;
         if (o.cutoff !== undefined) S.cutoff = o.cutoff;
         if (o.trials) {
           S.trials = o.trials.map((t) =>
@@ -5723,7 +5807,8 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
       }
 
       function scheduleSave() {
-        if (cloudLoading) return;
+        if (cloudLoading || !backendReady) return;
+        if (!S.people.length) return;
         setSyncHint("שומר…");
         clearTimeout(saveTimer);
         saveTimer = setTimeout(() => {
@@ -5734,30 +5819,70 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
 
       async function loadFromServer(force) {
         if (!force && saveTimer) return false;
+        cloudLoading = true;
+        setSyncHint("טוען…");
         try {
-          const res = await fetch("/api/scheduler");
-          if (!res.ok) {
-            setSyncHint("לא מחובר");
-            return false;
+          let loadedPeople = false;
+          const schedRes = await fetch("/api/scheduler");
+
+          if (schedRes.ok) {
+            const data = await schedRes.json();
+            if (
+              !force &&
+              cloudUpdatedAt &&
+              data.updated_at &&
+              data.updated_at === cloudUpdatedAt
+            ) {
+              cloudLoading = false;
+              return false;
+            }
+            cloudUpdatedAt = data.updated_at;
+            if (data.people?.length) {
+              applyPeopleList(data.people);
+              loadedPeople = true;
+            }
+            applySnapshot({ ...data.state, people: undefined });
+            if (!S.rooms?.length && S.people.length) {
+              S.rooms = buildRoomsFromPeople(S.people);
+            }
+            backendReady = true;
+            refreshAllViews();
+            setSyncHint(
+              data.meta?.stateReady === false
+                ? `מחזור (${S.people.length}) · הריצו migration_scheduler.sql`
+                : `מסונכרן · ${S.people.length} צוערים`,
+            );
+            cloudLoading = false;
+            return true;
           }
-          const data = await res.json();
-          if (
-            !force &&
-            cloudUpdatedAt &&
-            data.updated_at === cloudUpdatedAt
-          ) {
-            return false;
+
+          /* Fallback: /api/scheduler missing or error — load pieces separately */
+          const [peopleRaw, approved] = await Promise.all([
+            fetchPeopleFromApi(),
+            fetchApprovedIssues(),
+          ]);
+
+          if (peopleRaw?.length) {
+            applyPeopleList(peopleRaw);
+            loadedPeople = true;
           }
-          cloudLoading = true;
-          cloudUpdatedAt = data.updated_at;
-          applySnapshot({
-            people: data.people,
-            ...data.state,
-          });
+
+          const manual = mergeApprovedTrials(S.trials);
+          S.trials = [...manual, ...approvedToTrials(approved)];
+
+          if (!S.rooms?.length && S.people.length) {
+            S.rooms = buildRoomsFromPeople(S.people);
+          }
+
+          backendReady = loadedPeople;
           refreshAllViews();
+          setSyncHint(
+            loadedPeople
+              ? `מחזור מהשרת · ${S.people.length} צוערים`
+              : "לא הצלחתי לטעון מחזור",
+          );
           cloudLoading = false;
-          setSyncHint("מסונכרן");
-          return true;
+          return loadedPeople;
         } catch {
           setSyncHint("שגיאת טעינה");
           cloudLoading = false;
@@ -5789,8 +5914,16 @@ ${sheets.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.open
             document
               .querySelectorAll(".page")
               .forEach((p) => p.classList.toggle("on", p.id === b.dataset.tab));
+            if (b.dataset.tab === "p1") {
+              loadFromServer(false).then(() => {
+                renderPeople();
+                renderRooms();
+              });
+            }
             if (b.dataset.tab === "p5") renderBaltam();
-            if (b.dataset.tab === "p6") renderTrials();
+            if (b.dataset.tab === "p6") {
+              loadFromServer(false).then(() => renderTrials());
+            }
           }),
       );
       document.querySelectorAll(".subtab").forEach(

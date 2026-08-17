@@ -1,12 +1,22 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import {
+  PEOPLE_BASE_SELECT,
+  PEOPLE_FLAG_SELECT,
+  probePeopleFlags,
+} from "@/lib/people";
 
 export async function GET() {
   const supabase = await createClient();
+  const withFlags = await probePeopleFlags(supabase);
+  const select = withFlags
+    ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`
+    : PEOPLE_BASE_SELECT;
+
   const { data, error } = await supabase
     .from("people")
-    .select("*")
+    .select(select)
     .eq("active", true)
     .order("name");
 
