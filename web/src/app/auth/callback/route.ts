@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
+import { isKnownAdminEmail } from "@/lib/admins";
+import { ADMIN_COOKIE, adminCookieOptions } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { getPersonByEmail } from "@/lib/session";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -12,7 +15,25 @@ export async function GET(request: Request) {
     if (!error) {
       const safeNext =
         next.startsWith("/") && !next.startsWith("//") ? next : "/profile";
-      return NextResponse.redirect(`${origin}${safeNext}`);
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      let isAdmin = false;
+      if (user?.email) {
+        isAdmin = isKnownAdminEmail(user.email);
+        if (!isAdmin) {
+          const person = await getPersonByEmail(user.email);
+          isAdmin = person?.is_admin === true;
+        }
+      }
+
+      const response = NextResponse.redirect(`${origin}${safeNext}`);
+      if (isAdmin) {
+        response.cookies.set(ADMIN_COOKIE, "1", adminCookieOptions());
+      }
+      return response;
     }
   }
 

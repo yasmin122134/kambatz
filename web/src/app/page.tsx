@@ -4,11 +4,12 @@ import { HomeGuest } from "@/components/HomeGuest";
 import { HomeUpcoming } from "@/components/HomeUpcoming";
 import { HomeUnknownUser } from "@/components/HomeUnknownUser";
 import { getUpcomingForPerson } from "@/lib/upcoming";
-import { getAuthUser, getSessionPerson } from "@/lib/session";
+import { getAuthUser, getSessionPerson, peopleEmailReady } from "@/lib/session";
 
 export default async function HomePage() {
   const user = await getAuthUser();
   const session = await getSessionPerson();
+  const emailReady = user ? await peopleEmailReady() : false;
   const upcoming = session
     ? await getUpcomingForPerson(session.person.name)
     : null;
@@ -25,7 +26,7 @@ export default async function HomePage() {
             events={upcoming.events}
           />
         ) : user?.email ? (
-          <HomeUnknownUser email={user.email} />
+          <HomeUnknownUser email={user.email} emailsNotReady={!emailReady} />
         ) : (
           <HomeGuest />
         )}

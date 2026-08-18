@@ -1,8 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isKnownAdminEmail } from "@/lib/admins";
 import { ADMIN_COOKIE } from "@/lib/auth";
 
-function isAdmin(request: NextRequest) {
+function hasAdminCookie(request: NextRequest) {
   return request.cookies.get(ADMIN_COOKIE)?.value === "1";
 }
 
@@ -30,9 +31,15 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (request.nextUrl.pathname === "/scheduler.html" && !isAdmin(request)) {
+  const isAdmin =
+    hasAdminCookie(request) ||
+    (user?.email ? isKnownAdminEmail(user.email) : false);
+
+  if (request.nextUrl.pathname === "/scheduler.html" && !isAdmin) {
     const login = new URL("/admin", request.url);
     login.searchParams.set("next", "/scheduler.html");
     return NextResponse.redirect(login);

@@ -1,6 +1,19 @@
 export type IssueType = "exam" | "trial" | "medical" | "weapon" | "other";
 export type IssueStatus = "pending" | "approved" | "rejected";
 
+export interface ProfileRequest {
+  id: string;
+  person_id: string | null;
+  person_name: string;
+  km: boolean;
+  exam: boolean;
+  no_weapon: boolean;
+  no_guard: boolean;
+  no_mag: boolean;
+  status: IssueStatus;
+  created_at: string;
+}
+
 export interface Person {
   id: string;
   name: string;
@@ -8,6 +21,7 @@ export interface Person {
   room: string | null;
   gender: "m" | "f" | null;
   active: boolean;
+  is_admin?: boolean;
   km: boolean;
   exam: boolean;
   no_weapon: boolean;

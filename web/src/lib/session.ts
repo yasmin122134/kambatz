@@ -3,6 +3,8 @@ import type { Person, PersonalFlags } from "@/lib/types";
 import {
   PEOPLE_BASE_SELECT,
   PEOPLE_FLAG_SELECT,
+  probePeopleAdmin,
+  probePeopleEmail,
   probePeopleFlags,
 } from "@/lib/people";
 
@@ -18,19 +20,30 @@ export async function getPersonByEmail(
   email: string,
 ): Promise<Person | null> {
   const supabase = await createClient();
+  const hasEmail = await probePeopleEmail(supabase);
+  if (!hasEmail) return null;
+
   const withFlags = await probePeopleFlags(supabase);
-  const select = withFlags
+  const withAdmin = await probePeopleAdmin(supabase);
+  let select = withFlags
     ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`
     : PEOPLE_BASE_SELECT;
+  if (withAdmin) select += ",is_admin";
 
+  const normalized = email.trim().toLowerCase();
   const { data, error } = await supabase
     .from("people")
     .select(select)
-    .eq("email", email.trim().toLowerCase())
+    .ilike("email", normalized)
     .maybeSingle();
 
   if (error || !data) return null;
   return data as unknown as Person;
+}
+
+export async function peopleEmailReady(): Promise<boolean> {
+  const supabase = await createClient();
+  return probePeopleEmail(supabase);
 }
 
 export async function getSessionPerson(): Promise<{

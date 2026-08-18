@@ -92,6 +92,13 @@ export async function probePeopleEmail(
   return !error;
 }
 
+export async function probePeopleAdmin(
+  supabase: SupabaseClient,
+): Promise<boolean> {
+  const { error } = await supabase.from("people").select("is_admin").limit(1);
+  return !error;
+}
+
 export function peopleToSchedulerList(
   rows: Record<string, unknown>[],
 ): SchedulerPersonPayload[] {

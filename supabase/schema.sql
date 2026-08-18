@@ -11,6 +11,7 @@ create table if not exists people (
   room text,
   gender text check (gender in ('m', 'f')),
   active boolean not null default true,
+  is_admin boolean not null default false,
   created_at timestamptz not null default now()
 );
 

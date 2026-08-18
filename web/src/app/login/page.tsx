@@ -5,13 +5,22 @@ import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
 import { createClient } from "@/lib/supabase/client";
 
+const ERROR_HINTS: Record<string, string> = {
+  auth: "ההתחברות נכשלה. נסו שוב.",
+  provider:
+    "Google לא מופעל ב-Supabase. יש להפעיל: Dashboard → Authentication → Providers → Google, ולהוסיף Client ID/Secret מ-Google Cloud.",
+};
+
 export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("error") === "auth") {
+    const err = params.get("error");
+    if (err && ERROR_HINTS[err]) {
+      setError(ERROR_HINTS[err]);
+    } else if (err) {
       setError("ההתחברות נכשלה. נסו שוב.");
     }
   }, []);
@@ -22,15 +31,24 @@ export default function LoginPage() {
     const supabase = createClient();
     const next =
       new URLSearchParams(window.location.search).get("next") || "/profile";
-    const { error: authError } = await supabase.auth.signInWithOAuth({
+    const { data, error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
     if (authError) {
-      setError(authError.message);
+      const msg = authError.message.toLowerCase();
+      if (msg.includes("provider") && msg.includes("not enabled")) {
+        setError(ERROR_HINTS.provider);
+      } else {
+        setError(authError.message);
+      }
       setLoading(false);
+      return;
+    }
+    if (data?.url) {
+      window.location.href = data.url;
     }
   }
 
@@ -49,6 +67,28 @@ export default function LoginPage() {
         >
           {loading ? "מעביר לגוגל…" : "התחברות עם Google"}
         </button>
+        <details className="hint">
+          <summary className="cursor-pointer text-ink2">
+            Google לא עובד? הגדרה חד-פעמית ב-Supabase
+          </summary>
+          <ol className="mt-2 list-decimal mr-4 space-y-1 text-sm">
+            <li>
+              Supabase → Authentication → Providers → הפעילו <b>Google</b>
+            </li>
+            <li>
+              Google Cloud Console → OAuth Client → הוסיפו Redirect URI:{" "}
+              <code className="mono text-xs break-all">
+                https://hwkowvgxqwkrlrnobchr.supabase.co/auth/v1/callback
+              </code>
+            </li>
+            <li>
+              Supabase → URL Configuration → Redirect URLs:{" "}
+              <code className="mono text-xs">https://kambatz.vercel.app/auth/callback</code>
+              {" "}וגם{" "}
+              <code className="mono text-xs">http://localhost:3000/auth/callback</code>
+            </li>
+          </ol>
+        </details>
         <p className="hint">
           יש להשתמש באותו מייל שמולא בטופס הדוק. אם המייל לא נמצא במאגר — פנו
           למפקד.
