@@ -40,6 +40,20 @@ export default async function HomePage() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
+          <Link href="/schedule" className="card card-link sm:col-span-2">
+            <h3 className="font-display text-lg">לוח שמירות</h3>
+            <p className="text-sm text-ink2 mt-2">
+              המשמרות שלך + לוח מלא של כל המחזור — דורש התחברות.
+            </p>
+          </Link>
+
+          <Link href="/scheduler.html" className="card card-link">
+            <h3 className="font-display text-lg">מחולל שיבוץ</h3>
+            <p className="text-sm text-ink2 mt-2">
+              בניית לוח שמירות, ייצוא Excel, בלת״ם, טבלת צדק — למפקדים.
+            </p>
+          </Link>
+
           <Link href="/report" className="card card-link">
             <h3 className="font-display text-lg text-brick">דיווח חסימה</h3>
             <p className="text-sm text-ink2 mt-2">
@@ -57,14 +71,7 @@ export default async function HomePage() {
           <Link href="/admin" className="card card-link">
             <h3 className="font-display text-lg text-olive">ניהול</h3>
             <p className="text-sm text-ink2 mt-2">
-              מפקד: אישור דיווחים ורשימת מחזור. מאושרים נכנסים אוטומטית למחולל.
-            </p>
-          </Link>
-
-          <Link href="/scheduler.html" className="card card-link sm:col-span-2">
-            <h3 className="font-display text-lg">מחולל שיבוץ מלא</h3>
-            <p className="text-sm text-ink2 mt-2">
-              לוח שמירות מלא — בניית לוח, ייצוא Excel, בלת״ם, טבלת צדק.
+              מפקד: אישור דיווחים, סימונים אישיים ורשימת מחזור.
             </p>
           </Link>
         </div>

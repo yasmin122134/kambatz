@@ -27,11 +27,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   const body = await request.json();
+  const admin = await isAdmin();
   const person_name = String(body.person_name || "").trim();
   const start_time = String(body.start_time || "").trim();
   const end_time = String(body.end_time || "").trim();
   const issue_type = body.issue_type;
   const note = body.note ? String(body.note).trim() : null;
+  const autoApprove = admin && !!body.approved;
 
   if (!person_name || !start_time || !end_time || !issue_type) {
     return NextResponse.json({ error: "חסרים שדות חובה" }, { status: 400 });
@@ -43,6 +45,10 @@ export async function POST(request: Request) {
 
   if (!/^\d{1,2}:\d{2}$/.test(start_time) || !/^\d{1,2}:\d{2}$/.test(end_time)) {
     return NextResponse.json({ error: "פורמט שעה לא תקין (HH:MM)" }, { status: 400 });
+  }
+
+  if (body.approved && !admin) {
+    return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
   }
 
   const supabase = await createClient();
@@ -67,7 +73,7 @@ export async function POST(request: Request) {
       end_time,
       issue_type,
       note,
-      status: "pending",
+      status: autoApprove ? "approved" : "pending",
     })
     .select()
     .single();

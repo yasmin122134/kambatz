@@ -62,6 +62,9 @@ export function HomeUpcoming({ personName, boardReady, boardStart, events }: Pro
       )}
 
       <div className="bar mt-4 gap-2">
+        <Link href="/schedule" className="btn-pri btn-sm">
+          לוח שמירות מלא
+        </Link>
         <Link href="/report" className="btn-sm">
           דווח חסימה
         </Link>

@@ -45,6 +45,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(login);
   }
 
+  if (request.nextUrl.pathname === "/schedule" && !user) {
+    const login = new URL("/login", request.url);
+    login.searchParams.set("next", "/schedule");
+    return NextResponse.redirect(login);
+  }
+
   return response;
 }
 

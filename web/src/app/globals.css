@@ -192,6 +192,12 @@ button:hover,
   background: rgba(255, 255, 255, 0.08);
 }
 
+.stamp.on {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: #f2efe3;
+  color: #fff;
+}
+
 .msg-ok {
   color: var(--color-ok);
   font-weight: 600;
@@ -230,6 +236,77 @@ button:hover,
   color: var(--color-brick);
   border-color: var(--color-brick);
   background: #fbeeea;
+}
+
+.schedule-you {
+  font-weight: 700;
+  color: var(--color-olive);
+}
+
+.schedule-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem 0.75rem;
+  border: 1px solid var(--color-line2);
+  border-radius: 3px;
+  padding: 0.65rem 0.85rem;
+  background: #fff;
+}
+
+.schedule-mine {
+  border-color: var(--color-olive);
+  background: #eef2e8;
+}
+
+.schedule-now {
+  border-color: var(--color-brick);
+  background: #fbeeea;
+}
+
+.schedule-table-wrap {
+  background: var(--color-card);
+}
+
+.schedule-table {
+  border-collapse: collapse;
+}
+
+.schedule-table th,
+.schedule-table td {
+  border-bottom: 1px solid var(--color-line2);
+  padding: 0.55rem 0.75rem;
+  text-align: right;
+  vertical-align: top;
+}
+
+.schedule-table th {
+  background: var(--color-bone2);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-ink3);
+  font-weight: 700;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.schedule-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.schedule-tr-mine {
+  background: #eef2e8 !important;
+}
+
+.schedule-tr-mine:hover {
+  background: #e4eadc !important;
+}
+
+.schedule-tr-now {
+  background: #fbeeea !important;
+  box-shadow: inset 3px 0 0 var(--color-brick);
 }
 
 .issue-row {

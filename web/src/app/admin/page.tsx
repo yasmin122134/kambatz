@@ -1,8 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { PageShell } from "@/components/PageShell";
 import { NameCombobox } from "@/components/NameCombobox";
+import { AdminManualConstraints } from "@/components/AdminManualConstraints";
 import { createClient } from "@/lib/supabase/client";
 import {
   ISSUE_TYPE_LABELS,
@@ -264,9 +266,12 @@ export default function AdminPage() {
       lede="אשרו דיווחי צוערים ונהלו את רשימת המחזור. חסימות מאושרות נכנסות אוטומטית למחולל."
     >
       <div className="bar mb-6">
-        <a href="/scheduler.html" className="btn-pri">
+        <Link href="/scheduler.html" className="btn-pri">
           פתח מחולל שיבוץ מלא
-        </a>
+        </Link>
+        <Link href="/" className="btn">
+          דף הבית
+        </Link>
         <button type="button" className="btn" onClick={logout}>
           יציאה
         </button>
@@ -288,6 +293,15 @@ export default function AdminPage() {
         </button>
         {syncMsg && <p className="hint mt-2">{syncMsg}</p>}
       </section>
+
+      <AdminManualConstraints
+        people={people}
+        onSaved={() => {
+          loadPeople();
+          loadIssues();
+          loadProfileRequests();
+        }}
+      />
 
       <section className="card mb-6">
         <h3 className="font-display text-base mb-2">מחזור ({people.length})</h3>

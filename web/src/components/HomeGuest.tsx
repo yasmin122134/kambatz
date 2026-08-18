@@ -7,7 +7,7 @@ export function HomeGuest() {
       <p className="lede mb-3">
         התחברו עם Google כדי לראות כאן את המשמרות והחסימות הקרובות שלכם.
       </p>
-      <Link href="/login?next=/" className="btn-pri btn-sm">
+      <Link href="/login?next=/schedule" className="btn-pri btn-sm">
         התחברות עם Google
       </Link>
     </section>

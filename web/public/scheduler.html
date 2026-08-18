@@ -65,7 +65,6 @@
         background: var(--olive);
         color: #ede9dc;
         border-bottom: 3px solid var(--ink);
-        padding: 22px 26px 20px;
         position: relative;
         overflow: hidden;
       }
@@ -76,9 +75,57 @@
         align-items: flex-end;
         gap: 22px;
         flex-wrap: wrap;
+        padding: 0 26px;
+      }
+      header .site-bar {
+        padding-top: 18px;
+        padding-bottom: 14px;
+        border-bottom: 1px solid rgba(185, 198, 166, 0.35);
+      }
+      header .app-bar {
+        padding-top: 16px;
+        padding-bottom: 18px;
+      }
+      .site-brand {
+        color: inherit;
+        text-decoration: none;
+      }
+      .site-brand:hover .site-title {
+        opacity: 0.92;
+      }
+      .site-title {
+        font-family: "Secular One", sans-serif;
+        font-size: 26px;
+        line-height: 1.1;
+        display: block;
+      }
+      .site-nav {
+        margin-inline-start: auto;
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .site-link {
+        border: 2px solid #b9c6a6;
+        color: #dce4ce;
+        border-radius: 3px;
+        font-family: "IBM Plex Mono", monospace;
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        padding: 5px 10px;
+        text-transform: uppercase;
+        text-decoration: none;
+      }
+      .site-link:hover {
+        background: rgba(255, 255, 255, 0.08);
+      }
+      .site-link.on {
+        background: rgba(255, 255, 255, 0.14);
+        border-color: #f2efe3;
+        color: #fff;
       }
       header h1 {
-        font-size: 30px;
+        font-size: 22px;
         line-height: 1.1;
       }
       header .sub {
@@ -746,10 +793,29 @@
       footer {
         max-width: 1380px;
         margin: 34px auto 0;
-        padding: 0 26px;
+        padding: 0 26px 24px;
         color: var(--ink3);
         font-size: 12px;
         font-family: "IBM Plex Mono", monospace;
+      }
+      .site-footer-nav {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px 16px;
+        margin-bottom: 14px;
+        font-family: "Assistant", system-ui, sans-serif;
+        font-size: 13px;
+      }
+      .site-footer-nav a {
+        color: var(--olive);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .site-footer-nav a:hover {
+        text-decoration: underline;
+      }
+      .site-footer-nav a.on {
+        color: var(--ink);
       }
       .hint {
         font-size: 12.5px;
@@ -766,6 +832,9 @@
           padding: 0;
         }
         header,
+        .site-bar,
+        .site-nav,
+        .site-footer-nav,
         .tabbar,
         .bar,
         .subtabs,
@@ -787,10 +856,24 @@
   <body>
     <datalist id="bahadix-names"></datalist>
     <header>
-      <div class="wrap">
+      <div class="wrap site-bar">
+        <a href="/" class="site-brand">
+          <div class="sub">גדוד אלון · הגנ״ם</div>
+          <span class="site-title">לוח שמירות</span>
+        </a>
+        <nav class="site-nav" aria-label="ניווט ראשי">
+          <a href="/" class="site-link">דף הבית</a>
+          <a href="/schedule" class="site-link">לוח שמירות</a>
+          <a href="/report" class="site-link">דיווח חסימה</a>
+          <a href="/profile" class="site-link">הפרופיל שלי</a>
+          <a href="/admin" class="site-link">ניהול</a>
+          <a href="/scheduler.html" class="site-link on" aria-current="page">מחולל שיבוץ</a>
+        </nav>
+      </div>
+      <div class="wrap app-bar">
         <div>
-          <div class="sub">גדוד אלון · הגנ״ם · מחזור 24 שעות</div>
-          <h1>לוח שמירות</h1>
+          <h1>מחולל שיבוץ</h1>
+          <div class="sub">מחזור 24 שעות · כוח אדם, משימות, בניית לוח</div>
         </div>
         <div class="meta">
           <div class="stamp" id="stampPeople">0 צוערים</div>
@@ -1401,8 +1484,18 @@
     </main>
 
     <footer>
-      הלוח נבנה בדפדפן שלך בלבד · כלל 4־8 · עתודה בכל חלון · כ״כ ללא החלפה,
-      מאותו חדר · ^ כ״מ · ~ מבחן · ! ללא נשק · # פטור שמירה · * פטור מחסניות
+      <nav class="site-footer-nav" aria-label="ניווט">
+        <a href="/">דף הבית</a>
+        <a href="/schedule">לוח שמירות</a>
+        <a href="/report">דיווח חסימה</a>
+        <a href="/profile">הפרופיל שלי</a>
+        <a href="/admin">ניהול</a>
+        <a href="/scheduler.html" class="on">מחולל שיבוץ</a>
+      </nav>
+      <p>
+        הלוח נבנה בדפדפן שלך בלבד · כלל 4־8 · עתודה בכל חלון · כ״כ ללא החלפה,
+        מאותו חדר · ^ כ״מ · ~ מבחן · ! ללא נשק · # פטור שמירה · * פטור מחסניות
+      </p>
     </footer>
 
     <script>
