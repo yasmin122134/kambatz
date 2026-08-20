@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   const ends_at = String(body.ends_at || "");
   const title =
     String(body.title || "").trim() ||
-    `${mission_date} · ${mission_type === "guards" ? "שמירות" : mission_type === "kitchen" ? "מטבch" : "עב״ס"}`;
+    `${mission_date} · ${mission_type === "guards" ? "שמירות" : mission_type === "kitchen" ? "מטבח" : "עב״ס"}`;
 
   if (!mission_date || !starts_at || !ends_at) {
     return NextResponse.json({ error: "חסרים תאריך או שעות" }, { status: 400 });

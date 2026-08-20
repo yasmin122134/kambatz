@@ -126,8 +126,10 @@ export function missionTemplateComplete(
     return (
       pos?.kind === "kitchen" &&
       slots.length === 4 &&
-      slots.every((s) => s.seat_count >= seats && seats >= 35) &&
-      slots.some((s) => s.start_time === "06:00" && s.end_time === "10:00")
+      seats >= 1 &&
+      slots.every((s) => s.seat_count === seats) &&
+      slots.some((s) => s.start_time === "06:00" && s.end_time === "10:00") &&
+      slots.some((s) => s.start_time === "19:00" && s.end_time === "22:00")
     );
   }
   if (missionType === "base_work") {

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import {
+  defaultSchedulingForType,
+  missionTemplateComplete,
+  standardMissionPositions,
+} from "@/lib/mission-templates";
+import {
   deleteMissionDay,
+  emptyAssignments,
   getMissionDay,
   normalizeSchedulingRules,
   saveMissionDay,
@@ -43,26 +49,45 @@ export async function PUT(request: Request, { params }: Params) {
   }
 
   const body = await request.json();
-  const positions = body.positions ?? existing.positions;
+  const mission_type = body.mission_type ?? existing.mission_type;
+  const starts_at = body.starts_at ?? existing.starts_at;
+  const ends_at = body.ends_at ?? existing.ends_at;
+  const scheduling_rules = body.scheduling_rules
+    ? normalizeSchedulingRules(body.scheduling_rules)
+    : existing.scheduling_rules;
+
+  const clientPositions = body.positions ?? existing.positions;
+  const positions =
+    clientPositions?.length && missionTemplateComplete(mission_type, clientPositions)
+      ? clientPositions
+      : standardMissionPositions({
+          missionType: mission_type,
+          startsAt: starts_at,
+          endsAt: ends_at,
+          scheduling: scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
+        });
+
+  const templateWasIncomplete =
+    !clientPositions?.length || !missionTemplateComplete(mission_type, clientPositions);
   const assignments = syncAssignmentSeats(
     positions,
-    body.assignments ?? existing.assignments,
+    templateWasIncomplete && !body.assignments
+      ? emptyAssignments(positions)
+      : (body.assignments ?? existing.assignments),
   );
 
   try {
     const saved = await saveMissionDay({
       id,
       title: body.title ?? existing.title,
-      mission_type: body.mission_type ?? existing.mission_type,
+      mission_type,
       mission_date: body.mission_date ?? existing.mission_date,
-      starts_at: body.starts_at ?? existing.starts_at,
-      ends_at: body.ends_at ?? existing.ends_at,
+      starts_at,
+      ends_at,
       status: body.status ?? existing.status,
       positions,
       assignments,
-      scheduling_rules: body.scheduling_rules
-        ? normalizeSchedulingRules(body.scheduling_rules)
-        : existing.scheduling_rules,
+      scheduling_rules,
       notes: body.notes ?? existing.notes,
     });
     return NextResponse.json(saved);
