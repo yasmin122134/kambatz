@@ -2,9 +2,11 @@ import { defaultBaseWorkPositions } from "@/lib/base-work-template";
 import {
   buildGuardDayPositions,
   guardPositionHint,
+  normalizeRearVehicleSlots,
+  rearVehicleSlotsValid,
   summarizeGuardSlots,
 } from "@/lib/guard-day-template";
-export { guardPositionHint, summarizeGuardSlots };
+export { guardPositionHint, normalizeRearVehicleSlots, summarizeGuardSlots };
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import type { MissionPosition, MissionSchedulingRules, MissionType } from "@/lib/types";
 import {
@@ -122,7 +124,12 @@ export function missionTemplateComplete(
       "קצין תורן",
     ];
     const names = new Set(positions.map((p) => p.name));
-    return positions.length >= 12 && required.every((n) => names.has(n));
+    const rear = positions.find((p) => p.name.includes("רכב אחורי"));
+    return (
+      positions.length >= 12 &&
+      required.every((n) => names.has(n)) &&
+      (!rear || rearVehicleSlotsValid(rear.slots))
+    );
   }
   if (missionType === "kitchen") {
     const pos = positions[0];
@@ -151,7 +158,7 @@ export function missionTemplateComplete(
 export const STANDARD_GUARD_DAY_SUMMARY = [
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",
-  "ש״ג רכב אחורי — 1 ב־06–19, 2 בשאר היממה",
+  "ש״ג רכב אחורי — 1 ב־06–18, 2 מ־18:00 (משמרת משלימה אם חור)",
   "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — 1 ב־06–19",
   "פטל, תצפיתן, ימ״ח, נשקייה, בונקר — 1 תמיד",
   "כוח עתודה — 3 תמיד · קצין תורן — 1 תמיד (מסתובב בין קצינים)",
