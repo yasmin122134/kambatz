@@ -11,6 +11,7 @@ import {
   slotDurationMinutes,
 } from "@/lib/mission-utils";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
+import { missionsOverlapCompatible } from "@/lib/standby-compat";
 import type {
   FairnessRules,
   Issue,
@@ -26,6 +27,7 @@ type BusyBlock = {
   durationMinutes: number;
   eatsRest: boolean;
   positionKind: MissionPositionKind;
+  missionType: MissionType;
   slotId: string;
   missionId: string;
 };
@@ -135,6 +137,16 @@ function overlapsSlot(
 ): boolean {
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
+    if (
+      missionsOverlapCompatible(
+        slot.positionKind,
+        slot.missionType,
+        b.positionKind,
+        b.missionType,
+      )
+    ) {
+      continue;
+    }
     if (
       cyclicOverlap(b.cyclicStart, b.durationMinutes, slot.cyclicStart, slot.durationMinutes)
     ) {
@@ -262,6 +274,7 @@ export function placePerson(
     durationMinutes: slot.durationMinutes,
     eatsRest: eatsRest(slot.positionKind),
     positionKind: slot.positionKind,
+    missionType: missionType ?? slot.missionType,
     slotId: slot.slotId,
     missionId,
   };
@@ -352,6 +365,7 @@ export function assignStandbyRoom(
   rules: FairnessRules,
   meanPrior: number,
   missionId: string,
+  missionType: MissionType = slot.missionType,
 ): string[] {
   const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
   const fixed = taken.filter(Boolean);
@@ -414,12 +428,13 @@ export function assignStandbyRoom(
       rules,
       scheduling,
       slot.seatCount,
+      missionType,
     );
   }
   return out;
 }
 
-/** שיבוץ משמרת מטבח — 35 למשמרת, צוות אחד במנוחה, אותו אדם יכול במספר משמרות */
+/** שיבוץ משמרת מטבח — תמיד 35, חלוקה יחסית בין צוותים פעילים */
 export function assignKitchenShift(input: {
   people: Person[];
   slot: FlatSlot;
@@ -433,7 +448,7 @@ export function assignKitchenShift(input: {
   meanPrior: number;
   missionId: string;
   missionType: MissionType;
-}): { names: string[]; usedFallback: boolean } {
+}): { names: string[]; usedRestSquad: boolean; squadCounts: Record<number, number> } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const kitchen = input.scheduling.kitchen;
   const restList = kitchen?.squad_rest_by_shift || [1, 2, 3, 4];
@@ -445,64 +460,217 @@ export function assignKitchenShift(input: {
   const squadOf = (p: Person) =>
     effectiveSquad(p, sortedPeople.findIndex((x) => x.id === p.id));
 
-  const fits = (p: Person, allowResting: boolean) => {
-    if (input.taken.includes(p.name)) return false;
-    if (!allowResting && squadOf(p) === restSquad) return false;
+  const assigned: string[] = [...input.taken];
+  const targetTotal = input.taken.length + input.need;
+  const squadCounts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0 };
+  for (const name of input.taken) {
+    const p = peopleByName[name];
+    if (p) squadCounts[squadOf(p)] += 1;
+  }
+
+  const canPick = (p: Person) => {
+    if (assigned.includes(p.name)) return false;
     return fitsPerson(
       p,
       input.slot,
       input.tracker,
       input.issues,
       input.scheduling,
-      input.taken,
+      assigned,
       peopleByName,
     );
   };
 
-  let pool = sortedPeople.filter((p) => fits(p, false));
-  let usedFallback = false;
-  if (pool.length < input.need) {
-    pool = sortedPeople.filter((p) => fits(p, true));
-    usedFallback = true;
+  const pickFromPool = (pool: Person[], limit: number) => {
+    let added = 0;
+    const sorted = [...pool]
+      .filter(canPick)
+      .sort((a, b) => {
+        const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
+        const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
+        if (wa !== wb) return wa - wb;
+        return a.name.localeCompare(b.name, "he");
+      });
+    for (const p of sorted) {
+      if (assigned.length >= targetTotal || added >= limit) break;
+      assigned.push(p.name);
+      squadCounts[squadOf(p)] += 1;
+      placePerson(
+        p.name,
+        input.slot,
+        input.missionId,
+        input.tracker,
+        input.rules,
+        input.scheduling,
+        input.slot.seatCount,
+        input.missionType,
+      );
+      added += 1;
+    }
+  };
+
+  const groups = groupPeopleBySquad(sortedPeople, squadOf);
+  const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
+  const activeSizes = activeSquads.map((s) => groups[s].filter(canPick).length);
+  const targets = apportionSeats(Math.max(0, input.need - input.taken.length), activeSizes);
+
+  for (let i = 0; i < activeSquads.length; i++) {
+    pickFromPool(groups[activeSquads[i]], targets[i]);
   }
 
-  pool.sort((a, b) => {
-    const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
-    const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
-    if (wa !== wb) return wa - wb;
-    return a.name.localeCompare(b.name, "he");
-  });
+  let usedRestSquad = false;
+  if (assigned.length < targetTotal) {
+    const restLeft = targetTotal - assigned.length;
+    const restPool = groups[restSquad].filter(canPick);
+    if (restPool.length) usedRestSquad = true;
+    pickFromPool(restPool, restLeft);
+  }
 
-  const out: string[] = [];
-  for (const p of pool) {
-    if (out.length >= input.need) break;
-    if (out.includes(p.name)) continue;
-    if (
-      !fitsPerson(
+  if (assigned.length < targetTotal) {
+    pickFromPool(
+      sortedPeople.filter((p) => squadOf(p) !== restSquad),
+      targetTotal - assigned.length,
+    );
+  }
+
+  if (assigned.length < targetTotal) {
+    pickFromPool(sortedPeople, targetTotal - assigned.length);
+  }
+
+  const names = assigned.slice(input.taken.length);
+  return { names, usedRestSquad, squadCounts };
+}
+
+/** שיבוץ חלון עב״ס — צוות שלם (13–15), צוות אחד במנוחה */
+export function assignBaseWorkShift(input: {
+  people: Person[];
+  slot: FlatSlot;
+  shiftIndex: number;
+  tracker: ScheduleTracker;
+  issues: Issue[];
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+  meanPrior: number;
+  missionId: string;
+  missionType: MissionType;
+  taken: string[];
+}): { names: string[]; workSquad: number | null; usedFallback: boolean } {
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const cfg = input.scheduling.base_work;
+  const target = cfg?.seats_per_shift ?? 14;
+  const restList = cfg?.squad_rest_by_shift ?? [1, 2, 3];
+  const restSquad = restList[input.shiftIndex % restList.length] ?? (input.shiftIndex % 4) + 1;
+
+  const sortedPeople = [...input.people].sort((a, b) =>
+    a.name.localeCompare(b.name, "he"),
+  );
+  const squadOf = (p: Person) =>
+    effectiveSquad(p, sortedPeople.findIndex((x) => x.id === p.id));
+  const groups = groupPeopleBySquad(sortedPeople, squadOf);
+
+  const fitsAll = (members: Person[]) =>
+    members.every((p) =>
+      fitsPerson(
         p,
         input.slot,
         input.tracker,
         input.issues,
         input.scheduling,
-        [...input.taken, ...out],
+        input.taken,
         peopleByName,
-      )
-    ) {
-      continue;
-    }
-    out.push(p.name);
-    placePerson(
-      p.name,
-      input.slot,
-      input.missionId,
-      input.tracker,
-      input.rules,
-      input.scheduling,
-      input.slot.seatCount,
-      input.missionType,
+      ),
     );
+
+  const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
+  const candidates = activeSquads
+    .map((s) => ({ squad: s, members: groups[s] }))
+    .filter(({ members }) => members.length >= 13 && members.length <= 15)
+    .sort(
+      (a, b) =>
+        Math.abs(a.members.length - target) - Math.abs(b.members.length - target),
+    );
+
+  for (const { squad, members } of candidates) {
+    const pool = members.filter((m) => !input.taken.includes(m.name));
+    if (pool.length < 13 || pool.length > 15) continue;
+    if (!fitsAll(pool)) continue;
+    const names = pool.map((p) => p.name);
+    for (const name of names) {
+      placePerson(
+        name,
+        input.slot,
+        input.missionId,
+        input.tracker,
+        input.rules,
+        input.scheduling,
+        input.slot.seatCount,
+        input.missionType,
+      );
+    }
+    return { names, workSquad: squad, usedFallback: false };
   }
-  return { names: out, usedFallback };
+
+  // גיבוי: חלוקה יחסית עד יעד 13–15
+  const need = Math.max(13, Math.min(15, target));
+  const activePools = activeSquads.map((s) => groups[s]);
+  const sizes = activePools.map((pool) =>
+    pool.filter((p) =>
+      fitsPerson(
+        p,
+        input.slot,
+        input.tracker,
+        input.issues,
+        input.scheduling,
+        input.taken,
+        peopleByName,
+      ),
+    ).length,
+  );
+  const targets = apportionSeats(need, sizes);
+  const assigned: string[] = [];
+
+  for (let i = 0; i < activeSquads.length; i++) {
+    const squad = activeSquads[i];
+    const pool = activePools[i]
+      .filter((p) =>
+        fitsPerson(
+          p,
+          input.slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          [...input.taken, ...assigned],
+          peopleByName,
+        ),
+      )
+      .sort((a, b) => {
+        const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
+        const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
+        return wa - wb || a.name.localeCompare(b.name, "he");
+      });
+    let squadAdded = 0;
+    for (const p of pool) {
+      if (assigned.length >= need || squadAdded >= targets[i]) break;
+      assigned.push(p.name);
+      squadAdded += 1;
+      placePerson(
+        p.name,
+        input.slot,
+        input.missionId,
+        input.tracker,
+        input.rules,
+        input.scheduling,
+        input.slot.seatCount,
+        input.missionType,
+      );
+    }
+  }
+
+  return {
+    names: assigned,
+    workSquad: assigned.length ? squadOf(peopleByName[assigned[0]]) : null,
+    usedFallback: true,
+  };
 }
 
 export function findReplacements(input: {
