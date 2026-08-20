@@ -2,46 +2,23 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { PageShell } from "@/components/PageShell";
+import { AppShell } from "@/components/AppShell";
 import { NameCombobox } from "@/components/NameCombobox";
 import { AdminManualConstraints } from "@/components/AdminManualConstraints";
 import { createClient } from "@/lib/supabase/client";
 import {
-  ISSUE_TYPE_LABELS,
-  ISSUE_STATUS_LABELS,
-  PERSONAL_FLAG_LABELS,
-  type Issue,
   type Person,
-  type ProfileRequest,
 } from "@/lib/types";
 
 export default function AdminPage() {
   const [authed, setAuthed] = useState<boolean | null>(null);
   const [password, setPassword] = useState("");
   const [loginErr, setLoginErr] = useState("");
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [profileRequests, setProfileRequests] = useState<ProfileRequest[]>([]);
   const [people, setPeople] = useState<Person[]>([]);
   const [newName, setNewName] = useState("");
   const [bulkNames, setBulkNames] = useState("");
-  const [filter, setFilter] = useState<"pending" | "approved" | "all">("pending");
-  const [profileFilter, setProfileFilter] = useState<
-    "pending" | "approved" | "all"
-  >("pending");
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
-
-  const loadIssues = useCallback(async () => {
-    const q = filter === "all" ? "" : `?status=${filter}`;
-    const res = await fetch(`/api/issues${q}`);
-    if (res.ok) setIssues(await res.json());
-  }, [filter]);
-
-  const loadProfileRequests = useCallback(async () => {
-    const q = profileFilter === "all" ? "" : `?status=${profileFilter}`;
-    const res = await fetch(`/api/profile-requests${q}`);
-    if (res.ok) setProfileRequests(await res.json());
-  }, [profileFilter]);
 
   const loadPeople = useCallback(async () => {
     const res = await fetch("/api/people");
@@ -68,11 +45,9 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (authed) {
-      loadIssues();
-      loadProfileRequests();
       loadPeople();
     }
-  }, [authed, loadIssues, loadProfileRequests, loadPeople]);
+  }, [authed, loadPeople]);
 
   async function login(e: FormEvent) {
     e.preventDefault();
@@ -125,41 +100,6 @@ export default function AdminPage() {
     if (data?.url) window.location.href = data.url;
   }
 
-  async function setStatus(id: string, status: "approved" | "rejected") {
-    const res = await fetch("/api/issues", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    if (res.ok) {
-      loadIssues();
-    }
-  }
-
-  async function setProfileStatus(
-    id: string,
-    status: "approved" | "rejected",
-  ) {
-    const res = await fetch("/api/profile-requests", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, status }),
-    });
-    if (res.ok) {
-      loadProfileRequests();
-      loadPeople();
-    }
-  }
-
-  function formatProfileFlags(req: ProfileRequest): string {
-    const parts = (
-      Object.keys(PERSONAL_FLAG_LABELS) as (keyof typeof PERSONAL_FLAG_LABELS)[]
-    )
-      .filter((k) => req[k])
-      .map((k) => PERSONAL_FLAG_LABELS[k]);
-    return parts.length ? parts.join(" · ") : "ללא סימונים";
-  }
-
   async function syncRoster() {
     setSyncing(true);
     setSyncMsg("");
@@ -206,9 +146,11 @@ export default function AdminPage() {
 
   if (authed === null) {
     return (
-      <PageShell title="ניהול" lede="טוען…">
-        <p className="hint">ממתין…</p>
-      </PageShell>
+      <AppShell title="ניהול">
+        <main className="mx-auto max-w-sm px-5 py-8">
+          <p className="hint">טוען…</p>
+        </main>
+      </AppShell>
     );
   }
 
@@ -218,15 +160,17 @@ export default function AdminPage() {
       new URLSearchParams(window.location.search).get("next") === "/scheduler.html";
 
     return (
-      <PageShell
-        title="כניסת מפקד"
-        lede={
-          needsScheduler
-            ? "יש להתחבר כדי לפתוח את המחולל."
-            : "הזינו את סיסמת הניהול."
-        }
-      >
-        <form onSubmit={login} className="card max-w-sm space-y-4">
+      <AppShell title="כניסת מפקד">
+        <main className="mx-auto max-w-sm px-5 py-8">
+          <div className="card mb-4">
+            <h2 className="font-display text-xl">כניסת מפקד</h2>
+            <p className="lede">
+              {needsScheduler
+                ? "יש להתחבר כדי לפתוח את המחולל."
+                : "הזינו סיסמה או התחברו עם Google."}
+            </p>
+          </div>
+        <form onSubmit={login} className="card space-y-4">
           <div className="field">
             <label htmlFor="pw">סיסמה</label>
             <input
@@ -256,26 +200,34 @@ export default function AdminPage() {
             מפקדים מורשים (למשל יסמין חדד) יכולים להיכנס עם המייל מהדוק.
           </p>
         </form>
-      </PageShell>
+        </main>
+      </AppShell>
     );
   }
 
   return (
-    <PageShell
-      title="לוח בקרה"
-      lede="אשרו דיווחי צוערים ונהלו את רשימת המחזור. חסימות מאושרות נכנסות אוטומטית למחולל."
-    >
-      <div className="bar mb-6">
-        <Link href="/scheduler.html" className="btn-pri">
-          פתח מחולל שיבוץ מלא
-        </Link>
-        <Link href="/" className="btn">
-          דף הבית
-        </Link>
-        <button type="button" className="btn" onClick={logout}>
-          יציאה
-        </button>
-      </div>
+    <AppShell title="דף מנהל">
+      <main className="mx-auto max-w-3xl px-5 py-8">
+        <div className="card mb-6">
+          <h2 className="font-display text-xl mb-2">ניהול</h2>
+          <p className="lede mb-4">
+            יצירת ימי משימה, שיבוץ, ואישור אילוצים — רוב הפעולות מהרשימה המלאה.
+          </p>
+          <div className="bar flex-wrap gap-2">
+            <Link href="/admin/missions" className="btn-pri">
+              ימי משימה
+            </Link>
+            <Link href="/board" className="btn">
+              רשימה מלאה + אילוצים
+            </Link>
+            <Link href="/scheduler.html" className="btn-sm">
+              מחולל ישן
+            </Link>
+            <button type="button" className="btn-sm" onClick={logout}>
+              יציאה
+            </button>
+          </div>
+        </div>
 
       <section className="card mb-6">
         <h3 className="font-display text-base mb-2">סנכרון דוק פלוגה</h3>
@@ -298,8 +250,6 @@ export default function AdminPage() {
         people={people}
         onSaved={() => {
           loadPeople();
-          loadIssues();
-          loadProfileRequests();
         }}
       />
 
@@ -331,128 +281,7 @@ export default function AdminPage() {
           {people.map((p) => p.name).join(" · ") || "אין שמות"}
         </p>
       </section>
-
-      <section className="card mb-6">
-        <div className="bar spread mb-4">
-          <h3 className="font-display text-base">בקשות עדכון סימונים</h3>
-          <div className="flex gap-2">
-            {(["pending", "approved", "all"] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`btn-sm ${profileFilter === f ? "on" : ""}`}
-                onClick={() => setProfileFilter(f)}
-              >
-                {f === "pending" ? "ממתינים" : f === "approved" ? "מאושרים" : "הכל"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {profileRequests.length === 0 ? (
-          <p className="hint">
-            אין בקשות סימונים{profileFilter !== "all" ? " בסינון הזה" : ""}.
-          </p>
-        ) : (
-          <ul className="space-y-3">
-            {profileRequests.map((req) => (
-              <li key={req.id} className="issue-row">
-                <div>
-                  <b>{req.person_name}</b>
-                  <span className="text-ink2 mr-2"> — {formatProfileFlags(req)}</span>
-                  <span className={`tag tag-${req.status} mr-2`}>
-                    {ISSUE_STATUS_LABELS[req.status]}
-                  </span>
-                </div>
-                {req.status === "pending" && (
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      type="button"
-                      className="btn-pri btn-sm"
-                      onClick={() => setProfileStatus(req.id, "approved")}
-                    >
-                      אשר
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-sm"
-                      onClick={() => setProfileStatus(req.id, "rejected")}
-                    >
-                      דחה
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="hint mt-4">
-          אישור מעדכן את הסימונים האישיים של הצוער במחולל ובפרופיל.
-        </p>
-      </section>
-
-      <section className="card mb-6">
-        <div className="bar spread mb-4">
-          <h3 className="font-display text-base">דיווחי חסימות</h3>
-          <div className="flex gap-2">
-            {(["pending", "approved", "all"] as const).map((f) => (
-              <button
-                key={f}
-                type="button"
-                className={`btn-sm ${filter === f ? "on" : ""}`}
-                onClick={() => setFilter(f)}
-              >
-                {f === "pending" ? "ממתינים" : f === "approved" ? "מאושרים" : "הכל"}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {issues.length === 0 ? (
-          <p className="hint">אין דיווחים{filter !== "all" ? " בסינון הזה" : ""}.</p>
-        ) : (
-          <ul className="space-y-3">
-            {issues.map((iss) => (
-              <li key={iss.id} className="issue-row">
-                <div>
-                  <b>{iss.person_name}</b>
-                  <span className="mono mx-2">
-                    {iss.start_time}–{iss.end_time}
-                  </span>
-                  <span>{ISSUE_TYPE_LABELS[iss.issue_type]}</span>
-                  {iss.note && (
-                    <span className="text-ink2 mr-2"> — {iss.note}</span>
-                  )}
-                  <span className={`tag tag-${iss.status} mr-2`}>
-                    {ISSUE_STATUS_LABELS[iss.status]}
-                  </span>
-                </div>
-                {iss.status === "pending" && (
-                  <div className="flex gap-2 mt-2">
-                    <button
-                      type="button"
-                      className="btn-pri btn-sm"
-                      onClick={() => setStatus(iss.id, "approved")}
-                    >
-                      אשר
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-sm"
-                      onClick={() => setStatus(iss.id, "rejected")}
-                    >
-                      דחה
-                    </button>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-        <p className="hint mt-4">
-          דיווחים מאושרים מופיעים אוטומטית במחולל — לשונית 06 · חסימות.
-        </p>
-      </section>
-    </PageShell>
+      </main>
+    </AppShell>
   );
 }

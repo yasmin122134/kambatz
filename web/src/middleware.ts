@@ -47,7 +47,13 @@ export async function middleware(request: NextRequest) {
 
   if (request.nextUrl.pathname === "/schedule" && !user) {
     const login = new URL("/login", request.url);
-    login.searchParams.set("next", "/schedule");
+    login.searchParams.set("next", "/board");
+    return NextResponse.redirect(login);
+  }
+
+  if (request.nextUrl.pathname === "/board" && !user) {
+    const login = new URL("/login", request.url);
+    login.searchParams.set("next", "/board");
     return NextResponse.redirect(login);
   }
 
@@ -57,6 +63,8 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     "/scheduler.html",
+    "/board",
+    "/schedule",
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

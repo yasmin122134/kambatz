@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { PageShell } from "@/components/PageShell";
+import { AppShell } from "@/components/AppShell";
 import { NameCombobox } from "@/components/NameCombobox";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -97,10 +97,14 @@ export default function ReportPage() {
   }
 
   return (
-    <PageShell
-      title="דיווח חסימת שעות"
-      lede="בחרו שם, שעות, סוג חסימה (מבחן, התנסות, רפואי…), והסבירו בקצרה למה. המפקד יאשר — ואז המחולל יכבד את זה אוטומטית."
-    >
+    <AppShell title="אילוצים">
+      <main className="mx-auto max-w-lg px-5 py-8">
+        <div className="card mb-4">
+          <h2 className="font-display text-xl">הוספת אילוץ</h2>
+          <p className="lede">
+            דווחו חסימת שעות — ממתין לאישור מפקד.
+          </p>
+        </div>
       <form onSubmit={onSubmit} className="card space-y-4">
         <div className="field">
           <label htmlFor="person">השם שלי</label>
@@ -215,6 +219,7 @@ export default function ReportPage() {
           </ul>
         </div>
       )}
-    </PageShell>
+      </main>
+    </AppShell>
   );
 }

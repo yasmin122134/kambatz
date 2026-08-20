@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { PageShell } from "@/components/PageShell";
+import { AppShell } from "@/components/AppShell";
 import {
   ISSUE_STATUS_LABELS,
   PERSONAL_FLAG_LABELS,
@@ -136,25 +136,29 @@ export default function ProfilePage() {
 
   if (loading) {
     return (
-      <PageShell title="הפרופיל שלי" lede="טוען…">
-        <p className="hint">ממתין…</p>
-      </PageShell>
+      <AppShell title="פרופיל">
+        <main className="mx-auto max-w-lg px-5 py-8">
+          <p className="hint">טוען…</p>
+        </main>
+      </AppShell>
     );
   }
 
   if (!person) {
     return (
-      <PageShell title="הפרופיל שלי" lede="לא נמצא במאגר">
-        <div className="card max-w-md space-y-3">
-          {error && <p className="msg-err">{error}</p>}
-          <button type="button" className="btn" onClick={signOut}>
-            התנתקות
-          </button>
-          <Link href="/" className="text-sm text-ink2 hover:text-brick">
-            ← חזרה לדף הבית
-          </Link>
-        </div>
-      </PageShell>
+      <AppShell title="פרופיל">
+        <main className="mx-auto max-w-lg px-5 py-8">
+          <div className="card space-y-3">
+            {error && <p className="msg-err">{error}</p>}
+            <button type="button" className="btn" onClick={signOut}>
+              התנתקות
+            </button>
+            <Link href="/" className="text-sm text-ink2 hover:text-brick">
+              ← חזרה לדף הבית
+            </Link>
+          </div>
+        </main>
+      </AppShell>
     );
   }
 
@@ -162,11 +166,13 @@ export default function ProfilePage() {
   const approvedList = activeFlagsList(approvedFlags);
 
   return (
-    <PageShell
-      title="הפרופיל שלי"
-      lede="שינוי סימונים דורש אישור מפקד — לא נכנס לשיבוץ עד שיאושר."
-    >
-      <div className="card max-w-lg space-y-5">
+    <AppShell title="פרופיל">
+      <main className="mx-auto max-w-lg px-5 py-8">
+        <div className="card mb-4">
+          <h2 className="font-display text-xl">הפרופיל שלי</h2>
+          <p className="lede">שינוי סימונים דורש אישור מפקד.</p>
+        </div>
+      <div className="card space-y-5">
         <div>
           <p className="text-sm text-ink2">שם</p>
           <p className="font-display text-xl">{person.name}</p>
@@ -237,12 +243,13 @@ export default function ProfilePage() {
         </form>
 
         <p className="hint">
-          לדיווח חסימות שעות (מבחן, התנסות וכו׳) —{" "}
+          לדיווח חסימות שעות —{" "}
           <Link href="/report" className="text-brick hover:underline">
-            טופס דיווח
+            הוספת אילוץ
           </Link>
         </p>
       </div>
-    </PageShell>
+      </main>
+    </AppShell>
   );
 }

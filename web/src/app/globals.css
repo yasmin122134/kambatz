@@ -309,6 +309,117 @@ button:hover,
   box-shadow: inset 3px 0 0 var(--color-brick);
 }
 
+.menu-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.menu-btn span {
+  display: block;
+  width: 22px;
+  height: 2px;
+  background: #ede9dc;
+  border-radius: 1px;
+}
+
+.menu-drawer {
+  position: fixed;
+  top: 0;
+  inset-inline-start: 0;
+  width: min(280px, 85vw);
+  height: 100vh;
+  background: var(--color-card);
+  border-inline-end: 1px solid var(--color-line);
+  padding: 4.5rem 1rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.12);
+}
+
+.menu-drawer a {
+  display: block;
+  padding: 0.75rem 1rem;
+  text-decoration: none;
+  color: var(--color-ink);
+  font-weight: 600;
+  border-radius: 3px;
+}
+
+.menu-drawer a:hover {
+  background: var(--color-bone2);
+}
+
+.menu-drawer a.on {
+  background: #eef2e8;
+  color: var(--color-olive);
+}
+
+.day-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.day-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border: 2px solid var(--color-line);
+  border-radius: 4px;
+  background: var(--color-card);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.day-tab.on {
+  border-color: var(--color-olive);
+  background: #eef2e8;
+  font-weight: 700;
+}
+
+.day-tab-sep {
+  color: var(--color-ink3);
+  margin-inline-end: 0.25rem;
+}
+
+.day-tab-date {
+  font-weight: 600;
+}
+
+.guard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.guard-col {
+  border: 1px solid var(--color-line2);
+  border-radius: 4px;
+  padding: 0.75rem;
+  background: #fff;
+}
+
+.slot-card {
+  border: 1px solid var(--color-line2);
+  border-radius: 4px;
+  padding: 0.65rem 0.75rem;
+  background: var(--color-bone2);
+}
+
+.slot-card.mine {
+  border-color: var(--color-olive);
+  background: #eef2e8;
+}
+
 .issue-row {
   border: 1px solid var(--color-line2);
   border-radius: 3px;
