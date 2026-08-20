@@ -89,6 +89,51 @@ function addWallClockBounds(
   }
 }
 
+/** עוגן קבוע לרשת משמרות — יום שמתחיל ב-08:00 הוא המצב הייחוס */
+export const CANONICAL_GUARD_GRID_START = "08:00";
+
+function collectWallBoundsFromGrid(
+  boardMin: number,
+  cycleEnd: number,
+  shiftHours: number,
+  dayNightSplit: string,
+  extraWallBounds: string[],
+): Set<number> {
+  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
+  const bounds = new Set<number>([boardMin, cycleEnd]);
+
+  addWallClockBounds(bounds, boardMin, cycleEnd, dayNightSplit, shiftMin);
+  for (const wall of extraWallBounds) {
+    if (wall === dayNightSplit) continue;
+    addWallClockBounds(bounds, boardMin, cycleEnd, wall);
+  }
+
+  return bounds;
+}
+
+/** שעות שעון (wall) של כל גבולות הרשת ביום ייחוס שמתחיל ב-08:00 */
+function canonicalWallBoundaries(
+  shiftHours: number,
+  dayNightSplit: string,
+  extraWallBounds: string[],
+): number[] {
+  const refBoardMin = parseTimeMinutes(CANONICAL_GUARD_GRID_START) ?? 8 * 60;
+  const refEnd = refBoardMin + 1440;
+  const bounds = collectWallBoundsFromGrid(
+    refBoardMin,
+    refEnd,
+    shiftHours,
+    dayNightSplit,
+    extraWallBounds,
+  );
+
+  const walls = new Set<number>();
+  for (const abs of bounds) {
+    walls.add(wallMin(abs));
+  }
+  return [...walls];
+}
+
 export function buildUnifiedGuardShiftWindows(
   boardStart: string,
   cycleMin: number,
@@ -97,14 +142,20 @@ export function buildUnifiedGuardShiftWindows(
   extraWallBounds: string[] = [],
 ): GuardShiftWindow[] {
   const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
-  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
   const cycleEnd = boardMin + cycleMin;
   const bounds = new Set<number>([boardMin, cycleEnd]);
 
-  addWallClockBounds(bounds, boardMin, cycleEnd, dayNightSplit, shiftMin);
-  for (const wall of extraWallBounds) {
-    if (wall === dayNightSplit) continue;
-    addWallClockBounds(bounds, boardMin, cycleEnd, wall);
+  // רשת הייחוס (08:00) — המשמרת הראשונה ממלאת עד הגבול הבא, ואז כולם מסונכרנים
+  const canonicalWalls = canonicalWallBoundaries(shiftHours, dayNightSplit, extraWallBounds);
+  const boardWall = wallMin(boardMin);
+
+  for (const wall of canonicalWalls) {
+    let abs = boardMin - boardWall + wall;
+    if (abs < boardMin) abs += 1440;
+    while (abs < cycleEnd) {
+      if (abs > boardMin && abs < cycleEnd) bounds.add(abs);
+      abs += 1440;
+    }
   }
 
   const sorted = [...bounds].sort((a, b) => a - b);
@@ -522,24 +573,9 @@ function slotWindowKey(slot: Pick<MissionSlot, "start_time" | "end_time">): stri
   return `${slot.start_time}-${slot.end_time}`;
 }
 
-function wallBoundsFromSlotTimes(slots: MissionSlot[]): string[] {
-  const out = new Set<string>();
-  for (const slot of slots) {
-    if (slot.start_time) out.add(slot.start_time);
-    if (slot.end_time) out.add(slot.end_time);
-  }
-  return [...out];
-}
-
-/** רשת משמרות מאוחדת — כולל גבולות מאילוצי ש״ג אחורי/רגלי + חלונות קיימים */
-function buildGuardDayWindows(
-  ctx: GuardDayContext,
-  positions?: MissionPosition[],
-): GuardShiftWindow[] {
-  const staticBounds = [ctx.day[0], ctx.footDay[1]];
-  const rear = positions?.find((p) => p.name.includes("רכב אחורי"));
-  const fromRear = rear ? wallBoundsFromSlotTimes(rear.slots) : [];
-  const extra = [...new Set([...staticBounds, ...fromRear])];
+/** רשת משמרות מאוחדת — עוגן 08:00 + אילוצי ש״ג אחורי/רגלי */
+function buildGuardDayWindows(ctx: GuardDayContext): GuardShiftWindow[] {
+  const extra = [...new Set([ctx.day[0], ctx.footDay[1]])];
   return buildUnifiedGuardShiftWindows(ctx.board, ctx.cycleMin, ctx.shift, ctx.day[1], extra);
 }
 
@@ -596,7 +632,7 @@ export function syncGuardShiftSlots(
   options?: BuildGuardDayOptions,
 ): MissionPosition[] {
   const ctx = resolveGuardDayContext(options);
-  const windows = buildGuardDayWindows(ctx, positions);
+  const windows = buildGuardDayWindows(ctx);
 
   return positions.map((pos) => {
     if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
