@@ -1,8 +1,11 @@
 import { defaultBaseWorkPositions } from "@/lib/base-work-template";
 import {
   buildGuardDayPositions,
+  footPatrolSlotsValid,
   guardPositionHint,
+  guardShiftWindowsAligned,
   normalizeRearVehicleSlots,
+  officerDutySlotsValid,
   rearVehicleSlotsValid,
   summarizeGuardSlots,
 } from "@/lib/guard-day-template";
@@ -125,10 +128,15 @@ export function missionTemplateComplete(
     ];
     const names = new Set(positions.map((p) => p.name));
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
+    const foot = positions.find((p) => p.name.includes("רגלי"));
+    const officer = positions.find((p) => p.kind === "officer_duty");
     return (
       positions.length >= 12 &&
       required.every((n) => names.has(n)) &&
-      (!rear || rearVehicleSlotsValid(rear.slots))
+      (!rear || rearVehicleSlotsValid(rear.slots)) &&
+      (!foot || footPatrolSlotsValid(foot.slots)) &&
+      (!officer || officerDutySlotsValid(officer.slots)) &&
+      guardShiftWindowsAligned(positions)
     );
   }
   if (missionType === "kitchen") {
@@ -156,12 +164,14 @@ export function missionTemplateComplete(
 }
 
 export const STANDARD_GUARD_DAY_SUMMARY = [
+  "חילוף מסונכרן — כל העמדות (מלבד כוננות/קצין תורן) מחליפות באותם זמנים, כולל משמרות קצרות לסנכרון",
+  "משמרת סנכרון קצרה בתחילת היום אם צריך (למשל 09:00–10:00) — לכל העמדות",
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",
-  "ש״ג רכב אחורי — 1 ב־06–18, 2 מ־18:00 (משמרת משלימה אם חור)",
-  "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — 1 ב־06–19",
+  "ש״ג רכב אחורי — בדיוק 1 ב־06–18, בדיוק 2 בשאר השעות · חילוף מסונכרן",
+  "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — בדיוק 1 ב־06–19, 0 בשאר השעות",
   "פטל, תצפיתן, ימ״ח, נשקייה, בונקר — 1 תמיד",
-  "כוח עתודה — 3 תמיד · קצין תורן — 1 תמיד (מסתובב בין קצינים)",
+  "כוח עתודה — 3 תמיד · קצין תורן — 1 תמיד, שתי משמרות (חצי יום כל אחת)",
 ] as const;
 
 export const STANDARD_KITCHEN_SUMMARY = [

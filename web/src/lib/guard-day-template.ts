@@ -60,10 +60,171 @@ function newPosition(
   };
 }
 
-/** פיצול חלון שעות למשמרות מסתובבות */
+/** חלונות משמרת מאוחדים לכל העמדות — אותם זמני חילוף (כולל סנכרון בתחילת היום) */
+export type GuardShiftWindow = { startMin: number; endMin: number };
+
+function addWallClockBounds(
+  bounds: Set<number>,
+  boardMin: number,
+  cycleEnd: number,
+  wallTime: string,
+  shiftMin?: number,
+): void {
+  const wall = parseTimeMinutes(wallTime);
+  if (wall === null) return;
+
+  const boardWall = wallMin(boardMin);
+  let firstAbs = boardMin - boardWall + wall;
+  if (firstAbs <= boardMin) firstAbs += 1440;
+
+  for (let anchor = firstAbs; anchor < cycleEnd; anchor += 1440) {
+    bounds.add(anchor);
+    if (shiftMin == null) continue;
+    for (let t = anchor - shiftMin; t > boardMin; t -= shiftMin) {
+      bounds.add(t);
+    }
+    for (let t = anchor + shiftMin; t < cycleEnd; t += shiftMin) {
+      bounds.add(t);
+    }
+  }
+}
+
+export function buildUnifiedGuardShiftWindows(
+  boardStart: string,
+  cycleMin: number,
+  shiftHours: number,
+  dayNightSplit = "18:00",
+  extraWallBounds: string[] = [],
+): GuardShiftWindow[] {
+  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
+  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
+  const cycleEnd = boardMin + cycleMin;
+  const bounds = new Set<number>([boardMin, cycleEnd]);
+
+  addWallClockBounds(bounds, boardMin, cycleEnd, dayNightSplit, shiftMin);
+  for (const wall of extraWallBounds) {
+    if (wall === dayNightSplit) continue;
+    addWallClockBounds(bounds, boardMin, cycleEnd, wall);
+  }
+
+  const sorted = [...bounds].sort((a, b) => a - b);
+  const windows: GuardShiftWindow[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i + 1] > sorted[i]) {
+      windows.push({ startMin: sorted[i], endMin: sorted[i + 1] });
+    }
+  }
+  return windows;
+}
+
+function wallMin(absMin: number): number {
+  return ((absMin % 1440) + 1440) % 1440;
+}
+
+function slotsFromWindows(
+  windows: GuardShiftWindow[],
+  seatsFor: (w: GuardShiftWindow) => number,
+  keepZeroSeats = false,
+): MissionSlot[] {
+  return windows
+    .map((w) => ({ w, seats: seatsFor(w) }))
+    .filter((x) => keepZeroSeats || x.seats > 0)
+    .map(({ w, seats }) => newSlot(fmtTime(w.startMin), fmtTime(w.endMin), seats));
+}
+
+/** חלון שלם בתוך טווח שעון (ללא חציית חצות) */
+function windowFullyInsideWallRange(
+  w: GuardShiftWindow,
+  rangeStartMin: number,
+  rangeEndMin: number,
+): boolean {
+  const start = wallMin(w.startMin);
+  const end = wallMin(w.endMin);
+  if (end <= start) return false;
+  return start >= rangeStartMin && end <= rangeEndMin;
+}
+
+function rearSeatsForWindow(
+  w: GuardShiftWindow,
+  dayStartMin: number,
+  dayEndMin: number,
+): number {
+  if (windowFullyInsideWallRange(w, dayStartMin, dayEndMin)) return 1;
+  return 2;
+}
+
+function footSeatsForWindow(
+  w: GuardShiftWindow,
+  dayStartMin: number,
+  dayEndMin: number,
+): number {
+  return windowFullyInsideWallRange(w, dayStartMin, dayEndMin) ? 1 : 0;
+}
+
+function rotatingGuardSlots(
+  windows: GuardShiftWindow[],
+  seatsFor: (w: GuardShiftWindow) => number,
+): MissionSlot[] {
+  return slotsFromWindows(windows, seatsFor);
+}
+
+function rearVehicleSlotsFromWindows(
+  windows: GuardShiftWindow[],
+  dayStart: string,
+  dayEnd: string,
+): MissionSlot[] {
+  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
+  const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
+  return rotatingGuardSlots(windows, (w) =>
+    rearSeatsForWindow(w, dayStartMin, dayEndMin),
+  );
+}
+
+function footPatrolSlotsFromWindows(
+  windows: GuardShiftWindow[],
+  dayStart: string,
+  dayEnd: string,
+): MissionSlot[] {
+  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
+  const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
+  return slotsFromWindows(windows, (w) => footSeatsForWindow(w, dayStartMin, dayEndMin), true);
+}
+
+/** קצין תורן — שתי משמרות בלבד, חצי מחזור יום השמירות כל אחת */
+function officerDutySlots(boardStart: string, cycleMin: number): MissionSlot[] {
+  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
+  const mid = boardMin + Math.floor(cycleMin / 2);
+  const end = boardMin + cycleMin;
+  return [newSlot(fmtTime(boardMin), fmtTime(mid), 1), newSlot(fmtTime(mid), fmtTime(end), 1)];
+}
+
+/** האם מבנה קצין תורן תקין (בדיוק 2 משמרות) */
+export function officerDutySlotsValid(slots: MissionSlot[]): boolean {
+  return slots.length === 2 && slots.every((s) => s.seat_count >= 1);
+}
+
+/** כל עמדות השמירה המסתובבות (מלבד כוננות/קצין תורן) חולקות אותם חלונות זמן */
+export function guardShiftWindowsAligned(positions: MissionPosition[]): boolean {
+  const keys = (slots: MissionSlot[]) =>
+    slots.map((s) => `${s.start_time}-${s.end_time}`).join("|");
+
+  const rotating = positions.filter(
+    (p) =>
+      p.kind !== "standby_carmel_a" &&
+      p.kind !== "standby_carmel_b" &&
+      p.kind !== "officer_duty" &&
+      !p.name.includes("כוננות"),
+  );
+  if (rotating.length < 2) return true;
+
+  const ref = keys(rotating[0].slots);
+  return rotating.every((p) => keys(p.slots) === ref);
+}
+
+/** @deprecated — השתמשו ב-buildUnifiedGuardShiftWindows */
 export function buildRotatedSlots(
-  startTime: string,
-  endTime: string,
+  _startTime: string,
+  _endTime: string,
   seatCount: number,
   shiftHours: number,
   options?: {
@@ -71,31 +232,9 @@ export function buildRotatedSlots(
     boardStart?: string;
   },
 ): MissionSlot[] {
-  const board = parseTimeMinutes(options?.boardStart ?? "20:00") ?? 20 * 60;
-  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
-
-  let startMin: number;
-  let endMin: number;
-
-  if (options?.fullTour || startTime === endTime) {
-    startMin = board;
-    endMin = board + 1440;
-  } else {
-    const a = parseTimeMinutes(startTime);
-    const b = parseTimeMinutes(endTime);
-    if (a === null || b === null) return [newSlot(startTime, endTime, seatCount)];
-    startMin = a;
-    endMin = b <= a ? b + 1440 : b;
-  }
-
-  const slots: MissionSlot[] = [];
-  let cursor = startMin;
-  while (cursor < endMin - 1) {
-    const next = Math.min(cursor + shiftMin, endMin);
-    slots.push(newSlot(fmtTime(cursor), fmtTime(next), seatCount));
-    cursor = next;
-  }
-  return slots.length ? slots : [newSlot(startTime, endTime, seatCount)];
+  const board = options?.boardStart ?? "20:00";
+  const windows = buildUnifiedGuardShiftWindows(board, 1440, shiftHours);
+  return slotsFromWindows(windows, () => seatCount);
 }
 
 function guardPosition(
@@ -172,166 +311,172 @@ function slotDurationMinutes(start: string, end: string): number {
   return 1440 - a + b;
 }
 
-/** משמרות בתוך קטע — יישור לאחור מסוף הקטע (מונע שארית קצרה לפני 18:00) */
-function slotsFromSegmentBackward(
-  seg: { startMin: number; endMin: number; seats: number },
-  shiftMin: number,
+function splitSlotAtWallBoundaries(
+  slot: MissionSlot,
+  boundaries: number[],
+  seatsForRange: (startMin: number, endMin: number) => number,
 ): MissionSlot[] {
-  const slots: MissionSlot[] = [];
-  let cursor = seg.endMin;
-  while (cursor > seg.startMin + 1) {
-    const prev = Math.max(cursor - shiftMin, seg.startMin);
-    slots.unshift(newSlot(fmtTime(prev), fmtTime(cursor), seg.seats));
-    cursor = prev;
-  }
-  return slots;
-}
+  const start = parseTimeMinutes(slot.start_time);
+  if (start === null) return [slot];
 
-function slotsFromSegmentForward(
-  seg: { startMin: number; endMin: number; seats: number },
-  shiftMin: number,
-): MissionSlot[] {
-  const slots: MissionSlot[] = [];
-  let cursor = seg.startMin;
-  while (cursor < seg.endMin - 1) {
-    const next = Math.min(cursor + shiftMin, seg.endMin);
-    slots.push(newSlot(fmtTime(cursor), fmtTime(next), seg.seats));
-    cursor = next;
+  const dur = slotDurationMinutes(slot.start_time, slot.end_time);
+  if (dur <= 0) return [slot];
+  if (dur >= 1440 || start + dur > 1440) {
+    return [{ ...slot, seat_count: seatsForRange(start, start + dur) }];
   }
-  return slots;
+
+  const end = start + dur;
+  const cuts = boundaries.filter((b) => b > start && b < end).sort((a, b) => a - b);
+  if (!cuts.length) {
+    return [{ ...slot, seat_count: seatsForRange(start, end) }];
+  }
+
+  const out: MissionSlot[] = [];
+  let segStart = start;
+  for (const cut of cuts) {
+    out.push(
+      newSlot(
+        fmtTime(segStart),
+        fmtTime(cut),
+        seatsForRange(segStart, cut),
+      ),
+    );
+    segStart = cut;
+  }
+  out.push(
+    newSlot(
+      fmtTime(segStart),
+      slot.end_time,
+      seatsForRange(segStart, end),
+    ),
+  );
+  return out;
 }
 
 /**
  * מנרמל משמרות ש״ג רכב אחורי:
- * - פוצל משמרת שחוצה 18:00 עם 1 מאייש → יום + תגבור לילה
- * - משדרג משמרת לילה עם פחות מ־2 מאיישים
+ * - 06:00–18:00 בדיוק 1 שומר · כל שאר השעות בדיוק 2
+ * - פיצול במעברי 06:00 / 18:00
  */
 export function normalizeRearVehicleSlots(
   slots: MissionSlot[],
+  dayStart = "06:00",
   dayEnd = "18:00",
   daySeats = 1,
   nightSeats = 2,
 ): MissionSlot[] {
+  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-  const out: MissionSlot[] = [];
+  const boundaries = [dayStartMin, dayEndMin];
+  const seatsForRange = (startMin: number, endMin: number) =>
+    startMin >= dayStartMin && endMin <= dayEndMin ? daySeats : nightSeats;
 
-  for (const slot of slots) {
-    const start = parseTimeMinutes(slot.start_time);
-    if (start === null) {
-      out.push(slot);
-      continue;
-    }
-
-    const dur = slotDurationMinutes(slot.start_time, slot.end_time);
-    const crossesMidnight = dur > 0 && start + dur > 1440;
-
-    // משמרת שעוברת חצות — לא נוגעים (לילה מלא)
-    if (crossesMidnight || dur >= 1440) {
-      out.push({
-        ...slot,
-        seat_count: Math.max(slot.seat_count, nightSeats),
-      });
-      continue;
-    }
-
-    const end = start + dur;
-
-    // חוצה 18:00 עם מעט מדי מאיישים → פיצול + תגבור
-    if (start < dayEndMin && end > dayEndMin && slot.seat_count < nightSeats) {
-      if (start < dayEndMin - 1) {
-        out.push(newSlot(slot.start_time, dayEnd, daySeats));
-      }
-      out.push(
-        newSlot(dayEnd, slot.end_time, nightSeats - slot.seat_count),
-      );
-      continue;
-    }
-
-    // לילה (מ־18:00) עם פחות מ־2
-    if (start >= dayEndMin && slot.seat_count < nightSeats) {
-      out.push(newSlot(slot.start_time, slot.end_time, nightSeats));
-      continue;
-    }
-
-    // יום (עד 18:00) — מקסימום 1
-    if (end <= dayEndMin + 1 && slot.seat_count > daySeats) {
-      out.push(newSlot(slot.start_time, slot.end_time, daySeats));
-      continue;
-    }
-
-    out.push(slot);
-  }
-
-  return out;
+  return slots.flatMap((slot) =>
+    splitSlotAtWallBoundaries(slot, boundaries, seatsForRange),
+  );
 }
 
+const REAR_VEHICLE_DAY_START = "06:00";
 const REAR_VEHICLE_DAY_END = "18:00";
 
-/** האם משמרות ש״ג אחורי תקינות (ללא חור ב־18:00) */
-export function rearVehicleSlotsValid(slots: MissionSlot[]): boolean {
-  const dayEndMin = parseTimeMinutes(REAR_VEHICLE_DAY_END) ?? 18 * 60;
+function slotInsideWallRange(
+  startMin: number,
+  endMin: number,
+  rangeStartMin: number,
+  rangeEndMin: number,
+): boolean {
+  if (endMin <= startMin) return false;
+  if (endMin > 1440) return false;
+  return startMin >= rangeStartMin && endMin <= rangeEndMin;
+}
+
+function slotCrossesWallBoundary(
+  startMin: number,
+  endMin: number,
+  boundaryMin: number,
+): boolean {
+  if (endMin <= startMin || endMin > 1440) return false;
+  return startMin < boundaryMin && endMin > boundaryMin;
+}
+
+/** האם משמרות ש״ג אחורי תקינות — 1 ב־06–18, 2 בכל שאר השעות, ללא חציית גבולות */
+export function rearVehicleSlotsValid(
+  slots: MissionSlot[],
+  dayStart = REAR_VEHICLE_DAY_START,
+  dayEnd = REAR_VEHICLE_DAY_END,
+): boolean {
+  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
+  const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
 
   for (const slot of slots) {
     const start = parseTimeMinutes(slot.start_time);
-    if (start === null) continue;
+    if (start === null) return false;
     const dur = slotDurationMinutes(slot.start_time, slot.end_time);
-    if (dur >= 1440 || start + dur > 1440) continue;
+    if (dur <= 0) return false;
+
+    if (dur >= 1440 || start + dur > 1440) {
+      if (slot.seat_count !== 2) return false;
+      continue;
+    }
 
     const end = start + dur;
-    if (start < dayEndMin && end > dayEndMin && slot.seat_count < 2) return false;
-    if (start >= dayEndMin && slot.seat_count < 2) return false;
+    if (
+      slotCrossesWallBoundary(start, end, dayStartMin) ||
+      slotCrossesWallBoundary(start, end, dayEndMin)
+    ) {
+      return false;
+    }
+
+    const inDay = slotInsideWallRange(start, end, dayStartMin, dayEndMin);
+    if (inDay) {
+      if (slot.seat_count !== 1) return false;
+    } else if (slot.seat_count !== 2) {
+      return false;
+    }
   }
 
   return true;
 }
 
-function slotsFromAbsoluteSegments(
-  segments: Array<{ startMin: number; endMin: number; seats: number }>,
-  shiftHours: number,
-): MissionSlot[] {
-  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
-  const slots: MissionSlot[] = [];
+const FOOT_PATROL_DAY_START = "06:00";
+const FOOT_PATROL_DAY_END = "19:00";
 
-  for (const seg of segments) {
-    const chunkSlots =
-      seg.seats === 1
-        ? slotsFromSegmentBackward(seg, shiftMin)
-        : slotsFromSegmentForward(seg, shiftMin);
-    slots.push(...chunkSlots);
-  }
-
-  return slots;
-}
-
-/** ש״ג רכב אחורי — 1 ביום (06–18), 2 מ־18:00, פיצול + תגבור ב־18:00 */
-function rearVehicleSlots(
-  dayStart: string,
-  dayEnd: string,
-  shift: number,
-  board: string,
-  cycleMin: number,
-): MissionSlot[] {
-  const boardMin = parseTimeMinutes(board) ?? 20 * 60;
-  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-  const segments = dayNightSegmentsInCycle(boardMin, cycleMin, dayStartMin, dayEndMin, 1, 2);
-  const primary = slotsFromAbsoluteSegments(segments, shift);
-  return normalizeRearVehicleSlots(primary, dayEnd, 1, 2);
-}
-
-/** ש״ג רגלי — 1 ביום בלבד, רק בתוך מחזור יום השמירות */
-function footPatrolSlots(
-  dayStart: string,
-  dayEnd: string,
-  shift: number,
-  board: string,
-  cycleMin: number,
-): MissionSlot[] {
-  const boardMin = parseTimeMinutes(board) ?? 20 * 60;
+/** האם משמרות ש״ג רגלי תקינות — 1 ב־06–19, 0 בכל שאר השעות, ללא חציית גבולות */
+export function footPatrolSlotsValid(
+  slots: MissionSlot[],
+  dayStart = FOOT_PATROL_DAY_START,
+  dayEnd = FOOT_PATROL_DAY_END,
+): boolean {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
-  const segments = dayNightSegmentsInCycle(boardMin, cycleMin, dayStartMin, dayEndMin, 1, 0);
-  return slotsFromAbsoluteSegments(segments, shift);
+
+  for (const slot of slots) {
+    const start = parseTimeMinutes(slot.start_time);
+    if (start === null) return false;
+    const dur = slotDurationMinutes(slot.start_time, slot.end_time);
+    if (dur <= 0) return false;
+    if (dur >= 1440 || start + dur > 1440) {
+      if (slot.seat_count !== 0) return false;
+      continue;
+    }
+
+    const end = start + dur;
+    if (
+      slotCrossesWallBoundary(start, end, dayStartMin) ||
+      slotCrossesWallBoundary(start, end, dayEndMin)
+    ) {
+      return false;
+    }
+
+    const inFootDay = slotInsideWallRange(start, end, dayStartMin, dayEndMin);
+    if (inFootDay) {
+      if (slot.seat_count !== 1) return false;
+    } else if (slot.seat_count !== 0) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export type BuildGuardDayOptions = {
@@ -353,7 +498,14 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "18:00"] as const);
   const footDay =
     options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "19:00"] as const);
-  const tour = { fullTour: true, boardStart: board };
+
+  /** רשת משמרות אחת — כל העמדות מחליפות ביחד (כולל סנכרון קצר בתחילת היום) */
+  const windows = buildUnifiedGuardShiftWindows(board, cycleMin, shift, day[1], [
+    day[0],
+    footDay[1],
+  ]);
+  const fixedSeats = (seats: number) => rotatingGuardSlots(windows, () => seats);
+
   const carmelSlot = carmelSlotFromMission(
     options?.missionStartsAt,
     options?.missionEndsAt,
@@ -372,28 +524,20 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     }),
     guardPosition(
       "ש״ג רכב אחורי",
-      rearVehicleSlots(day[0], day[1], shift, board, cycleMin),
+      rearVehicleSlotsFromWindows(windows, day[0], day[1]),
     ),
-    guardPosition("ש״ג רכב קדמי", buildRotatedSlots("00:00", "00:00", 2, shift, tour)),
-    guardPosition("פטל", buildRotatedSlots("00:00", "00:00", 1, shift, tour)),
-    guardPosition("תצפיתן", buildRotatedSlots("00:00", "00:00", 1, shift, tour)),
+    guardPosition("ש״ג רכב קדמי", fixedSeats(2)),
+    guardPosition("פטל", fixedSeats(1)),
+    guardPosition("תצפיתן", fixedSeats(1)),
     guardPosition(
       "ש״ג רגלי",
-      footPatrolSlots(footDay[0], footDay[1], shift, board, cycleMin),
+      footPatrolSlotsFromWindows(windows, footDay[0], footDay[1]),
     ),
-    guardPosition("ימ״ח", buildRotatedSlots("00:00", "00:00", 1, shift, tour)),
-    guardPosition("נשקייה", buildRotatedSlots("00:00", "00:00", 1, shift, tour)),
-    guardPosition("בונקר", buildRotatedSlots("00:00", "00:00", 1, shift, tour)),
-    guardPosition(
-      "כוח עתודה",
-      buildRotatedSlots("00:00", "00:00", 3, shift, tour),
-      "duty",
-    ),
-    guardPosition(
-      "קצין תורן",
-      buildRotatedSlots("00:00", "00:00", 1, shift, tour),
-      "officer_duty",
-    ),
+    guardPosition("ימ״ח", fixedSeats(1)),
+    guardPosition("נשקייה", fixedSeats(1)),
+    guardPosition("בונקר", fixedSeats(1)),
+    guardPosition("כוח עתודה", fixedSeats(3), "duty"),
+    guardPosition("קצין תורן", officerDutySlots(board, cycleMin), "officer_duty"),
   ];
 }
 
@@ -409,7 +553,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "standby_carmel_b":
       return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (רס״ר) ולמטבח.";
     case "officer_duty":
-      return "קצין תורן זמין בכל רגע במהלך היום — משמרות מסתובבות בין צוערים שמוגדרים כקצין תורן.";
+      return "קצין תורן אחד — שתי משמרות שמחלקות את יום השמירות לשניים (לא רשת משמרות כמו שאר העמדות).";
     case "duty":
       if (pos.name.includes("עתודה")) {
         return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
@@ -419,16 +563,16 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       break;
   }
   if (pos.name.includes("רכב אחורי")) {
-    return "1 צוער 06:00–18:00, 2 מ־18:00. משמרת שחוצה 18:00 מתפצלת; נוסף תגבור 18:00–… (מאייש נוסף).";
+    return "בדיוק 1 שומר 06:00–18:00, בדיוק 2 בכל שאר השעות — אותם זמני חילוף כמו שאר העמדות (כולל משמרות קצרות לסנכרון).";
   }
   if (pos.name.includes("רכב קדמי")) {
-    return "2 שומרים בכל משמרת — לאורך כל יום המשימה.";
+    return "2 שומרים בכל משמרת — חילוף מסונכרן עם כל העמדות.";
   }
   if (pos.name.includes("רגלי")) {
-    return "שומר אחד בין 06:00–19:00 — רק בחלון שחופף ליום השמירות (לא לפני תחילתו).";
+    return "בדיוק 1 שומר 06:00–19:00, 0 בכל שאר השעות — אותם זמני חילוף כמו שאר העמדות (משמרות לילה עם 0 מאיישים לסנכרון).";
   }
   if (["פטל", "תצפיתן", "ימ״ח", "נשקייה", "בונקר"].some((n) => pos.name.includes(n))) {
-    return "שומר אחד בכל משמרת — לאורך כל יום המשימה (משמרות מסתובבות).";
+    return "משמרות מסתובבות — אותם זמני חילוף בכל העמדות.";
   }
   return null;
 }

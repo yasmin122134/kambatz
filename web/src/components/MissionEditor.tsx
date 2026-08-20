@@ -769,8 +769,14 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               </p>
             )}
 
-            {pos.slots.map((slot) => (
-              <div key={slot.id} className="rowf items-end">
+            {pos.slots.map((slot) => {
+              const allowZeroSeats =
+                missionType === "guards" && pos.name.includes("רגלי");
+              return (
+              <div
+                key={slot.id}
+                className={`rowf items-end${slot.seat_count === 0 ? " opacity-60" : ""}`}
+              >
                 <div className="field">
                   <label>משעה</label>
                   <input
@@ -795,12 +801,15 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   <label>מאיישים</label>
                   <input
                     type="number"
-                    min={1}
+                    min={allowZeroSeats ? 0 : 1}
                     max={missionType === "kitchen" ? 60 : 10}
                     value={slot.seat_count}
                     onChange={(e) =>
                       updateSlot(pos.id, slot.id, {
-                        seat_count: Math.max(1, +e.target.value || 1),
+                        seat_count: Math.max(
+                          allowZeroSeats ? 0 : 1,
+                          +e.target.value || (allowZeroSeats ? 0 : 1),
+                        ),
                       })
                     }
                   />
@@ -815,7 +824,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   </button>
                 )}
               </div>
-            ))}
+              );
+            })}
 
             <button type="button" className="btn-sm" onClick={() => addSlot(pos.id)}>
               + משמרת / חלון שעות
