@@ -518,7 +518,16 @@ export async function autoAssignDate(
     throw new Error("אין ימי משימה בתאריך זה");
   }
 
-  missions.sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const typeOrder: Record<string, number> = {
+    kitchen: 0,
+    base_work: 1,
+    guards: 2,
+  };
+  missions.sort(
+    (a, b) =>
+      (typeOrder[a.mission_type] ?? 9) - (typeOrder[b.mission_type] ?? 9) ||
+      a.starts_at.localeCompare(b.starts_at),
+  );
 
   const results: AutoAssignResult[] = [];
   const warnings: string[] = [];

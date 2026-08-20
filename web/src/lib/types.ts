@@ -114,6 +114,12 @@ export interface MissionSchedulingRules {
   board_start: string;
   /** אורך משמרת מסתובבת (שעות) */
   shift_hours: number;
+  /** מרווח מינימלי (דקות) בין עב״ס לשמירה לאותו צוער */
+  duty_guard_gap_minutes?: number;
+  /** מזהה קבוצה — שמירות+עב״ס באותו יום */
+  guard_day_bundle_id?: string;
+  /** משימה מקושרת (שמירות ↔ עב״ס) */
+  linked_mission_id?: string;
   kitchen?: KitchenSchedulingRules;
   base_work?: BaseWorkSchedulingRules;
 }
@@ -134,6 +140,7 @@ export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
   guard_ratio: 2,
   board_start: "20:00",
   shift_hours: 4,
+  duty_guard_gap_minutes: 30,
   kitchen: DEFAULT_KITCHEN_SCHEDULING_RULES,
   base_work: DEFAULT_BASE_WORK_SCHEDULING_RULES,
 };

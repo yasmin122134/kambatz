@@ -34,6 +34,10 @@ export type FlatSlot = {
   sortKey: number;
   durationMinutes: number;
   cyclicStart: number;
+  /** דקות משעות 00:00 (שעון קיר) */
+  wallStartMin: number;
+  /** 0 = תאריך mission_date, 1 = למחרת (משמרת לפנות בוקר בסוף מחזור) */
+  calendarDayOffset: number;
   /** אינדקס משמרת מטבח (0-based) */
   kitchenShiftIndex?: number;
   /** אינדקס חלון עב״ס (0-based) */
@@ -123,6 +127,16 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
     const v = +src.shift_hours;
     if (!Number.isNaN(v) && v >= 1 && v <= 12) out.shift_hours = v;
   }
+  if (src.duty_guard_gap_minutes != null) {
+    const v = +src.duty_guard_gap_minutes;
+    if (!Number.isNaN(v) && v >= 0 && v <= 180) out.duty_guard_gap_minutes = v;
+  }
+  if (typeof src.guard_day_bundle_id === "string" && src.guard_day_bundle_id) {
+    out.guard_day_bundle_id = src.guard_day_bundle_id;
+  }
+  if (typeof src.linked_mission_id === "string" && src.linked_mission_id) {
+    out.linked_mission_id = src.linked_mission_id;
+  }
   const k: Partial<KitchenSchedulingRules> = src.kitchen ?? {};
   out.kitchen = {
     points_per_shift: k.points_per_shift !== false,
@@ -201,6 +215,9 @@ export function flattenMissionSlots(
         sortKey: startMin,
         durationMinutes: dur,
         cyclicStart: cyclicPos(startMin, t0),
+        wallStartMin: startMin,
+        calendarDayOffset:
+          mission.mission_type === "guards" && startMin < t0 ? 1 : 0,
         kitchenShiftIndex: isKitchenSlot ? kitchenIdx++ : undefined,
         baseWorkShiftIndex: isBaseWorkSlot ? baseWorkIdx++ : undefined,
       });

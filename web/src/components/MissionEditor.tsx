@@ -414,7 +414,21 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         <h4 className="font-display text-base">כללי שיבוץ ליום זה</h4>
         <p className="hint text-sm">
           משמשים בשיבוץ החכם — מנוחה, כלל 4-8, אורך משמרת. כרמל א/ב בטבלת הצדק.
+          {schedulingRules.guard_day_bundle_id && (
+            <> · יום מאוחד שמירות+עב״ס — השיבוץ מונע חפיפות (מלבד כרמל ב׳).</>
+          )}
         </p>
+        {schedulingRules.linked_mission_id && (
+          <p className="hint text-sm">
+            משימה מקושרת:{" "}
+            <Link
+              href={`/admin/missions/${schedulingRules.linked_mission_id}`}
+              className="underline"
+            >
+              {missionType === "guards" ? "עריכת עב״ס" : "עריכת שמירות"}
+            </Link>
+          </p>
+        )}
         <div className="rowf">
           <div className="field">
             <label>מנוחה מינימלית (שעות)</label>
@@ -474,6 +488,24 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               }
             />
           </div>
+          {(missionType === "guards" || missionType === "base_work") && (
+            <div className="field">
+              <label>מרווח עב״ס↔שמירה (דק׳)</label>
+              <input
+                type="number"
+                min={0}
+                max={120}
+                step={5}
+                value={schedulingRules.duty_guard_gap_minutes ?? 30}
+                onChange={(e) =>
+                  setSchedulingRules((r) => ({
+                    ...r,
+                    duty_guard_gap_minutes: Math.max(0, +e.target.value || 0),
+                  }))
+                }
+              />
+            </div>
+          )}
         </div>
         {missionType === "guards" && (
           <>

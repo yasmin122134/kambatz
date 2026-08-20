@@ -24,6 +24,8 @@ import type {
 
 type BusyBlock = {
   cyclicStart: number;
+  wallStartMin: number;
+  calendarDayOffset: number;
   durationMinutes: number;
   eatsRest: boolean;
   positionKind: MissionPositionKind;
@@ -55,6 +57,44 @@ function cyclicOverlap(p1: number, d1: number, p2: number, d2: number): boolean 
 
 function cyclicGap(p1: number, d1: number, p2: number): number {
   return ((p2 - (p1 + d1)) % 1440 + 1440) % 1440;
+}
+
+function wallSegments(start: number, dur: number): [number, number][] {
+  if (dur >= 1440) return [[0, 1440]];
+  const end = start + dur;
+  if (end <= 1440) return [[start, end]];
+  return [
+    [start, 1440],
+    [0, end - 1440],
+  ];
+}
+
+function segmentsConflictWithGap(
+  segsA: [number, number][],
+  segsB: [number, number][],
+  gapMin: number,
+): boolean {
+  for (const [a0, a1] of segsA) {
+    for (const [b0, b1] of segsB) {
+      const aStart = a0 - gapMin;
+      const aEnd = a1 + gapMin;
+      if (aStart < b1 && b0 < aEnd) return true;
+    }
+  }
+  return false;
+}
+
+function needsDutyGuardGap(
+  kindA: MissionPositionKind,
+  typeA: MissionType,
+  kindB: MissionPositionKind,
+  typeB: MissionType,
+): boolean {
+  const aBase = typeA === "base_work" || (typeA === "guards" && kindA === "duty");
+  const bBase = typeB === "base_work" || (typeB === "guards" && kindB === "duty");
+  const aGuard = typeA === "guards" && isGuardKind(kindA);
+  const bGuard = typeB === "guards" && isGuardKind(kindB);
+  return (aBase && bGuard) || (aGuard && bBase);
 }
 
 function blockedByIssue(
@@ -136,8 +176,11 @@ function overlapsSlot(
   personName: string,
   slot: FlatSlot,
   tracker: ScheduleTracker,
+  scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
 ): boolean {
+  const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (
@@ -150,6 +193,32 @@ function overlapsSlot(
     ) {
       continue;
     }
+
+    const crossType =
+      slot.missionType !== b.missionType &&
+      slot.calendarDayOffset === b.calendarDayOffset;
+    const extraGap = needsDutyGuardGap(
+      slot.positionKind,
+      slot.missionType,
+      b.positionKind,
+      b.missionType,
+    )
+      ? gapMin
+      : 0;
+
+    if (crossType) {
+      if (
+        segmentsConflictWithGap(
+          wallSegments(slot.wallStartMin, slot.durationMinutes),
+          wallSegments(b.wallStartMin, b.durationMinutes),
+          extraGap,
+        )
+      ) {
+        return true;
+      }
+      continue;
+    }
+
     if (
       cyclicOverlap(b.cyclicStart, b.durationMinutes, slot.cyclicStart, slot.durationMinutes)
     ) {
@@ -252,7 +321,7 @@ export function fitsPerson(
 ): boolean {
   if (!canAssignKind(person, slot.positionKind)) return false;
   if (blockedByIssue(person.name, slot, issues)) return false;
-  if (overlapsSlot(person.name, slot, tracker, ignoreSlotId)) return false;
+  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
   if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
     return false;
   }
@@ -274,6 +343,8 @@ export function placePerson(
 ) {
   const block: BusyBlock = {
     cyclicStart: slot.cyclicStart,
+    wallStartMin: slot.wallStartMin,
+    calendarDayOffset: slot.calendarDayOffset,
     durationMinutes: slot.durationMinutes,
     eatsRest: eatsRest(slot.positionKind),
     positionKind: slot.positionKind,
