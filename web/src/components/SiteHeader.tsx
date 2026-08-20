@@ -5,11 +5,11 @@ import { usePathname } from "next/navigation";
 
 const NAV = [
   { href: "/", label: "דף הבית" },
-  { href: "/schedule", label: "לוח שמירות" },
-  { href: "/report", label: "דיווח חסימה" },
-  { href: "/profile", label: "הפרופיל שלי" },
+  { href: "/board", label: "רשימה מלאה" },
+  { href: "/fairness", label: "טבלת צדק" },
+  { href: "/report", label: "אילוצים" },
+  { href: "/profile", label: "פרופיל" },
   { href: "/admin", label: "ניהול" },
-  { href: "/scheduler.html", label: "מחולל שיבוץ" },
 ] as const;
 
 function isActive(pathname: string, href: string) {

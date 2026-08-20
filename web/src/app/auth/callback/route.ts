@@ -7,14 +7,14 @@ import { getPersonByEmail } from "@/lib/session";
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/profile";
+  const next = searchParams.get("next") ?? "/";
 
   if (code) {
     const supabase = await createClient();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
       const safeNext =
-        next.startsWith("/") && !next.startsWith("//") ? next : "/profile";
+        next.startsWith("/") && !next.startsWith("//") ? next : "/";
 
       const {
         data: { user },

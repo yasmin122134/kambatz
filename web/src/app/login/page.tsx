@@ -30,7 +30,7 @@ export default function LoginPage() {
     setError("");
     const supabase = createClient();
     const next =
-      new URLSearchParams(window.location.search).get("next") || "/profile";
+      new URLSearchParams(window.location.search).get("next") || "/";
     const { data, error: authError } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {

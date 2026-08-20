@@ -26,11 +26,19 @@ export function AppShell({ children, title }: Props) {
   }, [pathname]);
 
   const links = [
+    { href: "/", label: "דף הבית" },
+    { href: "/board", label: "רשימה מלאה" },
     { href: "/fairness", label: "טבלת צדק" },
     { href: "/profile", label: "פרופיל" },
     { href: "/report", label: "אילוצים" },
     ...(isAdmin ? [{ href: "/admin", label: "דף מנהל" }] : []),
   ];
+
+  function isActive(href: string) {
+    if (href === "/") return pathname === "/";
+    if (href === "/board") return pathname === "/board";
+    return pathname.startsWith(href);
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -47,9 +55,14 @@ export function AppShell({ children, title }: Props) {
             <span />
             <span />
           </button>
-          <Link href="/" className="font-display text-xl no-underline text-inherit">
-            {title || "לוח שמירות"}
-          </Link>
+          <div className="min-w-0">
+            <Link href="/" className="font-display text-xl no-underline text-inherit block leading-tight">
+              לוח שמירות
+            </Link>
+            {title && title !== "לוח שמירות" && (
+              <p className="text-xs text-olive-light/90 mt-0.5 truncate">{title}</p>
+            )}
+          </div>
         </div>
         {open && (
           <>
@@ -63,7 +76,8 @@ export function AppShell({ children, title }: Props) {
                 <Link
                   key={href}
                   href={href}
-                  className={pathname.startsWith(href) ? "on" : ""}
+                  className={isActive(href) ? "on" : ""}
+                  aria-current={isActive(href) ? "page" : undefined}
                 >
                   {label}
                 </Link>
