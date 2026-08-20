@@ -7,9 +7,12 @@ import { AppShell } from "@/components/AppShell";
 import {
   ISSUE_STATUS_LABELS,
   PERSONAL_FLAG_LABELS,
+  FAIRNESS_BUCKET_LABELS,
+  MISSION_TYPE_LABELS,
   type Person,
   type PersonalFlags,
   type ProfileRequest,
+  type PersonFairnessStats,
 } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -58,6 +61,7 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [fairness, setFairness] = useState<PersonFairnessStats | null>(null);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -95,6 +99,12 @@ export default function ProfilePage() {
         ? flagsFromRequest(data.pending_request)
         : approved,
     );
+
+    fetch("/api/me/fairness")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setFairness)
+      .catch(() => setFairness(null));
+
     setLoading(false);
   }, [router]);
 
@@ -183,6 +193,54 @@ export default function ProfilePage() {
             <p className="hint mt-1">חדר: {person.room}</p>
           )}
         </div>
+
+        {fairness && (
+          <div className="rounded-lg border border-line2 bg-bg/50 p-4 space-y-3">
+            <div className="bar spread flex-wrap gap-2">
+              <p className="font-display text-sm">נקודות שמירה (טבלת צדק)</p>
+              <Link href="/fairness" className="text-xs text-brick hover:underline">
+                טבלת צדק
+              </Link>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+              <div>
+                <p className="hint text-xs">תקופה נוכחית</p>
+                <p className="font-display text-lg">{fairness.periodPoints}</p>
+              </div>
+              <div>
+                <p className="hint text-xs">ניקוד קודם</p>
+                <p className="font-display text-lg">{fairness.priorScore}</p>
+              </div>
+              <div>
+                <p className="hint text-xs">סה״כ</p>
+                <p className="font-display text-lg text-olive">{fairness.totalPoints}</p>
+              </div>
+            </div>
+            {fairness.history.length > 0 ? (
+              <ul className="text-sm space-y-2 max-h-48 overflow-y-auto">
+                {fairness.history.map((h) => (
+                  <li
+                    key={h.id}
+                    className="flex flex-wrap gap-x-2 gap-y-1 border-b border-line2 pb-1.5"
+                  >
+                    <span className="mono text-xs">{h.missionDate}</span>
+                    <span className="mono text-xs">{h.timeLabel}</span>
+                    <span>{h.positionName}</span>
+                    <span className="text-ink2 text-xs">
+                      {MISSION_TYPE_LABELS[h.missionType]} ·{" "}
+                      {FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "")}
+                    </span>
+                    <span className="mr-auto font-semibold text-olive">
+                      +{h.points}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="hint text-sm">אין משימות מפורסמות עדיין.</p>
+            )}
+          </div>
+        )}
 
         <div className="rounded-lg border border-line2 bg-bg/50 p-4 space-y-2">
           <p className="font-display text-sm">סימונים מאושרים (בשיבוץ)</p>

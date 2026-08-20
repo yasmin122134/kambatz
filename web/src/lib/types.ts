@@ -179,3 +179,10 @@ export type PersonFairnessStats = {
   totalPoints: number;
   history: PersonMissionHistoryItem[];
 };
+
+export const SCHEDULER_FAIRNESS_EXPLANATION = [
+  "המחולל לא מחלק לפי שעות גולמיות — אלא לפי נקודות צדק.",
+  "לכל משמרת: שעות × משקל מטבלת הצדק (למשל שמירה לבד = 1.5 נק׳/שעה).",
+  "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם מהימים הקודמים).",
+  "שמירה בזוג שווה פחות משמירה לבד; עב״ס ומטבח שווים מעט נקודות.",
+];

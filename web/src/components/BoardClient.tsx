@@ -10,6 +10,9 @@ import {
   type Issue,
   type MissionDay,
   type ProfileRequest,
+  type FairnessRuleRequest,
+  FAIRNESS_BUCKET_LABELS,
+  DEFAULT_FAIRNESS_RULES,
 } from "@/lib/types";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 
@@ -34,6 +37,8 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   const [showConstraints, setShowConstraints] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [profileRequests, setProfileRequests] = useState<ProfileRequest[]>([]);
+  const [fairnessRequests, setFairnessRequests] = useState<FairnessRuleRequest[]>([]);
+  const [publishedRules, setPublishedRules] = useState(DEFAULT_FAIRNESS_RULES);
   const [swapTarget, setSwapTarget] = useState<{
     missionId: string;
     slotId: string;
@@ -72,14 +77,20 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;
-    const [i, p] = await Promise.all([
+    const [i, p, f, rulesRes] = await Promise.all([
       fetch("/api/issues?status=pending").then((r) => (r.ok ? r.json() : [])),
       fetch("/api/profile-requests?status=pending").then((r) =>
         r.ok ? r.json() : [],
       ),
+      fetch("/api/fairness/requests?status=pending").then((r) =>
+        r.ok ? r.json() : [],
+      ),
+      fetch("/api/fairness").then((r) => (r.ok ? r.json() : null)),
     ]);
     setIssues(i);
     setProfileRequests(p);
+    setFairnessRequests(f);
+    if (rulesRes?.rules) setPublishedRules(rulesRes.rules);
   }, [isAdminUser]);
 
   useEffect(() => {
@@ -170,6 +181,25 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
     loadAdminData();
   }
 
+  async function setFairnessStatus(id: string, status: "approved" | "rejected") {
+    await fetch("/api/fairness/requests", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    loadAdminData();
+  }
+
+  function formatFairnessDiff(req: FairnessRuleRequest) {
+    return (Object.keys(FAIRNESS_BUCKET_LABELS) as (keyof typeof FAIRNESS_BUCKET_LABELS)[])
+      .map((k) => {
+        if (req.proposed_rules[k] === publishedRules[k]) return null;
+        return `${FAIRNESS_BUCKET_LABELS[k]}: ${publishedRules[k]}→${req.proposed_rules[k]}`;
+      })
+      .filter(Boolean)
+      .join(" · ");
+  }
+
   function formatDate(d: string) {
     return new Date(d + "T12:00:00").toLocaleDateString("he-IL", {
       weekday: "long",
@@ -207,8 +237,8 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
                 onClick={() => setShowConstraints((v) => !v)}
               >
                 אילוצים
-                {(issues.length + profileRequests.length) > 0 && (
-                  <span className="mr-1">({issues.length + profileRequests.length})</span>
+                {(issues.length + profileRequests.length + fairnessRequests.length) > 0 && (
+                  <span className="mr-1">({issues.length + profileRequests.length + fairnessRequests.length})</span>
                 )}
               </button>
               <Link href="/admin/missions" className="btn-sm">
@@ -225,8 +255,11 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
         <ConstraintsPanel
           issues={issues}
           profileRequests={profileRequests}
+          fairnessRequests={fairnessRequests}
           onIssue={setIssueStatus}
           onProfile={setProfileStatus}
+          onFairness={setFairnessStatus}
+          formatFairnessDiff={formatFairnessDiff}
         />
       )}
 
@@ -388,19 +421,30 @@ function PanelSection({
 function ConstraintsPanel({
   issues,
   profileRequests,
+  fairnessRequests,
   onIssue,
   onProfile,
+  onFairness,
+  formatFairnessDiff,
 }: {
   issues: Issue[];
   profileRequests: ProfileRequest[];
+  fairnessRequests: FairnessRuleRequest[];
   onIssue: (id: string, s: "approved" | "rejected") => void;
   onProfile: (id: string, s: "approved" | "rejected") => void;
+  onFairness: (id: string, s: "approved" | "rejected") => void;
+  formatFairnessDiff: (req: FairnessRuleRequest) => string;
 }) {
+  const empty =
+    issues.length === 0 &&
+    profileRequests.length === 0 &&
+    fairnessRequests.length === 0;
+
   return (
     <section className="card mb-6">
-      <h3 className="font-display text-base mb-3">אילוצים ממתינים</h3>
-      {issues.length === 0 && profileRequests.length === 0 ? (
-        <p className="hint">אין אילוצים ממתינים.</p>
+      <h3 className="font-display text-base mb-3">אילוצים והצעות ממתינים</h3>
+      {empty ? (
+        <p className="hint">אין פריטים ממתינים.</p>
       ) : (
         <ul className="space-y-3">
           {issues.map((iss) => (
@@ -440,6 +484,24 @@ function ConstraintsPanel({
                   אשר
                 </button>
                 <button type="button" className="btn-sm" onClick={() => onProfile(req.id, "rejected")}>
+                  דחה
+                </button>
+              </div>
+            </li>
+          ))}
+          {fairnessRequests.map((req) => (
+            <li key={req.id} className="issue-row">
+              <div>
+                <b>{req.person_name}</b>
+                <span className="text-ink2 mr-2"> — הצעת שינוי לטבלת צדק</span>
+                <p className="text-sm text-ink2 mt-1">{formatFairnessDiff(req) || "שינוי משקלים"}</p>
+                {req.note && <p className="text-sm text-ink3 mt-1">{req.note}</p>}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button type="button" className="btn-pri btn-sm" onClick={() => onFairness(req.id, "approved")}>
+                  אשר
+                </button>
+                <button type="button" className="btn-sm" onClick={() => onFairness(req.id, "rejected")}>
                   דחה
                 </button>
               </div>

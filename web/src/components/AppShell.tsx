@@ -26,6 +26,7 @@ export function AppShell({ children, title }: Props) {
   }, [pathname]);
 
   const links = [
+    { href: "/fairness", label: "טבלת צדק" },
     { href: "/profile", label: "פרופיל" },
     { href: "/report", label: "אילוצים" },
     ...(isAdmin ? [{ href: "/admin", label: "דף מנהל" }] : []),
