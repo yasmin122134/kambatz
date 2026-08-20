@@ -1,7 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
 import {
-  defaultGuardDayPositions,
   flattenMissionSlots,
   isStandbyKind,
   normalizeSchedulingRules,
@@ -10,18 +9,18 @@ import {
 } from "@/lib/mission-utils";
 import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
 import {
-  PEOPLE_BASE_SELECT,
   PEOPLE_FLAG_SELECT,
   probePeopleFlags,
+  probePeopleSquad,
 } from "@/lib/people";
 import {
+  assignKitchenShift,
   assignStandbyRoom,
   buildTrackerFromMissions,
   fitsPerson,
   pickBestCandidate,
   placePerson,
   slotRank,
-  workScore,
 } from "@/lib/scheduling-engine";
 import type { Issue, MissionDay, Person } from "@/lib/types";
 
@@ -34,10 +33,14 @@ export type AutoAssignResult = {
 
 async function loadPeople(): Promise<Person[]> {
   const supabase = await createClient();
-  const withFlags = await probePeopleFlags(supabase);
-  const select = withFlags
-    ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`
-    : PEOPLE_BASE_SELECT;
+  const [withFlags, withSquad] = await Promise.all([
+    probePeopleFlags(supabase),
+    probePeopleSquad(supabase),
+  ]);
+  const cols = ["id", "name", "email", "room", "gender", "active", "created_at"];
+  if (withSquad) cols.splice(5, 0, "squad");
+  if (withFlags) cols.push(...PEOPLE_FLAG_SELECT.split(","));
+  const select = cols.join(",");
 
   const { data, error } = await supabase
     .from("people")
@@ -61,6 +64,113 @@ async function loadApprovedIssues(): Promise<Issue[]> {
     throw new Error(error.message);
   }
   return (data || []) as Issue[];
+}
+
+function autoAssignKitchenMission(
+  mission: MissionDay,
+  people: Person[],
+  issues: Issue[],
+  rules: Awaited<ReturnType<typeof getFairnessRules>>,
+  tracker: ReturnType<typeof buildTrackerFromMissions>,
+  scheduling: ReturnType<typeof normalizeSchedulingRules>,
+  meanPrior: number,
+  keepExisting: boolean,
+): { assignments: Record<string, string[]>; filled: number; skipped: number; warnings: string[] } {
+  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+  const warnings: string[] = [];
+  let filled = 0;
+  let skipped = 0;
+
+  const slots = flattenMissionSlots(mission).sort(
+    (a, b) => (a.kitchenShiftIndex ?? 0) - (b.kitchenShiftIndex ?? 0),
+  );
+
+  for (const slot of slots) {
+    const seats = assignments[slot.slotId] || [];
+    const shiftIndex = slot.kitchenShiftIndex ?? 0;
+    const restSquad =
+      scheduling.kitchen?.squad_rest_by_shift?.[shiftIndex % 4] ?? shiftIndex + 1;
+
+    if (keepExisting && seats.every(Boolean)) {
+      const keptNames = seats.filter(Boolean);
+      for (const name of keptNames) {
+        placePerson(
+          name,
+          slot,
+          mission.id,
+          tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
+      }
+      skipped += keptNames.length;
+      continue;
+    }
+
+    const kept = keepExisting ? seats.filter(Boolean) : [];
+    for (const name of kept) {
+      placePerson(
+        name,
+        slot,
+        mission.id,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+        mission.mission_type,
+      );
+    }
+
+    const need = slot.seatCount - kept.length;
+    if (need <= 0) {
+      assignments[slot.slotId] = seats;
+      continue;
+    }
+
+    const { names, usedFallback } = assignKitchenShift({
+      people,
+      slot,
+      shiftIndex,
+      need,
+      taken: kept,
+      tracker,
+      issues,
+      scheduling,
+      rules,
+      meanPrior,
+      missionId: mission.id,
+      missionType: mission.mission_type,
+    });
+
+    if (usedFallback) {
+      warnings.push(
+        `${slot.positionName} ${slot.timeLabel}: שובץ גם מצוות ${restSquad} (מנוחה) — חסר כוח`,
+      );
+    }
+
+    let ni = 0;
+    for (let i = 0; i < seats.length; i++) {
+      if (keepExisting && seats[i]) continue;
+      if (ni < names.length) {
+        seats[i] = names[ni++];
+        filled++;
+      } else {
+        seats[i] = "";
+      }
+    }
+
+    if (names.length < need) {
+      warnings.push(
+        `${slot.positionName} ${slot.timeLabel}: חסרים ${need - names.length} מתוך ${need} (צוות ${restSquad} במנוחה)`,
+      );
+    }
+
+    assignments[slot.slotId] = seats;
+  }
+
+  return { assignments, filled, skipped, warnings };
 }
 
 export async function autoAssignMission(
@@ -98,11 +208,34 @@ export async function autoAssignMission(
       for (const [name, gs] of Object.entries(t2.guardShifts)) {
         tracker.guardShifts[name] = [...(tracker.guardShifts[name] || []), ...gs];
       }
+      for (const [name, pts] of Object.entries(t2.periodPoints)) {
+        tracker.periodPoints[name] = (tracker.periodPoints[name] || 0) + pts;
+      }
     }
   }
 
   const meanPrior =
     people.reduce((sum, p) => sum + (p.prior_score || 0), 0) / (people.length || 1);
+
+  if (mission.mission_type === "kitchen") {
+    const result = autoAssignKitchenMission(
+      mission,
+      people,
+      issues,
+      rules,
+      tracker,
+      scheduling,
+      meanPrior,
+      keepExisting,
+    );
+    const saved = await saveMissionDay({ ...mission, assignments: result.assignments });
+    return {
+      mission: saved,
+      filled: result.filled,
+      skipped: result.skipped,
+      warnings: result.warnings,
+    };
+  }
 
   const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
   const warnings: string[] = [];
@@ -111,7 +244,7 @@ export async function autoAssignMission(
 
   const slots = flattenMissionSlots(mission).sort(
     (a, b) =>
-      slotRank(b, rules, scheduling) - slotRank(a, rules, scheduling) ||
+      slotRank(b, rules) - slotRank(a, rules) ||
       b.durationMinutes - a.durationMinutes,
   );
 
@@ -121,9 +254,12 @@ export async function autoAssignMission(
       .map((p) => p.id),
   );
 
+  const allowMultiSlot =
+    mission.mission_type === "base_work" || mission.mission_type === "guards";
+
   for (const slot of slots) {
     const seats = assignments[slot.slotId] || [];
-    let inSlot = new Set(seats.filter(Boolean));
+    const inSlot = allowMultiSlot ? new Set<string>() : new Set(seats.filter(Boolean));
 
     if (slot.sameRoom && standbyPositions.has(slot.positionId)) {
       const emptySeats = seats
@@ -132,7 +268,16 @@ export async function autoAssignMission(
       const need = emptySeats.length;
       if (need === 0) {
         for (const name of seats.filter(Boolean)) {
-          placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+          placePerson(
+            name,
+            slot,
+            mission.id,
+            tracker,
+            rules,
+            scheduling,
+            slot.seatCount,
+            mission.mission_type,
+          );
           skipped++;
         }
         continue;
@@ -140,7 +285,16 @@ export async function autoAssignMission(
 
       const kept = keepExisting ? seats.filter(Boolean) : [];
       for (const name of kept) {
-        placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+        placePerson(
+          name,
+          slot,
+          mission.id,
+          tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
       }
 
       const assigned = assignStandbyRoom(
@@ -161,12 +315,11 @@ export async function autoAssignMission(
         if (keepExisting && seats[i]) continue;
         if (ai < assigned.length) {
           seats[i] = assigned[ai++];
-          inSlot.add(seats[i]);
           filled++;
         } else {
           seats[i] = "";
           warnings.push(
-            `${slot.positionName}: לא נמצא חדר שלם פנוי (${need} מקומות)`,
+            `${slot.positionName}: לא נמצא חדר שלם פנוי (${need} מקומות, אותו מין)`,
           );
         }
       }
@@ -177,7 +330,16 @@ export async function autoAssignMission(
     for (let i = 0; i < slot.seatCount; i++) {
       const current = seats[i] || "";
       if (keepExisting && current) {
-        placePerson(current, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+        placePerson(
+          current,
+          slot,
+          mission.id,
+          tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
         skipped++;
         continue;
       }
@@ -200,7 +362,16 @@ export async function autoAssignMission(
 
       seats[i] = chosen.name;
       inSlot.add(chosen.name);
-      placePerson(chosen.name, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+      placePerson(
+        chosen.name,
+        slot,
+        mission.id,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+        mission.mission_type,
+      );
       filled++;
     }
 

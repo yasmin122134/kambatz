@@ -5,11 +5,16 @@ alter table mission_days
     "rest_hours": 7,
     "guard_ratio": 2,
     "board_start": "20:00",
-    "standby_carmel_a_weight": 0.45,
-    "standby_carmel_b_weight": 0.15
+    "shift_hours": 4
   }'::jsonb;
 
--- Extend published fairness defaults for Carmel A/B (optional — app falls back if missing)
+-- אם כבר הרצת גרסה קודמת עם משקלי כרמל — מעדכן למבנה החדש
+update mission_days
+set scheduling_rules = (scheduling_rules - 'standby_carmel_a_weight' - 'standby_carmel_b_weight')
+  || '{"shift_hours": 4}'::jsonb
+where scheduling_rules ? 'standby_carmel_a_weight'
+   or scheduling_rules ? 'standby_carmel_b_weight';
+
 update fairness_rules
 set rules = rules || '{"standby_a": 0.45, "standby_b": 0.15}'::jsonb
 where id = 1

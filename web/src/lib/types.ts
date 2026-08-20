@@ -20,6 +20,8 @@ export interface Person {
   email: string | null;
   room: string | null;
   gender: "m" | "f" | null;
+  /** צוות 1–4 — לשיבוץ מטבח ועב״ס */
+  squad?: number | null;
   active: boolean;
   is_admin?: boolean;
   km: boolean;
@@ -88,25 +90,50 @@ export type MissionPositionKind =
   | "duty"
   | "kitchen";
 
-export interface MissionSchedulingRules {
-  /** מינימום שעות מנוחה ביממה (לא כולל כוננות) */
-  rest_hours: number;
-  /** כלל 4-8: מרווח בין שמירות ≥ יחס × משך המשמרת */
-  guard_ratio: number;
-  /** שעת פתיחת הלוח — לחישוב מחזור 24 שעות */
-  board_start: string;
-  /** נקודות צדק לשעה — כרמל א׳ (קשה יותר) */
-  standby_carmel_a_weight: number;
-  /** נקודות צדק לשעה — כרמל ב׳ */
-  standby_carmel_b_weight: number;
+export interface KitchenSchedulingRules {
+  /** נקודות צדק קבועות לכל משמרת (לא לפי שעות) */
+  points_per_shift: boolean;
+  /** כמה צוערים בכל משמרת מטבח — תמיד 35 */
+  seats_per_shift: number;
+  /** לכל משמרת (0-based): מספר הצוות (1–4) שבמנוחה (עדיפות, לא חובה אם חסר כוח) */
+  squad_rest_by_shift: number[];
 }
+
+export interface BaseWorkSchedulingRules {
+  /** יעד צוערים בחלון עב״ס (13–15, בדרך כלל צוות שלם) */
+  seats_per_shift: number;
+  /** לכל חלון (0-based): צוות במנוחה */
+  squad_rest_by_shift: number[];
+}
+
+export interface MissionSchedulingRules {
+  rest_hours: number;
+  guard_ratio: number;
+  board_start: string;
+  /** אורך משמרת מסתובבת (שעות) */
+  shift_hours: number;
+  kitchen?: KitchenSchedulingRules;
+  base_work?: BaseWorkSchedulingRules;
+}
+
+export const DEFAULT_KITCHEN_SCHEDULING_RULES: KitchenSchedulingRules = {
+  points_per_shift: true,
+  seats_per_shift: 35,
+  squad_rest_by_shift: [1, 2, 3, 4],
+};
+
+export const DEFAULT_BASE_WORK_SCHEDULING_RULES: BaseWorkSchedulingRules = {
+  seats_per_shift: 14,
+  squad_rest_by_shift: [1, 2, 3],
+};
 
 export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
   rest_hours: 7,
   guard_ratio: 2,
   board_start: "20:00",
-  standby_carmel_a_weight: 0.45,
-  standby_carmel_b_weight: 0.15,
+  shift_hours: 4,
+  kitchen: DEFAULT_KITCHEN_SCHEDULING_RULES,
+  base_work: DEFAULT_BASE_WORK_SCHEDULING_RULES,
 };
 
 export interface MissionSlot {
@@ -121,6 +148,8 @@ export interface MissionPosition {
   name: string;
   kind?: MissionPositionKind;
   same_room?: boolean;
+  /** כוננות כרמל — כולם מאותו מין */
+  same_gender?: boolean;
   slots: MissionSlot[];
 }
 
@@ -198,7 +227,7 @@ export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
   standby_a: "כרמל א׳ — כוננות (לשעה)",
   standby_b: "כרמל ב׳ — כוננות (לשעה)",
   duty: "עבודות בסיס (לשעה)",
-  kitchen: "תורנות מטבח (לשעה)",
+  kitchen: "תורנות מטבח (למשמרת)",
 };
 
 export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
@@ -208,7 +237,7 @@ export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
   standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
   standby_b: "כרמל ב׳ — כוננות",
   duty: "עב״ס, עתודה ומשימות בסיס",
-  kitchen: "חמגשיות ותורנות מטבח",
+  kitchen: "חמגשיות ותורנות מטבח — נקודה קבועה לכל משמרת",
 };
 
 export type PersonMissionHistoryItem = {
@@ -234,7 +263,9 @@ export type PersonFairnessStats = {
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
   "המחולל לא מחלק לפי שעות גולמיות — אלא לפי נקודות צדק.",
-  "לכל משמרת: שעות × משקל מטבלת הצדק (למשל שמירה לבד = 1.5 נק׳/שעה).",
-  "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם מהימים הקודמים).",
-  "שמירה בזוג שווה פחות משמירה לבד; עב״ס ומטבח שווים מעט נקודות.",
+  "לכל משמרת שמירה/עב״ס: שעות × משקל מטבלת הצדק (למשל שמירה לבד = 1.5 נק׳/שעה).",
+  "מטבח — נקודה קבועה לכל משמרת (35 צוערים), לא לפי שעות.",
+  "כרמל א׳ וכרמל ב׳ — שורות נפרדות בטבלה; א׳ משמעותית קשה יותר.",
+  "עמדה שדורשת מאייש אחד 24 שעות = משמרות מסתובבות (למשל 4 שעות), לא אותו אדם כל היום.",
+  "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];

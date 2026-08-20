@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
   MISSION_POSITION_KIND_LABELS,
   MISSION_STATUS_LABELS,
@@ -14,6 +15,9 @@ import {
   type MissionSlot,
   type MissionType,
 } from "@/lib/types";
+import { defaultBaseWorkPositions } from "@/lib/base-work-template";
+import { defaultGuardDayPositions } from "@/lib/guard-day-template";
+import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 
 function uid() {
   return crypto.randomUUID();
@@ -37,19 +41,18 @@ function newPosition(
       (kind === "standby_carmel_a" || kind === "standby_carmel_b"),
     slots: [
       kind === "standby_carmel_a" || kind === "standby_carmel_b"
-        ? newSlot("00:00", "00:00", 4)
+        ? newSlot("00:00", "00:00", 3)
         : newSlot(),
     ],
   };
 }
 
-function guardDayTemplate(): MissionPosition[] {
-  return [
-    newPosition("כרמל א׳ (כוננות)", { kind: "standby_carmel_a", same_room: true }),
-    newPosition("כרמל ב׳ (כוננות)", { kind: "standby_carmel_b", same_room: true }),
-    newPosition("עמדה 1", { kind: "guard" }),
-    newPosition("עמדה 2", { kind: "guard" }),
-  ];
+function guardDayTemplate(rules: MissionSchedulingRules): MissionPosition[] {
+  return defaultGuardDayPositions({
+    shiftHours: rules.shift_hours,
+    boardStart: rules.board_start,
+    season: "summer",
+  });
 }
 
 const GUARD_KINDS: MissionPositionKind[] = [
@@ -114,18 +117,29 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     const date = today.toISOString().slice(0, 10);
     setMissionType(type);
     setMissionDate(date);
-    setStartsAt(`${date}T08:00`);
-    setEndsAt(`${date}T20:00`);
+    if (type === "kitchen") {
+      setStartsAt(`${date}T06:00`);
+      setEndsAt(`${date}T22:00`);
+    } else if (type === "guards") {
+      setStartsAt(`${date}T20:00`);
+      const next = new Date(today);
+      next.setDate(next.getDate() + 1);
+      setEndsAt(`${next.toISOString().slice(0, 10)}T20:00`);
+    } else {
+      setStartsAt(`${date}T08:30`);
+      setEndsAt(`${date}T20:00`);
+    }
     setTitle("");
-    setSchedulingRules({ ...DEFAULT_MISSION_SCHEDULING_RULES });
+    const rules = { ...DEFAULT_MISSION_SCHEDULING_RULES };
+    setSchedulingRules(rules);
     setPositions(
       type === "guards"
-        ? guardDayTemplate()
-        : [
-            newPosition(type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס", {
-              kind: type === "kitchen" ? "kitchen" : "duty",
-            }),
-          ],
+        ? guardDayTemplate(rules)
+        : type === "kitchen"
+          ? defaultKitchenDayPositions({
+              seatsPerShift: rules.kitchen?.seats_per_shift ?? 35,
+            })
+          : defaultBaseWorkPositions(),
     );
   }
 
@@ -352,7 +366,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       <div className="card space-y-4">
         <h4 className="font-display text-base">כללי שיבוץ ליום זה</h4>
         <p className="hint text-sm">
-          משמשים בשיבוץ החכם ובחיפוש מחליף — מנוחה, כלל 4-8, ומשקלי כוננות.
+          משמשים בשיבוץ החכם — מנוחה, כלל 4-8, אורך משמרת. כרמל א/ב בטבלת הצדק.
         </p>
         <div className="rowf">
           <div className="field">
@@ -388,6 +402,22 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             />
           </div>
           <div className="field">
+            <label>אורך משמרת (שעות)</label>
+            <input
+              type="number"
+              min={1}
+              max={12}
+              step={1}
+              value={schedulingRules.shift_hours ?? 4}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({
+                  ...r,
+                  shift_hours: Math.max(1, +e.target.value || 4),
+                }))
+              }
+            />
+          </div>
+          <div className="field">
             <label>שעת פתיחת לוח</label>
             <input
               type="time"
@@ -398,38 +428,111 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             />
           </div>
         </div>
-        <div className="rowf">
-          <div className="field">
-            <label>נק׳/שעה — כרמל א׳</label>
-            <input
-              type="number"
-              min={0}
-              step={0.05}
-              value={schedulingRules.standby_carmel_a_weight}
-              onChange={(e) =>
-                setSchedulingRules((r) => ({
-                  ...r,
-                  standby_carmel_a_weight: Math.max(0, +e.target.value || 0),
-                }))
+        {missionType === "guards" && (
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              if (
+                !confirm(
+                  "לטעון מחדש את מערך השמירות מהפקודה? חלונות השעות יוחלפו.",
+                )
+              ) {
+                return;
               }
-            />
-          </div>
-          <div className="field">
-            <label>נק׳/שעה — כרמל ב׳</label>
-            <input
-              type="number"
-              min={0}
-              step={0.05}
-              value={schedulingRules.standby_carmel_b_weight}
-              onChange={(e) =>
-                setSchedulingRules((r) => ({
-                  ...r,
-                  standby_carmel_b_weight: Math.max(0, +e.target.value || 0),
-                }))
-              }
-            />
-          </div>
-        </div>
+              setPositions(guardDayTemplate(schedulingRules));
+            }}
+          >
+            טען מערך שמירות מהפקודה
+          </button>
+        )}
+        {missionType === "kitchen" && (
+          <>
+            <div className="rowf">
+              <div className="field">
+                <label>צוערים למשמרת</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  value={schedulingRules.kitchen?.seats_per_shift ?? 35}
+                  onChange={(e) => {
+                    const seats = Math.max(1, +e.target.value || 35);
+                    setSchedulingRules((r) => ({
+                      ...r,
+                      kitchen: {
+                        ...(r.kitchen || DEFAULT_KITCHEN_SCHEDULING_RULES),
+                        seats_per_shift: seats,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="field">
+                  <label>מנוחה משמרת {i + 1} — צוות</label>
+                  <select
+                    value={
+                      schedulingRules.kitchen?.squad_rest_by_shift?.[i] ?? i + 1
+                    }
+                    onChange={(e) => {
+                      const squad = +e.target.value;
+                      setSchedulingRules((r) => {
+                        const rest = [
+                          ...(r.kitchen?.squad_rest_by_shift ||
+                            DEFAULT_KITCHEN_SCHEDULING_RULES.squad_rest_by_shift),
+                        ];
+                        rest[i] = squad;
+                        return {
+                          ...r,
+                          kitchen: {
+                            ...(r.kitchen || DEFAULT_KITCHEN_SCHEDULING_RULES),
+                            squad_rest_by_shift: rest,
+                          },
+                        };
+                      });
+                    }}
+                  >
+                    {[1, 2, 3, 4].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <p className="hint text-xs">
+              35 צוערים בכל משמרת. בכל משמרת צוות אחד במנוחה — אותו אדם יכול במספר משמרות.
+              נקודות צדק קבועות למשמרת (לא לפי שעות).
+            </p>
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() => {
+                if (!confirm("לטעון מחדש 4 משמרות מטבח (06–22)?")) return;
+                const seats =
+                  schedulingRules.kitchen?.seats_per_shift ??
+                  DEFAULT_KITCHEN_SCHEDULING_RULES.seats_per_shift;
+                setPositions(defaultKitchenDayPositions({ seatsPerShift: seats }));
+              }}
+            >
+              טען משמרות מטבח (4×35)
+            </button>
+          </>
+        )}
+        {missionType === "base_work" && (
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              if (!confirm("לטעון מחדש חלונות עב״ס מהפקודה?")) return;
+              setPositions(defaultBaseWorkPositions());
+            }}
+          >
+            טען חלונות עב״ס
+          </button>
+        )}
       </div>
 
       <div className="card space-y-4">
@@ -480,7 +583,12 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             </div>
             {(pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") && (
               <p className="hint text-xs">
-                כוננות מאותו חדר — השיבוץ החכם יבחר חדר שלם ({pos.kind === "standby_carmel_a" ? "כרמל א׳ — קשה יותר" : "כרמל ב׳"})
+                כוננות — 3 צוערים מאותו חדר ומין לכל היממה. נקודות בטבלת הצדק.
+              </p>
+            )}
+            {missionType === "kitchen" && (
+              <p className="hint text-xs">
+                ערוך שעות ומספר מקומות לכל משמרת (ברירת מחדל 35).
               </p>
             )}
 
@@ -511,7 +619,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   <input
                     type="number"
                     min={1}
-                    max={10}
+                    max={missionType === "kitchen" ? 60 : 10}
                     value={slot.seat_count}
                     onChange={(e) =>
                       updateSlot(pos.id, slot.id, {

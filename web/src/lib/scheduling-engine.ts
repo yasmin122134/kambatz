@@ -10,12 +10,14 @@ import {
   resolvePositionKind,
   slotDurationMinutes,
 } from "@/lib/mission-utils";
+import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import type {
   FairnessRules,
   Issue,
   MissionDay,
   MissionPositionKind,
   MissionSchedulingRules,
+  MissionType,
   Person,
 } from "@/lib/types";
 
@@ -158,11 +160,33 @@ function sameRoomOk(
   return true;
 }
 
+function sameGenderOk(
+  person: Person,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+): boolean {
+  if (!person.gender) return true;
+  for (const m of mates) {
+    if (!m || m === person.name) continue;
+    const mp = peopleByName[m];
+    if (!mp?.gender) continue;
+    if (mp.gender !== person.gender) return false;
+  }
+  return true;
+}
+
+/** צוות 1–4; אם חסר במאגר — חלוקה יציבה לפי שם */
+export function effectiveSquad(person: Person, fallbackIndex: number): number {
+  if (person.squad != null && person.squad >= 1 && person.squad <= 4) {
+    return person.squad;
+  }
+  return (fallbackIndex % 4) + 1;
+}
+
 export function bucketForSlot(
   slot: FlatSlot,
   seatCount: number,
   rules: FairnessRules,
-  scheduling?: MissionSchedulingRules,
 ): keyof FairnessRules {
   if (slot.positionKind === "standby_carmel_a") return "standby_a";
   if (slot.positionKind === "standby_carmel_b") return "standby_b";
@@ -176,16 +200,18 @@ export function pointsForSlot(
   slot: FlatSlot,
   seatCount: number,
   rules: FairnessRules,
-  scheduling?: MissionSchedulingRules,
+  options?: { missionType?: MissionType; scheduling?: MissionSchedulingRules },
 ): number {
-  const hours = slotDurationHours(slot.startTime, slot.endTime);
-  const bucket = bucketForSlot(slot, seatCount, rules, scheduling);
-  let weight = rules[bucket as keyof FairnessRules] as number;
-  if (scheduling && slot.positionKind === "standby_carmel_a") {
-    weight = scheduling.standby_carmel_a_weight;
-  } else if (scheduling && slot.positionKind === "standby_carmel_b") {
-    weight = scheduling.standby_carmel_b_weight;
+  const bucket = bucketForSlot(slot, seatCount, rules);
+  const weight = rules[bucket as keyof FairnessRules] as number;
+  const kitchenPerShift =
+    slot.positionKind === "kitchen" &&
+    (options?.scheduling?.kitchen?.points_per_shift !== false ||
+      options?.missionType === "kitchen");
+  if (kitchenPerShift) {
+    return Math.round(weight * 100) / 100;
   }
+  const hours = slotDurationHours(slot.startTime, slot.endTime);
   return Math.round(hours * weight * 100) / 100;
 }
 
@@ -217,6 +243,7 @@ export function fitsPerson(
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return false;
   if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return false;
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return false;
   return true;
 }
 
@@ -228,6 +255,7 @@ export function placePerson(
   rules: FairnessRules,
   scheduling: MissionSchedulingRules,
   seatCount: number,
+  missionType?: MissionType,
 ) {
   const block: BusyBlock = {
     cyclicStart: slot.cyclicStart,
@@ -244,7 +272,7 @@ export function placePerson(
       { start: slot.cyclicStart, duration: slot.durationMinutes },
     ];
   }
-  const pts = pointsForSlot(slot, seatCount, rules, scheduling);
+  const pts = pointsForSlot(slot, seatCount, rules, { missionType, scheduling });
   tracker.periodPoints[personName] = (tracker.periodPoints[personName] || 0) + pts;
 }
 
@@ -265,16 +293,26 @@ export function buildTrackerFromMissions(
     for (const slot of flattenMissionSlots(mission)) {
       for (const name of slot.assignees) {
         if (!name) continue;
-        placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+        placePerson(
+          name,
+          slot,
+          mission.id,
+          tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
       }
     }
   }
   return tracker;
 }
 
-export function slotRank(slot: FlatSlot, rules: FairnessRules, scheduling: MissionSchedulingRules) {
+export function slotRank(slot: FlatSlot, rules: FairnessRules) {
   if (isStandbyKind(slot.positionKind)) return 1e9;
-  return pointsForSlot(slot, slot.seatCount, rules, scheduling) * 100;
+  if (slot.positionKind === "kitchen") return 500;
+  return pointsForSlot(slot, slot.seatCount, rules) * 100;
 }
 
 export function pickBestCandidate(
@@ -283,13 +321,16 @@ export function pickBestCandidate(
   tracker: ScheduleTracker,
   rules: FairnessRules,
   meanPrior: number,
+  options?: { preferHighLoad?: boolean },
 ): Person | null {
   if (!candidates.length) return null;
-  const easy = isStandbyKind(slot.positionKind) || slot.positionKind === "duty" || slot.positionKind === "kitchen";
+  const preferHigh =
+    options?.preferHighLoad ??
+    (isStandbyKind(slot.positionKind) && !slot.sameGender);
   const sorted = [...candidates].sort((a, b) => {
     const wa = workScore(a, tracker, rules, meanPrior);
     const wb = workScore(b, tracker, rules, meanPrior);
-    let sc = easy ? wb - wa : wa - wb;
+    let sc = preferHigh ? wb - wa : wa - wb;
     if (a.exam !== b.exam) {
       if (isGuardKind(slot.positionKind)) sc += a.exam ? 1000 : -1000;
       else sc += a.exam ? -1000 : 1000;
@@ -345,13 +386,13 @@ export function assignStandbyRoom(
         pool.length
       );
     };
-    return avg(b) - avg(a);
+    return avg(a) - avg(b);
   });
 
   const pool = okInRoom(rooms[0]).sort((a, b) => {
     const wa = workScore(a, tracker, rules, meanPrior);
     const wb = workScore(b, tracker, rules, meanPrior);
-    if (wa !== wb) return wb - wa;
+    if (wa !== wb) return wa - wb;
     if (a.exam !== b.exam) return a.exam ? -1 : 1;
     return a.name.localeCompare(b.name, "he");
   });
@@ -360,10 +401,108 @@ export function assignStandbyRoom(
   for (const p of pool) {
     if (out.length >= need) break;
     if (taken.includes(p.name)) continue;
+    if (slot.sameGender && out.length) {
+      const ref = peopleByName[out[0]];
+      if (ref?.gender && p.gender && ref.gender !== p.gender) continue;
+    }
     out.push(p.name);
-    placePerson(p.name, slot, missionId, tracker, rules, scheduling, slot.seatCount);
+    placePerson(
+      p.name,
+      slot,
+      missionId,
+      tracker,
+      rules,
+      scheduling,
+      slot.seatCount,
+    );
   }
   return out;
+}
+
+/** שיבוץ משמרת מטבח — 35 למשמרת, צוות אחד במנוחה, אותו אדם יכול במספר משמרות */
+export function assignKitchenShift(input: {
+  people: Person[];
+  slot: FlatSlot;
+  shiftIndex: number;
+  need: number;
+  taken: string[];
+  tracker: ScheduleTracker;
+  issues: Issue[];
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+  meanPrior: number;
+  missionId: string;
+  missionType: MissionType;
+}): { names: string[]; usedFallback: boolean } {
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const kitchen = input.scheduling.kitchen;
+  const restList = kitchen?.squad_rest_by_shift || [1, 2, 3, 4];
+  const restSquad = restList[input.shiftIndex % restList.length] ?? (input.shiftIndex % 4) + 1;
+
+  const sortedPeople = [...input.people].sort((a, b) =>
+    a.name.localeCompare(b.name, "he"),
+  );
+  const squadOf = (p: Person) =>
+    effectiveSquad(p, sortedPeople.findIndex((x) => x.id === p.id));
+
+  const fits = (p: Person, allowResting: boolean) => {
+    if (input.taken.includes(p.name)) return false;
+    if (!allowResting && squadOf(p) === restSquad) return false;
+    return fitsPerson(
+      p,
+      input.slot,
+      input.tracker,
+      input.issues,
+      input.scheduling,
+      input.taken,
+      peopleByName,
+    );
+  };
+
+  let pool = sortedPeople.filter((p) => fits(p, false));
+  let usedFallback = false;
+  if (pool.length < input.need) {
+    pool = sortedPeople.filter((p) => fits(p, true));
+    usedFallback = true;
+  }
+
+  pool.sort((a, b) => {
+    const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
+    const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
+    if (wa !== wb) return wa - wb;
+    return a.name.localeCompare(b.name, "he");
+  });
+
+  const out: string[] = [];
+  for (const p of pool) {
+    if (out.length >= input.need) break;
+    if (out.includes(p.name)) continue;
+    if (
+      !fitsPerson(
+        p,
+        input.slot,
+        input.tracker,
+        input.issues,
+        input.scheduling,
+        [...input.taken, ...out],
+        peopleByName,
+      )
+    ) {
+      continue;
+    }
+    out.push(p.name);
+    placePerson(
+      p.name,
+      input.slot,
+      input.missionId,
+      input.tracker,
+      input.rules,
+      input.scheduling,
+      input.slot.seatCount,
+      input.missionType,
+    );
+  }
+  return { names: out, usedFallback };
 }
 
 export function findReplacements(input: {

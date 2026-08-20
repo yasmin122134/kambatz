@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 /** Columns always present after initial schema.sql */
 export const PEOPLE_BASE_SELECT =
-  "id,name,email,room,gender,active,created_at" as const;
+  "id,name,email,room,gender,squad,active,created_at" as const;
 
 export const PEOPLE_FLAG_SELECT =
   "km,exam,no_weapon,no_guard,no_mag,prior_score" as const;
@@ -13,6 +13,7 @@ export type SchedulerPersonPayload = {
   on?: boolean;
   room?: string;
   gender?: string;
+  squad?: number;
   km?: boolean;
   exam?: boolean;
   noWeapon?: boolean;
@@ -30,6 +31,7 @@ export function dbPersonToScheduler(
     on: p.active !== false,
     room: p.room ? String(p.room) : undefined,
     gender: p.gender ? String(p.gender) : undefined,
+    squad: p.squad != null ? Number(p.squad) : undefined,
     km: p.km != null ? !!p.km : undefined,
     exam: p.exam != null ? !!p.exam : undefined,
     noWeapon: p.no_weapon != null ? !!p.no_weapon : undefined,
@@ -47,6 +49,8 @@ export function schedulerPersonToDb(
     name: p.name.trim(),
     room: p.room || null,
     gender: p.gender === "m" || p.gender === "f" ? p.gender : null,
+    squad:
+      p.squad != null && p.squad >= 1 && p.squad <= 4 ? Math.round(p.squad) : null,
     active: p.on !== false,
   };
   if (withFlags) {
@@ -89,6 +93,13 @@ export async function probePeopleEmail(
   supabase: SupabaseClient,
 ): Promise<boolean> {
   const { error } = await supabase.from("people").select("email").limit(1);
+  return !error;
+}
+
+export async function probePeopleSquad(
+  supabase: SupabaseClient,
+): Promise<boolean> {
+  const { error } = await supabase.from("people").select("squad").limit(1);
   return !error;
 }
 

@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { flattenMissionSlots } from "@/lib/mission-utils";
+import { flattenMissionSlots, normalizeSchedulingRules } from "@/lib/mission-utils";
 import { listMissionDays } from "@/lib/missions";
 import type {
   FairnessBucket,
@@ -53,7 +53,15 @@ export function normalizeFairnessRules(raw: unknown): FairnessRules {
   return out;
 }
 
-export function pointsForHours(hours: number, bucket: FairnessBucket, rules: FairnessRules) {
+export function pointsForHours(
+  hours: number,
+  bucket: FairnessBucket,
+  rules: FairnessRules,
+  options?: { perShift?: boolean },
+) {
+  if (options?.perShift) {
+    return Math.round(rules[bucket] * 100) / 100;
+  }
   return Math.round(hours * rules[bucket] * 100) / 100;
 }
 
@@ -97,6 +105,7 @@ export async function getPersonFairnessStats(
   const history: PersonMissionHistoryItem[] = [];
 
   for (const mission of missions) {
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
     for (const slot of flattenMissionSlots(mission)) {
       if (!slot.assignees.includes(personName)) continue;
       const hours = slotDurationHours(slot.startTime, slot.endTime);
@@ -105,7 +114,12 @@ export async function getPersonFairnessStats(
         slot.seatCount,
         slot.positionKind,
       );
-      const points = pointsForHours(hours, bucket, rules);
+      const kitchenPerShift =
+        mission.mission_type === "kitchen" &&
+        scheduling.kitchen?.points_per_shift !== false;
+      const points = pointsForHours(hours, bucket, rules, {
+        perShift: kitchenPerShift,
+      });
       history.push({
         id: `${mission.id}:${slot.slotId}:${personName}`,
         missionId: mission.id,

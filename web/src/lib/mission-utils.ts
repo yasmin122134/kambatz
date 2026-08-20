@@ -9,7 +9,13 @@ import type {
   MissionType,
   Person,
 } from "@/lib/types";
-import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
+import {
+  DEFAULT_BASE_WORK_SCHEDULING_RULES,
+  DEFAULT_KITCHEN_SCHEDULING_RULES,
+  DEFAULT_MISSION_SCHEDULING_RULES,
+  type BaseWorkSchedulingRules,
+  type KitchenSchedulingRules,
+} from "@/lib/types";
 
 export type FlatSlot = {
   slotId: string;
@@ -17,6 +23,7 @@ export type FlatSlot = {
   positionName: string;
   positionKind: MissionPositionKind;
   sameRoom: boolean;
+  sameGender: boolean;
   startTime: string;
   endTime: string;
   timeLabel: string;
@@ -25,6 +32,10 @@ export type FlatSlot = {
   sortKey: number;
   durationMinutes: number;
   cyclicStart: number;
+  /** אינדקס משמרת מטבח (0-based) */
+  kitchenShiftIndex?: number;
+  /** אינדקס חלון עב״ס (0-based) */
+  baseWorkShiftIndex?: number;
 };
 
 export type UpcomingMissionItem = {
@@ -91,7 +102,9 @@ export function eatsRest(kind: MissionPositionKind): boolean {
 }
 
 export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
-  const src = (raw || {}) as Partial<MissionSchedulingRules>;
+  const src = (raw || {}) as Partial<MissionSchedulingRules> & {
+    kitchen?: Partial<KitchenSchedulingRules>;
+  };
   const out = { ...DEFAULT_MISSION_SCHEDULING_RULES };
   if (src.rest_hours != null) {
     const v = +src.rest_hours;
@@ -104,15 +117,43 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
   if (src.board_start && /^\d{1,2}:\d{2}$/.test(src.board_start)) {
     out.board_start = src.board_start;
   }
-  if (src.standby_carmel_a_weight != null) {
-    const v = +src.standby_carmel_a_weight;
-    if (!Number.isNaN(v) && v >= 0) out.standby_carmel_a_weight = v;
+  if (src.shift_hours != null) {
+    const v = +src.shift_hours;
+    if (!Number.isNaN(v) && v >= 1 && v <= 12) out.shift_hours = v;
   }
-  if (src.standby_carmel_b_weight != null) {
-    const v = +src.standby_carmel_b_weight;
-    if (!Number.isNaN(v) && v >= 0) out.standby_carmel_b_weight = v;
-  }
+  const k: Partial<KitchenSchedulingRules> = src.kitchen ?? {};
+  out.kitchen = {
+    points_per_shift: k.points_per_shift !== false,
+    seats_per_shift: Math.max(
+      1,
+      Math.min(60, +k.seats_per_shift! || DEFAULT_KITCHEN_SCHEDULING_RULES.seats_per_shift),
+    ),
+    squad_rest_by_shift: normalizeSquadRest(k.squad_rest_by_shift),
+  };
+  const b: Partial<BaseWorkSchedulingRules> = src.base_work ?? {};
+  out.base_work = {
+    seats_per_shift: Math.max(
+      13,
+      Math.min(15, +b.seats_per_shift! || DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift),
+    ),
+    squad_rest_by_shift: normalizeSquadRest(
+      b.squad_rest_by_shift,
+      DEFAULT_BASE_WORK_SCHEDULING_RULES.squad_rest_by_shift,
+    ),
+  };
   return out;
+}
+
+function normalizeSquadRest(raw: unknown, fallback?: number[]): number[] {
+  const base = fallback ?? DEFAULT_KITCHEN_SCHEDULING_RULES.squad_rest_by_shift;
+  if (!Array.isArray(raw) || !raw.length) {
+    return [...base];
+  }
+  return raw.map((v, i) => {
+    const n = +v;
+    if (!Number.isNaN(n) && n >= 1 && n <= 4) return n;
+    return base[i % base.length] ?? (i % 4) + 1;
+  });
 }
 
 export function cyclicPos(minute: number, boardStart: number): number {
@@ -129,20 +170,26 @@ export function flattenMissionSlots(
     parseTimeMinutes(rules.board_start) ??
     20 * 60;
   const out: FlatSlot[] = [];
+  let kitchenIdx = 0;
+  let baseWorkIdx = 0;
 
   for (const pos of mission.positions || []) {
     const kind = resolvePositionKind(mission.mission_type, pos);
     const sameRoom = pos.same_room ?? isStandbyKind(kind);
+    const sameGender = pos.same_gender ?? isStandbyKind(kind);
     for (const slot of pos.slots || []) {
       const assignees = (mission.assignments[slot.id] || []).filter(Boolean);
       const startMin = parseTimeMinutes(slot.start_time) ?? 0;
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
+      const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
+      const isBaseWorkSlot = mission.mission_type === "base_work";
       out.push({
         slotId: slot.id,
         positionId: pos.id,
         positionName: pos.name,
         positionKind: kind,
         sameRoom,
+        sameGender,
         startTime: slot.start_time,
         endTime: slot.end_time,
         timeLabel: timeLabel(slot.start_time, slot.end_time),
@@ -151,6 +198,8 @@ export function flattenMissionSlots(
         sortKey: startMin,
         durationMinutes: dur,
         cyclicStart: cyclicPos(startMin, t0),
+        kitchenShiftIndex: isKitchenSlot ? kitchenIdx++ : undefined,
+        baseWorkShiftIndex: isBaseWorkSlot ? baseWorkIdx++ : undefined,
       });
     }
   }
@@ -189,22 +238,9 @@ export function newPosition(
   };
 }
 
-export function defaultGuardDayPositions(): MissionPosition[] {
-  return [
-    newPosition("כרמל א׳ (כוננות)", {
-      kind: "standby_carmel_a",
-      same_room: true,
-      slots: [newSlot("00:00", "00:00", 4)],
-    }),
-    newPosition("כרמל ב׳ (כוננות)", {
-      kind: "standby_carmel_b",
-      same_room: true,
-      slots: [newSlot("00:00", "00:00", 4)],
-    }),
-    newPosition("עמדה 1", { kind: "guard" }),
-    newPosition("עמדה 2", { kind: "guard" }),
-  ];
-}
+export { defaultGuardDayPositions } from "@/lib/guard-day-template";
+export { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
+export { defaultBaseWorkPositions } from "@/lib/base-work-template";
 
 export function emptyAssignments(positions: MissionPosition[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};

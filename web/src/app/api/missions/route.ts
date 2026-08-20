@@ -53,9 +53,15 @@ export async function POST(request: Request) {
 
   let positions = body.positions;
   if (!positions?.length) {
+    const rules = normalizeSchedulingRules(
+      body.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+    );
     positions =
       mission_type === "guards"
-        ? defaultGuardDayPositions()
+        ? defaultGuardDayPositions({
+            shiftHours: rules.shift_hours,
+            boardStart: rules.board_start,
+          })
         : [
             newPosition(
               mission_type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס",
