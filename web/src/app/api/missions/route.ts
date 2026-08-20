@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import {
-  defaultGuardDayPositions,
+  defaultSchedulingForType,
+  missionTemplateComplete,
+  standardMissionPositions,
+} from "@/lib/mission-templates";
+import {
   emptyAssignments,
   listMissionDays,
-  newPosition,
   normalizeSchedulingRules,
   saveMissionDay,
 } from "@/lib/missions";
-import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import type { MissionType } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -45,34 +47,26 @@ export async function POST(request: Request) {
   const ends_at = String(body.ends_at || "");
   const title =
     String(body.title || "").trim() ||
-    `${mission_date} · ${mission_type === "guards" ? "שמירות" : mission_type === "kitchen" ? "מטבח" : "עב״ס"}`;
+    `${mission_date} · ${mission_type === "guards" ? "שמירות" : mission_type === "kitchen" ? "מטבch" : "עב״ס"}`;
 
   if (!mission_date || !starts_at || !ends_at) {
     return NextResponse.json({ error: "חסרים תאריך או שעות" }, { status: 400 });
   }
 
-  let positions = body.positions;
-  if (!positions?.length) {
-    const rules = normalizeSchedulingRules(
-      body.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
-    );
-    positions =
-      mission_type === "guards"
-        ? defaultGuardDayPositions({
-            shiftHours: rules.shift_hours,
-            boardStart: rules.board_start,
-          })
-        : [
-            newPosition(
-              mission_type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס",
-              { kind: mission_type === "kitchen" ? "kitchen" : "duty" },
-            ),
-          ];
-  }
-
   const scheduling_rules = normalizeSchedulingRules(
-    body.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+    body.scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
   );
+
+  const clientPositions = body.positions;
+  const positions =
+    clientPositions?.length && missionTemplateComplete(mission_type, clientPositions)
+      ? clientPositions
+      : standardMissionPositions({
+          missionType: mission_type,
+          startsAt: starts_at,
+          endsAt: ends_at,
+          scheduling: scheduling_rules,
+        });
 
   try {
     const saved = await saveMissionDay({

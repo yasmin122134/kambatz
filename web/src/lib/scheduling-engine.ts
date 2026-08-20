@@ -85,6 +85,9 @@ export function canGuardPerson(person: Person): boolean {
 }
 
 export function canAssignKind(person: Person, kind: MissionPositionKind): boolean {
+  if (kind === "officer_duty") {
+    return !person.no_guard && !!person.is_officer;
+  }
   if (isGuardKind(kind)) return canGuardPerson(person);
   if (person.no_guard) return false;
   return true;
@@ -204,7 +207,7 @@ export function bucketForSlot(
   if (slot.positionKind === "standby_carmel_b") return "standby_b";
   if (isStandbyKind(slot.positionKind)) return "standby";
   if (slot.positionKind === "kitchen") return "kitchen";
-  if (slot.positionKind === "duty") return "duty";
+  if (slot.positionKind === "duty" || slot.positionKind === "officer_duty") return "duty";
   return seatCount <= 1 ? "solo" : "pair";
 }
 

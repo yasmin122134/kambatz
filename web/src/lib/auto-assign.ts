@@ -14,6 +14,7 @@ import {
   probePeopleSquad,
 } from "@/lib/people";
 import {
+  assignBaseWorkShift,
   assignKitchenShift,
   assignStandbyRoom,
   buildTrackerFromMissions,
@@ -123,13 +124,14 @@ function autoAssignKitchenMission(
       );
     }
 
-    const need = slot.seatCount - kept.length;
+    const need =
+      (scheduling.kitchen?.seats_per_shift ?? slot.seatCount) - kept.length;
     if (need <= 0) {
       assignments[slot.slotId] = seats;
       continue;
     }
 
-    const { names, usedFallback } = assignKitchenShift({
+    const { names, usedRestSquad } = assignKitchenShift({
       people,
       slot,
       shiftIndex,
@@ -144,9 +146,9 @@ function autoAssignKitchenMission(
       missionType: mission.mission_type,
     });
 
-    if (usedFallback) {
+    if (usedRestSquad) {
       warnings.push(
-        `${slot.positionName} ${slot.timeLabel}: שובץ גם מצוות ${restSquad} (מנוחה) — חסר כוח`,
+        `${slot.positionName} ${slot.timeLabel}: נוספו צוערים מצוות ${restSquad} (מנוחה) כדי להגיע ל-${scheduling.kitchen?.seats_per_shift ?? 35}`,
       );
     }
 
@@ -165,6 +167,111 @@ function autoAssignKitchenMission(
       warnings.push(
         `${slot.positionName} ${slot.timeLabel}: חסרים ${need - names.length} מתוך ${need} (צוות ${restSquad} במנוחה)`,
       );
+    }
+
+    assignments[slot.slotId] = seats;
+  }
+
+  return { assignments, filled, skipped, warnings };
+}
+
+function autoAssignBaseWorkMission(
+  mission: MissionDay,
+  people: Person[],
+  issues: Issue[],
+  rules: Awaited<ReturnType<typeof getFairnessRules>>,
+  tracker: ReturnType<typeof buildTrackerFromMissions>,
+  scheduling: ReturnType<typeof normalizeSchedulingRules>,
+  meanPrior: number,
+  keepExisting: boolean,
+): { assignments: Record<string, string[]>; filled: number; skipped: number; warnings: string[] } {
+  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+  const warnings: string[] = [];
+  let filled = 0;
+  let skipped = 0;
+
+  const slots = flattenMissionSlots(mission).sort(
+    (a, b) => (a.baseWorkShiftIndex ?? 0) - (b.baseWorkShiftIndex ?? 0),
+  );
+
+  for (const slot of slots) {
+    const seats = assignments[slot.slotId] || [];
+    const shiftIndex = slot.baseWorkShiftIndex ?? 0;
+    const restSquad =
+      scheduling.base_work?.squad_rest_by_shift?.[shiftIndex % 3] ?? shiftIndex + 1;
+
+    if (keepExisting && seats.every(Boolean)) {
+      const keptNames = seats.filter(Boolean);
+      for (const name of keptNames) {
+        placePerson(
+          name,
+          slot,
+          mission.id,
+          tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
+      }
+      skipped += keptNames.length;
+      continue;
+    }
+
+    const kept = keepExisting ? seats.filter(Boolean) : [];
+    for (const name of kept) {
+      placePerson(
+        name,
+        slot,
+        mission.id,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+        mission.mission_type,
+      );
+    }
+
+    if (kept.length >= slot.seatCount) {
+      assignments[slot.slotId] = seats;
+      continue;
+    }
+
+    const { names, workSquad, usedFallback } = assignBaseWorkShift({
+      people,
+      slot,
+      shiftIndex,
+      taken: kept,
+      tracker,
+      issues,
+      scheduling,
+      rules,
+      meanPrior,
+      missionId: mission.id,
+      missionType: mission.mission_type,
+    });
+
+    let ni = 0;
+    for (let i = 0; i < seats.length; i++) {
+      if (keepExisting && seats[i]) continue;
+      if (ni < names.length) {
+        seats[i] = names[ni++];
+        filled++;
+      } else {
+        seats[i] = "";
+      }
+    }
+
+    if (workSquad) {
+      warnings.push(
+        `${slot.timeLabel}: צוות ${workSquad} (${names.length} צוערים) · צ${restSquad} במנוחה`,
+      );
+    }
+    if (usedFallback) {
+      warnings.push(`${slot.timeLabel}: שיבוץ חלקי — לא נמצא צוות שלם פנוי`);
+    }
+    if (names.length < 13) {
+      warnings.push(`${slot.timeLabel}: רק ${names.length} צוערים (יעד 13–15)`);
     }
 
     assignments[slot.slotId] = seats;
@@ -237,6 +344,26 @@ export async function autoAssignMission(
     };
   }
 
+  if (mission.mission_type === "base_work") {
+    const result = autoAssignBaseWorkMission(
+      mission,
+      people,
+      issues,
+      rules,
+      tracker,
+      scheduling,
+      meanPrior,
+      keepExisting,
+    );
+    const saved = await saveMissionDay({ ...mission, assignments: result.assignments });
+    return {
+      mission: saved,
+      filled: result.filled,
+      skipped: result.skipped,
+      warnings: result.warnings,
+    };
+  }
+
   const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
   const warnings: string[] = [];
   let filled = 0;
@@ -254,12 +381,9 @@ export async function autoAssignMission(
       .map((p) => p.id),
   );
 
-  const allowMultiSlot =
-    mission.mission_type === "base_work" || mission.mission_type === "guards";
-
   for (const slot of slots) {
     const seats = assignments[slot.slotId] || [];
-    const inSlot = allowMultiSlot ? new Set<string>() : new Set(seats.filter(Boolean));
+    const inSlot = new Set<string>();
 
     if (slot.sameRoom && standbyPositions.has(slot.positionId)) {
       const emptySeats = seats

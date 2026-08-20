@@ -24,6 +24,8 @@ export type FlatSlot = {
   positionKind: MissionPositionKind;
   sameRoom: boolean;
   sameGender: boolean;
+  /** סוג יום המשימה — לחפיפות מותרות (כרמל + מטבch/עב״ס) */
+  missionType: MissionType;
   startTime: string;
   endTime: string;
   timeLabel: string;
@@ -94,7 +96,7 @@ export function isStandbyKind(kind: MissionPositionKind): boolean {
 }
 
 export function isGuardKind(kind: MissionPositionKind): boolean {
-  return kind === "guard";
+  return kind === "guard" || kind === "officer_duty";
 }
 
 export function eatsRest(kind: MissionPositionKind): boolean {
@@ -190,6 +192,7 @@ export function flattenMissionSlots(
         positionKind: kind,
         sameRoom,
         sameGender,
+        missionType: mission.mission_type,
         startTime: slot.start_time,
         endTime: slot.end_time,
         timeLabel: timeLabel(slot.start_time, slot.end_time),
@@ -238,7 +241,8 @@ export function newPosition(
   };
 }
 
-export { defaultGuardDayPositions } from "@/lib/guard-day-template";
+export { buildGuardDayPositions, defaultGuardDayPositions } from "@/lib/guard-day-template";
+export { standardGuardDayPositions, STANDARD_GUARD_DAY_SUMMARY } from "@/lib/guard-day-catalog";
 export { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 export { defaultBaseWorkPositions } from "@/lib/base-work-template";
 

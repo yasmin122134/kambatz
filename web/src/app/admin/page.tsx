@@ -117,6 +117,28 @@ export default function AdminPage() {
     loadPeople();
   }
 
+  async function syncSquads() {
+    setSyncing(true);
+    setSyncMsg("");
+    const res = await fetch("/api/people/sync-squads", { method: "POST" });
+    const data = await res.json();
+    setSyncing(false);
+    if (!res.ok) {
+      setSyncMsg(data.error || "שגיאה בסנכרון צוותים");
+      return;
+    }
+    const counts = data.squadCounts
+      ? Object.entries(data.squadCounts)
+          .map(([k, v]) => `צ${k}:${v}`)
+          .join(", ")
+      : "";
+    setSyncMsg(
+      `עודכנו ${data.updated} צוערים${counts ? ` (${counts})` : ""}` +
+        (data.errors?.length ? ` · ${data.errors.length} שגיאות` : ""),
+    );
+    loadPeople();
+  }
+
   async function addPerson(e: FormEvent) {
     e.preventDefault();
     const name = newName.trim();
@@ -235,14 +257,28 @@ export default function AdminPage() {
           מייבא 53 צוערים מהדוק — שמות, מיילים, ותיקון שמות ישנים. דורש הרצת{" "}
           <code className="mono text-xs">migration_email_auth.sql</code> ב-Supabase.
         </p>
-        <button
-          type="button"
-          className="btn-pri btn-sm"
-          disabled={syncing}
-          onClick={syncRoster}
-        >
-          {syncing ? "מסנכרן…" : "סנכרן מיילים מהדוק"}
-        </button>
+        <div className="bar flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-pri btn-sm"
+            disabled={syncing}
+            onClick={syncRoster}
+          >
+            {syncing ? "מסנכרן…" : "סנכרן מיילים מהדוק"}
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={syncing}
+            onClick={syncSquads}
+          >
+            {syncing ? "מסנכרן…" : "סנכרן צוותים (13–16)"}
+          </button>
+        </div>
+        <p className="hint text-xs mt-2">
+          צוותים מקובץ הדוק (צוות 13–16). דורש{" "}
+          <code className="mono">migration_squad.sql</code>.
+        </p>
         {syncMsg && <p className="hint mt-2">{syncMsg}</p>}
       </section>
 

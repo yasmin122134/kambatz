@@ -24,6 +24,7 @@ export interface Person {
   squad?: number | null;
   active: boolean;
   is_admin?: boolean;
+  is_officer?: boolean;
   km: boolean;
   exam: boolean;
   no_weapon: boolean;
@@ -88,7 +89,8 @@ export type MissionPositionKind =
   | "standby_carmel_a"
   | "standby_carmel_b"
   | "duty"
-  | "kitchen";
+  | "kitchen"
+  | "officer_duty";
 
 export interface KitchenSchedulingRules {
   /** נקודות צדק קבועות לכל משמרת (לא לפי שעות) */
@@ -124,7 +126,7 @@ export const DEFAULT_KITCHEN_SCHEDULING_RULES: KitchenSchedulingRules = {
 
 export const DEFAULT_BASE_WORK_SCHEDULING_RULES: BaseWorkSchedulingRules = {
   seats_per_shift: 14,
-  squad_rest_by_shift: [1, 2, 3],
+  squad_rest_by_shift: [4, 1, 2],
 };
 
 export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
@@ -175,6 +177,7 @@ export const MISSION_POSITION_KIND_LABELS: Record<MissionPositionKind, string> =
   standby_carmel_b: "כרמל ב׳ (כוננות)",
   duty: "עב״ס / תורנות",
   kitchen: "מטבח / חמגשיות",
+  officer_duty: "קצין תורן",
 };
 
 export const MISSION_TYPE_LABELS: Record<MissionType, string> = {

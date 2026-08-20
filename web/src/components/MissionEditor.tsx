@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
+  DEFAULT_BASE_WORK_SCHEDULING_RULES,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
   MISSION_POSITION_KIND_LABELS,
@@ -15,9 +17,15 @@ import {
   type MissionSlot,
   type MissionType,
 } from "@/lib/types";
-import { defaultBaseWorkPositions } from "@/lib/base-work-template";
-import { defaultGuardDayPositions } from "@/lib/guard-day-template";
-import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
+import {
+  defaultMissionWindow,
+  defaultSchedulingForType,
+  missionTemplateComplete,
+  STANDARD_BASE_WORK_SUMMARY,
+  STANDARD_GUARD_DAY_SUMMARY,
+  STANDARD_KITCHEN_SUMMARY,
+  standardMissionPositions,
+} from "@/lib/mission-templates";
 
 function uid() {
   return crypto.randomUUID();
@@ -47,11 +55,16 @@ function newPosition(
   };
 }
 
-function guardDayTemplate(rules: MissionSchedulingRules): MissionPosition[] {
-  return defaultGuardDayPositions({
-    shiftHours: rules.shift_hours,
-    boardStart: rules.board_start,
-    season: "summer",
+function guardDayTemplate(
+  rules: MissionSchedulingRules,
+  startsAt: string,
+  endsAt: string,
+): MissionPosition[] {
+  return standardMissionPositions({
+    missionType: "guards",
+    startsAt: new Date(startsAt).toISOString(),
+    endsAt: new Date(endsAt).toISOString(),
+    scheduling: rules,
   });
 }
 
@@ -59,6 +72,7 @@ const GUARD_KINDS: MissionPositionKind[] = [
   "guard",
   "standby_carmel_a",
   "standby_carmel_b",
+  "officer_duty",
 ];
 
 function formatDatetimeLocal(iso: string) {
@@ -68,6 +82,9 @@ function formatDatetimeLocal(iso: string) {
 }
 
 export function MissionEditor({ missionId }: { missionId?: string }) {
+  const searchParams = useSearchParams();
+  const autoInitDone = useRef(false);
+  const templateFixDone = useRef(false);
   const [loading, setLoading] = useState(!!missionId);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -85,6 +102,27 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     DEFAULT_MISSION_SCHEDULING_RULES,
   );
   const [autoAssigning, setAutoAssigning] = useState(false);
+
+  function applyStandardTemplate(
+    type: MissionType,
+    window: { startsAt: string; endsAt: string; missionDate: string },
+    rules?: MissionSchedulingRules,
+  ) {
+    const scheduling = rules ?? defaultSchedulingForType(type, window.startsAt);
+    setMissionType(type);
+    setMissionDate(window.missionDate);
+    setStartsAt(window.startsAt);
+    setEndsAt(window.endsAt);
+    setSchedulingRules(scheduling);
+    setPositions(
+      standardMissionPositions({
+        missionType: type,
+        startsAt: new Date(window.startsAt).toISOString(),
+        endsAt: new Date(window.endsAt).toISOString(),
+        scheduling,
+      }),
+    );
+  }
 
   const load = useCallback(async () => {
     if (!missionId) return;
@@ -105,6 +143,23 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setPositions(m.positions);
     setSchedulingRules(m.scheduling_rules || DEFAULT_MISSION_SCHEDULING_RULES);
     setNotes(m.notes || "");
+    if (
+      m.status === "draft" &&
+      !templateFixDone.current &&
+      !missionTemplateComplete(m.mission_type, m.positions)
+    ) {
+      templateFixDone.current = true;
+      const rules = m.scheduling_rules || defaultSchedulingForType(m.mission_type, m.starts_at);
+      setPositions(
+        standardMissionPositions({
+          missionType: m.mission_type,
+          startsAt: m.starts_at,
+          endsAt: m.ends_at,
+          scheduling: rules,
+        }),
+      );
+      setMsg("נטענה תבנית סטנדרטית (יום משימה לא היה מלא)");
+    }
     setLoading(false);
   }, [missionId]);
 
@@ -112,35 +167,20 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     load();
   }, [load]);
 
-  function initCreate(type: MissionType) {
-    const today = new Date();
-    const date = today.toISOString().slice(0, 10);
-    setMissionType(type);
-    setMissionDate(date);
-    if (type === "kitchen") {
-      setStartsAt(`${date}T06:00`);
-      setEndsAt(`${date}T22:00`);
-    } else if (type === "guards") {
-      setStartsAt(`${date}T20:00`);
-      const next = new Date(today);
-      next.setDate(next.getDate() + 1);
-      setEndsAt(`${next.toISOString().slice(0, 10)}T20:00`);
-    } else {
-      setStartsAt(`${date}T08:30`);
-      setEndsAt(`${date}T20:00`);
+  useEffect(() => {
+    if (missionId || autoInitDone.current || positions.length) return;
+    const typeParam = searchParams.get("type") as MissionType | null;
+    if (typeParam && ["guards", "base_work", "kitchen"].includes(typeParam)) {
+      autoInitDone.current = true;
+      initCreate(typeParam);
     }
+  }, [missionId, searchParams, positions.length]);
+
+  function initCreate(type: MissionType) {
+    const date = new Date().toISOString().slice(0, 10);
+    const window = defaultMissionWindow(type, date);
+    applyStandardTemplate(type, window);
     setTitle("");
-    const rules = { ...DEFAULT_MISSION_SCHEDULING_RULES };
-    setSchedulingRules(rules);
-    setPositions(
-      type === "guards"
-        ? guardDayTemplate(rules)
-        : type === "kitchen"
-          ? defaultKitchenDayPositions({
-              seatsPerShift: rules.kitchen?.seats_per_shift ?? 35,
-            })
-          : defaultBaseWorkPositions(),
-    );
   }
 
   async function save(e: FormEvent) {
@@ -429,22 +469,36 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           </div>
         </div>
         {missionType === "guards" && (
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={() => {
-              if (
-                !confirm(
-                  "לטעון מחדש את מערך השמירות מהפקודה? חלונות השעות יוחלפו.",
-                )
-              ) {
-                return;
-              }
-              setPositions(guardDayTemplate(schedulingRules));
-            }}
-          >
-            טען מערך שמירות מהפקודה
-          </button>
+          <>
+            <ul className="hint text-sm list-disc pr-5 space-y-1">
+              {STANDARD_GUARD_DAY_SUMMARY.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() => {
+                if (
+                  !confirm(
+                    "לטעון מחדש את יום השמירות הסטנדרטי? כל העמדות והשעות יוחלפו לפי הפקודה ותחילת/סוף יום המשימה.",
+                  )
+                ) {
+                  return;
+                }
+                const rules = {
+                  ...schedulingRules,
+                  board_start: boardStartFromMissionStart(
+                    new Date(startsAt).toISOString(),
+                  ),
+                };
+                setSchedulingRules(rules);
+                setPositions(guardDayTemplate(rules, startsAt, endsAt));
+              }}
+            >
+              טען יום שמירות סטנדרטי (כל העמדות)
+            </button>
+          </>
         )}
         {missionType === "kitchen" && (
           <>
@@ -522,16 +576,75 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           </>
         )}
         {missionType === "base_work" && (
-          <button
-            type="button"
-            className="btn-sm"
-            onClick={() => {
-              if (!confirm("לטעון מחדש חלונות עב״ס מהפקודה?")) return;
-              setPositions(defaultBaseWorkPositions());
-            }}
-          >
-            טען חלונות עב״ס
-          </button>
+          <>
+            <div className="rowf">
+              <div className="field">
+                <label>יעד צוערים בחלון (13–15)</label>
+                <input
+                  type="number"
+                  min={13}
+                  max={15}
+                  value={schedulingRules.base_work?.seats_per_shift ?? 14}
+                  onChange={(e) => {
+                    const seats = Math.max(13, Math.min(15, +e.target.value || 14));
+                    setSchedulingRules((r) => ({
+                      ...r,
+                      base_work: {
+                        ...(r.base_work || DEFAULT_BASE_WORK_SCHEDULING_RULES),
+                        seats_per_shift: seats,
+                      },
+                    }));
+                  }}
+                />
+              </div>
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="field">
+                  <label>מנוחה חלון {i + 1} — צוות</label>
+                  <select
+                    value={
+                      schedulingRules.base_work?.squad_rest_by_shift?.[i] ?? i + 1
+                    }
+                    onChange={(e) => {
+                      const squad = +e.target.value;
+                      setSchedulingRules((r) => {
+                        const rest = [
+                          ...(r.base_work?.squad_rest_by_shift ||
+                            DEFAULT_BASE_WORK_SCHEDULING_RULES.squad_rest_by_shift),
+                        ];
+                        rest[i] = squad;
+                        return {
+                          ...r,
+                          base_work: {
+                            ...(r.base_work || DEFAULT_BASE_WORK_SCHEDULING_RULES),
+                            squad_rest_by_shift: rest,
+                          },
+                        };
+                      });
+                    }}
+                  >
+                    {[1, 2, 3, 4].map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+            <p className="hint text-xs">
+              בכל חלון משובץ צוות שלם (13–15). צוות אחד במנוחה לכל חלון.
+            </p>
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={() => {
+                if (!confirm("לטעון מחדש חלונות עב״ס מהפקודה?")) return;
+                setPositions(defaultBaseWorkPositions());
+              }}
+            >
+              טען חלונות עב״ס
+            </button>
+          </>
         )}
       </div>
 
@@ -583,7 +696,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             </div>
             {(pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") && (
               <p className="hint text-xs">
-                כוננות — 3 צוערים מאותו חדר ומין לכל היממה. נקודות בטבלת הצדק.
+                כוננות — 3 צוערים, אותו חדר ומין, מתחילת יום המשימה עד סופה.
+                {pos.kind === "standby_carmel_a"
+                  ? " מותר במקביל למטבח."
+                  : " מותר במקביל לעב״ס (רס״ר) ולמטבח."}
               </p>
             )}
             {missionType === "kitchen" && (

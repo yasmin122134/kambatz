@@ -1,0 +1,382 @@
+{
+  "squads": [
+    "צוות 13 - מפק\"ץ איתי",
+    "צוות 14 - מפק\"ץ זיו",
+    "צוות 15 - מפק\"ץ סיוון",
+    "צוות 16- מפק\"ץ רוני"
+  ],
+  "people": [
+    {
+      "name": "יהונתן אדיב",
+      "db_name": null,
+      "email": "yehonatan.adiv.47@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "מתן שטגר",
+      "db_name": "מתן שטגר",
+      "email": "matan.sthoeger@mail.huji.ac.il",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "ספיר טוביאס",
+      "db_name": "ספיר טוביאס",
+      "email": "sapir.tobias.47@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "עידן אדמסקי",
+      "db_name": "עידן אדמסקי",
+      "email": "idan.adamsky.47@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "נועה קינן מלול",
+      "db_name": "נועה קינן",
+      "email": "noamalul25@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "אורי מרקוביץ",
+      "db_name": "אורי מרקוביץ",
+      "email": "uri.marko1@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "בנימין קנוביץ'",
+      "db_name": "בני קנוביץ",
+      "email": "benik2002@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "הדר שביט",
+      "db_name": "הדר שביט",
+      "email": "hadarshavit51@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "יאיר חוף",
+      "db_name": "יאיר חוף",
+      "email": "yairhof86@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "יואב ארם",
+      "db_name": "יואב ארם",
+      "email": "yoav.aram.47@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "מעיין משה",
+      "db_name": "מעיין משה",
+      "email": "maayan.moshe.47@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "נדב שחורי",
+      "db_name": "נדב שחורי",
+      "email": "shchorinadav@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "כפיר אליה",
+      "db_name": "כפיר אליה",
+      "email": "kfirelya@gmail.com",
+      "squad": 1,
+      "squad_label": "צוות 13 - מפק\"ץ איתי"
+    },
+    {
+      "name": "אביב פרידמן",
+      "db_name": "אביב פרידמן",
+      "email": "avivfriedman100@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "אדם אורבך",
+      "db_name": "אדם אורבך",
+      "email": "adam.auerba@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "אורין אהרונוביץ",
+      "db_name": "אורין אהרונוביץ'",
+      "email": "orin.aha@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "אופק בוכנר",
+      "db_name": "אופק בוכנר",
+      "email": "ofekbuch5@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "אייקו שלו",
+      "db_name": "אייקו שלו",
+      "email": "aiko.shalev2006@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "איתי אברהם",
+      "db_name": "איתי אברהם",
+      "email": "itay.abraham.47@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "יאיר קצוביץ'",
+      "db_name": "יאיר קצוביץ",
+      "email": "yairkaz16@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "יהל כהן סולאל",
+      "db_name": "יהל כהן סולאל",
+      "email": "yaelcohensolal@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "יובל גל",
+      "db_name": "יובל גל",
+      "email": "yuvalgal1001@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "יסמין חדד",
+      "db_name": "יסמין חדד",
+      "email": "yasmin.haddad.yh.47@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "ליאם לוי",
+      "db_name": "ליאם לוי",
+      "email": "liameilat4@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "עידו בוחניק",
+      "db_name": "עידו בוחניק",
+      "email": "idobouhenik@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "עומר חתם",
+      "db_name": "עומר חתם",
+      "email": "omer.hattem.47@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "זיו אור",
+      "db_name": "זיו אור",
+      "email": "ziv.or.47@gmail.com",
+      "squad": 2,
+      "squad_label": "צוות 14 - מפק\"ץ זיו"
+    },
+    {
+      "name": "יהונתן הלוי",
+      "db_name": "יהונתן הלוי",
+      "email": "yonyon.halevi@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "גיא כץ",
+      "db_name": "גיא כץ",
+      "email": "guy.katz.47@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "יובל בארי",
+      "db_name": "יובל בארי",
+      "email": "yuvaly164@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "אדר קדוש",
+      "db_name": "אדר קדוש",
+      "email": "adar.kds@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "אוהד בר-און",
+      "db_name": "אוהד בר און",
+      "email": "ohadbo06@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "רוני דאי",
+      "db_name": "רוני דאי",
+      "email": "ronidai9999@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "נועה לוי",
+      "db_name": "נועה לוי",
+      "email": "levno100@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "מעין רביד",
+      "db_name": "מעין רביד",
+      "email": "maayan.ravid.47@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "גלי שלום",
+      "db_name": "גלי שלום",
+      "email": "shalom.gali.47@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "דור בן מנחם",
+      "db_name": "דור בן מנחם",
+      "email": "dorbenmen@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "סאלח גדבאן",
+      "db_name": "סלאח גדבאן",
+      "email": "salihgdban@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "לינוי אדלמן",
+      "db_name": "לינוי אדלמן",
+      "email": "linoyed1@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "הראל שוורץ",
+      "db_name": "הראל שוורץ",
+      "email": "harel.swartz@gmail.com",
+      "squad": 3,
+      "squad_label": "צוות 15 - מפק\"ץ סיוון"
+    },
+    {
+      "name": "רועי לנגרמן",
+      "db_name": "רועי לנגרמן",
+      "email": "roeelangermann@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "גפן פרומקס",
+      "db_name": "גפן פרומקס",
+      "email": "gefen.frumkes.47@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "ניר יצחק מימון",
+      "db_name": "ניר מימון",
+      "email": "nirimaim@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "רני פלג",
+      "db_name": "רני פלג",
+      "email": "rani.peleg.47@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "אמיר בסון",
+      "db_name": null,
+      "email": "amir.basson.47@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "אלמוג נגר",
+      "db_name": "אלמוג נגר",
+      "email": "almogn2006@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "עמית בן סימון",
+      "db_name": "עמית בן סימון",
+      "email": "amitbs2307@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "יואב שם דוד",
+      "db_name": "יואב שם דוד",
+      "email": "yoav2005sd@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "רותם כספי",
+      "db_name": "רותם כספי",
+      "email": "rotemcaspi2006@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "מאיה אפשטיין",
+      "db_name": null,
+      "email": "maya.epstein.a@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "אוריאל בן חיים",
+      "db_name": "אוריאל בן חיים",
+      "email": "oriel.benhaim@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "יערה נחום",
+      "db_name": "יערה נחום",
+      "email": "yaaranachum93@gmail.com",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    },
+    {
+      "name": "איתי גינזבורג",
+      "db_name": null,
+      "email": "itai.ginzburg@mail.huji.ac.il",
+      "squad": 4,
+      "squad_label": "צוות 16- מפק\"ץ רוני"
+    }
+  ],
+  "unmatched": []
+}
