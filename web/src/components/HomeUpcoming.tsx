@@ -34,9 +34,9 @@ export function HomeUpcoming({ personName, boardReady, boardStart, events }: Pro
           {events.map((ev, i) => (
             <li
               key={ev.id}
-              className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded border px-3 py-2.5 ${
+              className={`flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-2xl border px-3 py-2.5 ${
                 i === 0
-                  ? "border-olive bg-[#eef2e8]"
+                  ? "border-olive bg-accent-bg"
                   : "border-line2 bg-bone2/60"
               }`}
             >

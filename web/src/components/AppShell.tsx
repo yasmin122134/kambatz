@@ -42,7 +42,7 @@ export function AppShell({ children, title }: Props) {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="bg-olive text-bone border-b-[3px] border-ink sticky top-0 z-40">
+      <header className="app-header sticky top-0 z-40">
         <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-4">
           <button
             type="button"
@@ -60,7 +60,7 @@ export function AppShell({ children, title }: Props) {
               לוח שמירות
             </Link>
             {title && title !== "לוח שמירות" && (
-              <p className="text-xs text-olive-light/90 mt-0.5 truncate">{title}</p>
+              <p className="text-xs text-white/75 mt-0.5 truncate">{title}</p>
             )}
           </div>
         </div>

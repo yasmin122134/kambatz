@@ -195,7 +195,7 @@ export default function ProfilePage() {
         </div>
 
         {fairness && (
-          <div className="rounded-lg border border-line2 bg-bg/50 p-4 space-y-3">
+          <div className="rounded-2xl border border-line2 bg-bone2/50 p-4 space-y-3">
             <div className="bar spread flex-wrap gap-2">
               <p className="font-display text-sm">נקודות שמירה (טבלת צדק)</p>
               <Link href="/fairness" className="text-xs text-brick hover:underline">
@@ -242,7 +242,7 @@ export default function ProfilePage() {
           </div>
         )}
 
-        <div className="rounded-lg border border-line2 bg-bg/50 p-4 space-y-2">
+        <div className="rounded-2xl border border-line2 bg-bone2/50 p-4 space-y-2">
           <p className="font-display text-sm">סימונים מאושרים (בשיבוץ)</p>
           {approvedList.length === 0 ? (
             <p className="hint text-sm">אין סימונים פעילים</p>
@@ -256,7 +256,7 @@ export default function ProfilePage() {
         </div>
 
         {pendingRequest && (
-          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+          <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl px-3 py-2">
             יש בקשה ממתינה — {ISSUE_STATUS_LABELS.pending}. שינוי ושליחה
             מחדש יעדכן את הבקשה.
           </p>
