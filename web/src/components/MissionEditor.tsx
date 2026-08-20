@@ -22,6 +22,7 @@ import {
   defaultMissionWindow,
   defaultSchedulingForType,
   missionTemplateComplete,
+  resolveMissionPositions,
   STANDARD_BASE_WORK_SUMMARY,
   STANDARD_GUARD_DAY_SUMMARY,
   STANDARD_KITCHEN_SUMMARY,
@@ -185,6 +186,14 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setMsg("");
     setErr("");
 
+    const syncedPositions = resolveMissionPositions({
+      missionType,
+      startsAt: new Date(startsAt).toISOString(),
+      endsAt: new Date(endsAt).toISOString(),
+      scheduling: schedulingRules,
+      clientPositions: positions,
+    });
+
     const payload = {
       title: title || `${missionDate} · ${MISSION_TYPE_LABELS[missionType]}`,
       mission_type: missionType,
@@ -192,14 +201,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       starts_at: new Date(startsAt).toISOString(),
       ends_at: new Date(endsAt).toISOString(),
       status,
-      positions: missionTemplateComplete(missionType, positions)
-        ? positions
-        : standardMissionPositions({
-            missionType,
-            startsAt: new Date(startsAt).toISOString(),
-            endsAt: new Date(endsAt).toISOString(),
-            scheduling: schedulingRules,
-          }),
+      positions: syncedPositions,
       scheduling_rules: schedulingRules,
       notes: notes || null,
     };
@@ -217,7 +219,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
 
-    if (!missionTemplateComplete(missionType, positions)) {
+    if (missionType === "guards" || !missionTemplateComplete(missionType, positions)) {
       setPositions(payload.positions);
     }
 

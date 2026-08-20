@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import {
   defaultSchedulingForType,
-  missionTemplateComplete,
-  standardMissionPositions,
+  resolveMissionPositions,
 } from "@/lib/mission-templates";
 import {
   emptyAssignments,
@@ -58,15 +57,13 @@ export async function POST(request: Request) {
   );
 
   const clientPositions = body.positions;
-  const positions =
-    clientPositions?.length && missionTemplateComplete(mission_type, clientPositions)
-      ? clientPositions
-      : standardMissionPositions({
-          missionType: mission_type,
-          startsAt: starts_at,
-          endsAt: ends_at,
-          scheduling: scheduling_rules,
-        });
+  const positions = resolveMissionPositions({
+    missionType: mission_type,
+    startsAt: starts_at,
+    endsAt: ends_at,
+    scheduling: scheduling_rules,
+    clientPositions,
+  });
 
   try {
     const saved = await saveMissionDay({

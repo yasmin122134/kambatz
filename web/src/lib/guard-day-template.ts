@@ -165,7 +165,8 @@ function rotatingGuardSlots(
   windows: GuardShiftWindow[],
   seatsFor: (w: GuardShiftWindow) => number,
 ): MissionSlot[] {
-  return slotsFromWindows(windows, seatsFor);
+  // כל העמדות חולקות את אותם חלונות — כולל משמרות קצרות לסנכרון
+  return slotsFromWindows(windows, seatsFor, true);
 }
 
 function rearVehicleSlotsFromWindows(
@@ -175,9 +176,7 @@ function rearVehicleSlotsFromWindows(
 ): MissionSlot[] {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-  return rotatingGuardSlots(windows, (w) =>
-    rearSeatsForWindow(w, dayStartMin, dayEndMin),
-  );
+  return slotsFromWindows(windows, (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin), true);
 }
 
 function footPatrolSlotsFromWindows(
@@ -354,14 +353,12 @@ function splitSlotAtWallBoundaries(
 }
 
 /**
- * מנרמל משמרות ש״ג רכב אחורי:
- * - 06:00–18:00 בדיוק 1 שומר · כל שאר השעות בדיוק 2
- * - פיצול במעברי 06:00 / 18:00
+ * @deprecated השתמשו ב-syncGuardShiftSlots — מנרמל רק את ש״ג אחורי בודד
  */
 export function normalizeRearVehicleSlots(
   slots: MissionSlot[],
-  dayStart = "06:00",
-  dayEnd = "18:00",
+  dayStart = REAR_VEHICLE_DAY_START,
+  dayEnd = REAR_VEHICLE_DAY_END,
   daySeats = 1,
   nightSeats = 2,
 ): MissionSlot[] {
@@ -488,32 +485,150 @@ export type BuildGuardDayOptions = {
   carmelSeats?: number;
 };
 
-/** מערך שמירות סטנדרטי — כל העמדות לפי הפקודה */
-export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
+type GuardDayContext = {
+  board: string;
+  cycleMin: number;
+  shift: number;
+  day: readonly [string, string];
+  footDay: readonly [string, string];
+  season: "summer" | "winter";
+  missionStartsAt?: string;
+  missionEndsAt?: string;
+  carmelSeats: number;
+};
+
+function resolveGuardDayContext(options?: BuildGuardDayOptions): GuardDayContext {
   const shift = options?.shiftHours ?? 4;
   const board = options?.boardStart ?? isoToTimeLabel(options?.missionStartsAt) ?? "20:00";
   const cycleMin = cycleMinutesFromMission(options?.missionStartsAt, options?.missionEndsAt);
-  const carmelSeats = options?.carmelSeats ?? 3;
   const day =
     options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "18:00"] as const);
   const footDay =
     options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "19:00"] as const);
+  return {
+    board,
+    cycleMin,
+    shift,
+    day,
+    footDay,
+    season: options?.season ?? "summer",
+    missionStartsAt: options?.missionStartsAt,
+    missionEndsAt: options?.missionEndsAt,
+    carmelSeats: options?.carmelSeats ?? 3,
+  };
+}
 
-  /** רשת משמרות אחת — כל העמדות מחליפות ביחד (כולל סנכרון קצר בתחילת היום) */
-  const windows = buildUnifiedGuardShiftWindows(board, cycleMin, shift, day[1], [
-    day[0],
-    footDay[1],
-  ]);
-  const fixedSeats = (seats: number) => rotatingGuardSlots(windows, () => seats);
+function slotWindowKey(slot: Pick<MissionSlot, "start_time" | "end_time">): string {
+  return `${slot.start_time}-${slot.end_time}`;
+}
+
+function wallBoundsFromSlotTimes(slots: MissionSlot[]): string[] {
+  const out = new Set<string>();
+  for (const slot of slots) {
+    if (slot.start_time) out.add(slot.start_time);
+    if (slot.end_time) out.add(slot.end_time);
+  }
+  return [...out];
+}
+
+/** רשת משמרות מאוחדת — כולל גבולות מאילוצי ש״ג אחורי/רגלי + חלונות קיימים */
+function buildGuardDayWindows(
+  ctx: GuardDayContext,
+  positions?: MissionPosition[],
+): GuardShiftWindow[] {
+  const staticBounds = [ctx.day[0], ctx.footDay[1]];
+  const rear = positions?.find((p) => p.name.includes("רכב אחורי"));
+  const fromRear = rear ? wallBoundsFromSlotTimes(rear.slots) : [];
+  const extra = [...new Set([...staticBounds, ...fromRear])];
+  return buildUnifiedGuardShiftWindows(ctx.board, ctx.cycleMin, ctx.shift, ctx.day[1], extra);
+}
+
+function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
+  const byKey = new Map(prev.map((s) => [slotWindowKey(s), s]));
+  return next.map((slot) => {
+    const old = byKey.get(slotWindowKey(slot));
+    return old ? { ...slot, id: old.id } : slot;
+  });
+}
+
+function guardSlotsForPosition(
+  pos: MissionPosition,
+  windows: GuardShiftWindow[],
+  ctx: GuardDayContext,
+): MissionSlot[] | null {
+  const dayStartMin = parseTimeMinutes(ctx.day[0]) ?? 6 * 60;
+  const dayEndMin = parseTimeMinutes(ctx.day[1]) ?? 18 * 60;
+  const footStartMin = parseTimeMinutes(ctx.footDay[0]) ?? 6 * 60;
+  const footEndMin = parseTimeMinutes(ctx.footDay[1]) ?? 19 * 60;
+
+  if (pos.kind === "officer_duty") {
+    return officerDutySlots(ctx.board, ctx.cycleMin);
+  }
+  if (pos.name.includes("רכב אחורי")) {
+    return slotsFromWindows(
+      windows,
+      (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
+      true,
+    );
+  }
+  if (pos.name.includes("רגלי")) {
+    return slotsFromWindows(
+      windows,
+      (w) => footSeatsForWindow(w, footStartMin, footEndMin),
+      true,
+    );
+  }
+  if (pos.name.includes("רכב קדמי")) {
+    return slotsFromWindows(windows, () => 2, true);
+  }
+  if (pos.kind === "duty") {
+    return slotsFromWindows(windows, () => 3, true);
+  }
+  return slotsFromWindows(windows, () => 1, true);
+}
+
+/**
+ * מסנכרן את חלונות המשמרת לכל העמדות — אותם זמני עלייה/ירידה.
+ * אם נוצרה משמרת קצרה (למשל בגלל ש״ג אחורi) — היא מתווספת לכולם.
+ */
+export function syncGuardShiftSlots(
+  positions: MissionPosition[],
+  options?: BuildGuardDayOptions,
+): MissionPosition[] {
+  const ctx = resolveGuardDayContext(options);
+  const windows = buildGuardDayWindows(ctx, positions);
+
+  return positions.map((pos) => {
+    if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
+      const carmel = carmelSlotFromMission(
+        ctx.missionStartsAt,
+        ctx.missionEndsAt,
+        ctx.board,
+        ctx.carmelSeats,
+      );
+      return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
+    }
+
+    const next = guardSlotsForPosition(pos, windows, ctx);
+    if (!next) return pos;
+    return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
+  });
+}
+
+/** מערך שמירות סטנדרטי — כל העמדות לפי הפקודה */
+export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
+  const ctx = resolveGuardDayContext(options);
+  const windows = buildGuardDayWindows(ctx);
+  const fixedSeats = (seats: number) => slotsFromWindows(windows, () => seats, true);
 
   const carmelSlot = carmelSlotFromMission(
-    options?.missionStartsAt,
-    options?.missionEndsAt,
-    board,
-    carmelSeats,
+    ctx.missionStartsAt,
+    ctx.missionEndsAt,
+    ctx.board,
+    ctx.carmelSeats,
   );
 
-  return [
+  const positions = [
     guardPosition("כרמל א׳ (כוננות)", [carmelSlot], "standby_carmel_a", {
       same_room: true,
       same_gender: true,
@@ -524,21 +639,23 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     }),
     guardPosition(
       "ש״ג רכב אחורי",
-      rearVehicleSlotsFromWindows(windows, day[0], day[1]),
+      rearVehicleSlotsFromWindows(windows, ctx.day[0], ctx.day[1]),
     ),
     guardPosition("ש״ג רכב קדמי", fixedSeats(2)),
     guardPosition("פטל", fixedSeats(1)),
     guardPosition("תצפיתן", fixedSeats(1)),
     guardPosition(
       "ש״ג רגלי",
-      footPatrolSlotsFromWindows(windows, footDay[0], footDay[1]),
+      footPatrolSlotsFromWindows(windows, ctx.footDay[0], ctx.footDay[1]),
     ),
     guardPosition("ימ״ח", fixedSeats(1)),
     guardPosition("נשקייה", fixedSeats(1)),
     guardPosition("בונקר", fixedSeats(1)),
     guardPosition("כוח עתודה", fixedSeats(3), "duty"),
-    guardPosition("קצין תורן", officerDutySlots(board, cycleMin), "officer_duty"),
+    guardPosition("קצין תורן", officerDutySlots(ctx.board, ctx.cycleMin), "officer_duty"),
   ];
+
+  return syncGuardShiftSlots(positions, options);
 }
 
 export function defaultGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {

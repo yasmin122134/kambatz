@@ -3,7 +3,7 @@ import { isAdmin } from "@/lib/auth";
 import {
   defaultSchedulingForType,
   missionTemplateComplete,
-  standardMissionPositions,
+  resolveMissionPositions,
 } from "@/lib/mission-templates";
 import {
   deleteMissionDay,
@@ -57,15 +57,14 @@ export async function PUT(request: Request, { params }: Params) {
     : existing.scheduling_rules;
 
   const clientPositions = body.positions ?? existing.positions;
-  const positions =
-    clientPositions?.length && missionTemplateComplete(mission_type, clientPositions)
-      ? clientPositions
-      : standardMissionPositions({
-          missionType: mission_type,
-          startsAt: starts_at,
-          endsAt: ends_at,
-          scheduling: scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
-        });
+  const positions = resolveMissionPositions({
+    missionType: mission_type,
+    startsAt: starts_at,
+    endsAt: ends_at,
+    scheduling:
+      scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
+    clientPositions,
+  });
 
   const templateWasIncomplete =
     !clientPositions?.length || !missionTemplateComplete(mission_type, clientPositions);

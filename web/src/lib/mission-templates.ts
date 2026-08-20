@@ -8,8 +8,9 @@ import {
   officerDutySlotsValid,
   rearVehicleSlotsValid,
   summarizeGuardSlots,
+  syncGuardShiftSlots,
 } from "@/lib/guard-day-template";
-export { guardPositionHint, normalizeRearVehicleSlots, summarizeGuardSlots };
+export { guardPositionHint, normalizeRearVehicleSlots, summarizeGuardSlots, syncGuardShiftSlots };
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import type { MissionPosition, MissionSchedulingRules, MissionType } from "@/lib/types";
 import {
@@ -106,6 +107,58 @@ export function standardMissionPositions(input: StandardMissionInput): MissionPo
   });
 }
 
+/** מסנכרן חלונות משמרת לכל עמדות השמירה לפני שמירה */
+export function finalizeGuardMissionPositions(
+  positions: MissionPosition[],
+  input: {
+    startsAt: string;
+    endsAt: string;
+    scheduling?: MissionSchedulingRules;
+    season?: "summer" | "winter";
+  },
+): MissionPosition[] {
+  if (!positions?.length) return positions;
+  return syncGuardShiftSlots(positions, {
+    shiftHours: input.scheduling?.shift_hours,
+    boardStart: input.scheduling?.board_start,
+    season: input.season ?? "summer",
+    missionStartsAt: input.startsAt,
+    missionEndsAt: input.endsAt,
+  });
+}
+
+export function resolveMissionPositions(input: {
+  missionType: MissionType;
+  startsAt: string;
+  endsAt: string;
+  scheduling?: MissionSchedulingRules;
+  season?: "summer" | "winter";
+  clientPositions?: MissionPosition[];
+}): MissionPosition[] {
+  const scheduling =
+    input.scheduling ?? defaultSchedulingForType(input.missionType, input.startsAt);
+  const base =
+    input.clientPositions?.length &&
+    missionTemplateComplete(input.missionType, input.clientPositions)
+      ? input.clientPositions
+      : standardMissionPositions({
+          missionType: input.missionType,
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+          scheduling,
+          season: input.season,
+        });
+
+  if (input.missionType !== "guards") return base;
+
+  return finalizeGuardMissionPositions(base, {
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    scheduling,
+    season: input.season,
+  });
+}
+
 export function missionTemplateComplete(
   missionType: MissionType,
   positions: MissionPosition[],
@@ -165,7 +218,7 @@ export function missionTemplateComplete(
 
 export const STANDARD_GUARD_DAY_SUMMARY = [
   "חילוף מסונכרן — כל העמדות (מלבד כוננות/קצין תורן) מחליפות באותם זמנים, כולל משמרות קצרות לסנכרון",
-  "משמרת סנכרון קצרה בתחילת היום אם צריך (למשל 09:00–10:00) — לכל העמדות",
+  "משמרת סנכרון קצרה (למשל 09:00–10:00) — נוצרת לכל העמדות יחד כשצריך",
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",
   "ש״ג רכב אחורי — בדיוק 1 ב־06–18, בדיוק 2 בשאר השעות · חילוף מסונכרן",
