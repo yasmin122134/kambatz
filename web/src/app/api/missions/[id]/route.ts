@@ -3,6 +3,7 @@ import { isAdmin } from "@/lib/auth";
 import {
   deleteMissionDay,
   getMissionDay,
+  normalizeSchedulingRules,
   saveMissionDay,
   syncAssignmentSeats,
 } from "@/lib/missions";
@@ -59,6 +60,9 @@ export async function PUT(request: Request, { params }: Params) {
       status: body.status ?? existing.status,
       positions,
       assignments,
+      scheduling_rules: body.scheduling_rules
+        ? normalizeSchedulingRules(body.scheduling_rules)
+        : existing.scheduling_rules,
       notes: body.notes ?? existing.notes,
     });
     return NextResponse.json(saved);

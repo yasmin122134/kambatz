@@ -81,6 +81,34 @@ export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
 export type MissionType = "guards" | "base_work" | "kitchen";
 export type MissionStatus = "draft" | "published";
 
+export type MissionPositionKind =
+  | "guard"
+  | "standby_carmel_a"
+  | "standby_carmel_b"
+  | "duty"
+  | "kitchen";
+
+export interface MissionSchedulingRules {
+  /** מינימום שעות מנוחה ביממה (לא כולל כוננות) */
+  rest_hours: number;
+  /** כלל 4-8: מרווח בין שמירות ≥ יחס × משך המשמרת */
+  guard_ratio: number;
+  /** שעת פתיחת הלוח — לחישוב מחזור 24 שעות */
+  board_start: string;
+  /** נקודות צדק לשעה — כרמל א׳ (קשה יותר) */
+  standby_carmel_a_weight: number;
+  /** נקודות צדק לשעה — כרמל ב׳ */
+  standby_carmel_b_weight: number;
+}
+
+export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
+  rest_hours: 7,
+  guard_ratio: 2,
+  board_start: "20:00",
+  standby_carmel_a_weight: 0.45,
+  standby_carmel_b_weight: 0.15,
+};
+
 export interface MissionSlot {
   id: string;
   start_time: string;
@@ -91,6 +119,8 @@ export interface MissionSlot {
 export interface MissionPosition {
   id: string;
   name: string;
+  kind?: MissionPositionKind;
+  same_room?: boolean;
   slots: MissionSlot[];
 }
 
@@ -104,10 +134,19 @@ export interface MissionDay {
   status: MissionStatus;
   positions: MissionPosition[];
   assignments: Record<string, string[]>;
+  scheduling_rules: MissionSchedulingRules;
   notes: string | null;
   created_at: string;
   updated_at: string;
 }
+
+export const MISSION_POSITION_KIND_LABELS: Record<MissionPositionKind, string> = {
+  guard: "שמירה",
+  standby_carmel_a: "כרמל א׳ (כוננות)",
+  standby_carmel_b: "כרמל ב׳ (כוננות)",
+  duty: "עב״ס / תורנות",
+  kitchen: "מטבח / חמגשיות",
+};
 
 export const MISSION_TYPE_LABELS: Record<MissionType, string> = {
   guards: "יום שמירות",
@@ -120,7 +159,14 @@ export const MISSION_STATUS_LABELS: Record<MissionStatus, string> = {
   published: "פורסם",
 };
 
-export type FairnessBucket = "solo" | "pair" | "standby" | "duty" | "kitchen";
+export type FairnessBucket =
+  | "solo"
+  | "pair"
+  | "standby"
+  | "standby_a"
+  | "standby_b"
+  | "duty"
+  | "kitchen";
 
 export type FairnessRules = Record<FairnessBucket, number> & { hist: number };
 
@@ -138,6 +184,8 @@ export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   solo: 1.5,
   pair: 1.0,
   standby: 0.15,
+  standby_a: 0.45,
+  standby_b: 0.15,
   duty: 0.1,
   kitchen: 0.1,
   hist: 0.7,
@@ -147,6 +195,8 @@ export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
   solo: "שמירה לבד (לשעה)",
   pair: "שמירה בזוג (לשעה)",
   standby: "כוננות (לשעה)",
+  standby_a: "כרמל א׳ — כוננות (לשעה)",
+  standby_b: "כרמל ב׳ — כוננות (לשעה)",
   duty: "עבודות בסיס (לשעה)",
   kitchen: "תורנות מטבח (לשעה)",
 };
@@ -154,7 +204,9 @@ export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
 export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
   solo: "משמרת שמירה כשמאיישים יחיד בעמדה",
   pair: "משמרת שמירה עם 2+ מאיישים",
-  standby: "כיתת כוננות",
+  standby: "כיתת כוננות (כללי)",
+  standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
+  standby_b: "כרמל ב׳ — כוננות",
   duty: "עב״ס, עתודה ומשימות בסיס",
   kitchen: "חמגשיות ותורנות מטבח",
 };

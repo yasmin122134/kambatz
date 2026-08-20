@@ -47,6 +47,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   } | null>(null);
   const [swapMode, setSwapMode] = useState<SwapMode>(null);
   const [msg, setMsg] = useState("");
+  const [autoAssigning, setAutoAssigning] = useState(false);
 
   const dayMissions = useMemo(
     () => missions.filter((m) => m.mission_date === activeDate),
@@ -64,7 +65,8 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   }, [dayMissions, personName]);
 
   const loadMissions = useCallback(async () => {
-    const res = await fetch("/api/missions?published=1");
+    const url = isAdminUser ? "/api/missions" : "/api/missions?published=1";
+    const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
       setMissions(data);
@@ -73,7 +75,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
         setActiveDate(String(nextDates[0]));
       }
     }
-  }, [activeDate]);
+  }, [activeDate, isAdminUser]);
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;
@@ -163,6 +165,22 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
     });
   }
 
+  async function adminReplacementSwap(
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) {
+    await patchAssignment(missionId, {
+      action: "swap",
+      slot_id: slotId,
+      seat_index: seatIndex,
+      target_slot_id: targetSlotId,
+      target_seat_index: targetSeatIndex,
+    });
+  }
+
   async function setIssueStatus(id: string, status: "approved" | "rejected") {
     await fetch("/api/issues", {
       method: "PATCH",
@@ -179,6 +197,36 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       body: JSON.stringify({ id, status }),
     });
     loadAdminData();
+  }
+
+  async function runAutoAssign() {
+    if (!activeDate || !confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")) {
+      return;
+    }
+    setAutoAssigning(true);
+    setMsg("");
+    const res = await fetch("/api/missions/auto-assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mission_date: activeDate, keep_existing: true }),
+    });
+    const data = await res.json();
+    setAutoAssigning(false);
+    if (!res.ok) {
+      setMsg(data.error || "שגיאה בשיבוץ");
+      return;
+    }
+    await loadMissions();
+    const filled = (data.results || []).reduce(
+      (sum: number, r: { filled: number }) => sum + r.filled,
+      0,
+    );
+    const warnCount = (data.warnings || []).length;
+    setMsg(
+      warnCount
+        ? `שובצו ${filled} משבצות. ${warnCount} משבצות לא מולאו — אין מספיק צוערים פנויים.`
+        : `שובצו ${filled} משבצות בהצלחה.`,
+    );
   }
 
   async function setFairnessStatus(id: string, status: "approved" | "rejected") {
@@ -233,6 +281,14 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
             <>
               <button
                 type="button"
+                className="btn-pri btn-sm"
+                disabled={autoAssigning || !activeDate}
+                onClick={runAutoAssign}
+              >
+                {autoAssigning ? "משבץ…" : "שיבוץ חכם ליום"}
+              </button>
+              <button
+                type="button"
                 className={`btn-sm ${showConstraints ? "on" : ""}`}
                 onClick={() => setShowConstraints((v) => !v)}
               >
@@ -249,7 +305,9 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
         </div>
       </div>
 
-      {msg && <p className="msg-err mb-3">{msg}</p>}
+      {msg && (
+        <p className={`mb-3 ${msg.includes("שובצו") ? "msg-ok" : "msg-err"}`}>{msg}</p>
+      )}
 
       {showConstraints && isAdminUser && (
         <ConstraintsPanel
@@ -309,6 +367,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
                 );
               }}
               onAdminSet={adminSetName}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -348,6 +407,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
                 );
               }}
               onAdminSet={adminSetName}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -387,6 +447,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
                 );
               }}
               onAdminSet={adminSetName}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -525,6 +586,7 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
+  onAdminReplacementSwap,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -538,6 +600,13 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onAdminReplacementSwap: (
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
   onCancelSwap: () => void;
 }) {
   const slots = flattenMissionSlots(mission);
@@ -567,6 +636,7 @@ function MissionPanel({
                       onTake={onTake}
                       onSwap={onSwap}
                       onAdminSet={onAdminSet}
+                      onAdminReplacementSwap={onAdminReplacementSwap}
                       onCancelSwap={onCancelSwap}
                     />
                   ))}
@@ -595,9 +665,120 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
+            onAdminReplacementSwap={onAdminReplacementSwap}
             onCancelSwap={onCancelSwap}
           />
         ))}
+    </div>
+  );
+}
+
+function ReplacementPicker({
+  missionId,
+  slotId,
+  seatIndex,
+  currentName,
+  onDirect,
+  onSwap,
+}: {
+  missionId: string;
+  slotId: string;
+  seatIndex: number;
+  currentName: string;
+  onDirect: (name: string) => void;
+  onSwap: (targetSlotId: string, targetSeatIndex: number) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<"replace" | "swap">("replace");
+  const [loading, setLoading] = useState(false);
+  const [options, setOptions] = useState<
+    {
+      type: "direct" | "swap";
+      personName: string;
+      label: string;
+      swapSlotId?: string;
+      swapSeatIndex?: number;
+    }[]
+  >([]);
+
+  async function load(nextMode: "replace" | "swap") {
+    setMode(nextMode);
+    setLoading(true);
+    setOpen(true);
+    const res = await fetch(`/api/missions/${missionId}/replacements`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        seat_index: seatIndex,
+        remove_name: currentName,
+        mode: nextMode,
+      }),
+    });
+    const data = await res.json();
+    setLoading(false);
+    if (res.ok) setOptions(data.options || []);
+    else setOptions([]);
+  }
+
+  if (!currentName) return null;
+
+  return (
+    <div className="relative">
+      <button type="button" className="btn-sm" onClick={() => load("replace")}>
+        מחליף
+      </button>
+      {open && (
+        <div className="absolute z-50 mt-1 min-w-[260px] max-w-sm card shadow-lg p-3 text-sm right-0">
+          <div className="bar spread mb-2">
+            <b>מחליף ל{currentName}</b>
+            <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
+              ×
+            </button>
+          </div>
+          <div className="flex gap-1 mb-2">
+            <button
+              type="button"
+              className={`btn-sm ${mode === "replace" ? "on" : ""}`}
+              onClick={() => load("replace")}
+            >
+              הסר + מחליף
+            </button>
+            <button
+              type="button"
+              className={`btn-sm ${mode === "swap" ? "on" : ""}`}
+              onClick={() => load("swap")}
+            >
+              החלפה ראש בראש
+            </button>
+          </div>
+          {loading ? (
+            <p className="hint">מחפש…</p>
+          ) : options.length === 0 ? (
+            <p className="hint">אין מחליף שעומד בכללים</p>
+          ) : (
+            <ul className="space-y-2 max-h-48 overflow-y-auto">
+              {options.map((o) => (
+                <li key={`${o.type}-${o.personName}-${o.swapSlotId || ""}`}>
+                  <button
+                    type="button"
+                    className="btn-sm w-full text-right"
+                    onClick={() => {
+                      if (o.type === "direct") onDirect(o.personName);
+                      else if (o.swapSlotId != null && o.swapSeatIndex != null) {
+                        onSwap(o.swapSlotId, o.swapSeatIndex);
+                      }
+                      setOpen(false);
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -615,6 +796,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
+  onAdminReplacementSwap,
   onCancelSwap,
 }: {
   missionId: string;
@@ -629,6 +811,13 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onAdminReplacementSwap: (
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
   onCancelSwap: () => void;
 }) {
   const isMine = slot.assignees.includes(personName);
@@ -652,12 +841,32 @@ function SlotCard({
           return (
             <li key={seatIndex} className="flex flex-wrap items-center gap-2 text-sm">
               {isAdmin ? (
-                <NameCombobox
-                  value={name}
-                  onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
-                  placeholder="שם"
-                  className="flex-1 min-w-[140px]"
-                />
+                <>
+                  <NameCombobox
+                    value={name}
+                    onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
+                    placeholder="שם"
+                    className="flex-1 min-w-[140px]"
+                  />
+                  {name && (
+                    <ReplacementPicker
+                      missionId={missionId}
+                      slotId={slot.slotId}
+                      seatIndex={seatIndex}
+                      currentName={name}
+                      onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
+                      onSwap={(targetSlotId, targetSeatIndex) =>
+                        onAdminReplacementSwap(
+                          missionId,
+                          slot.slotId,
+                          seatIndex,
+                          targetSlotId,
+                          targetSeatIndex,
+                        )
+                      }
+                    />
+                  )}
+                </>
               ) : (
                 <span className={isMySeat ? "schedule-you font-semibold" : ""}>
                   {name || "— פנוי —"}

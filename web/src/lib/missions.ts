@@ -1,11 +1,14 @@
 import { createClient } from "@/lib/supabase/server";
 import type { MissionDay } from "@/lib/types";
 import {
+  defaultGuardDayPositions,
   emptyAssignments,
   newPosition,
+  normalizeSchedulingRules,
   syncAssignmentSeats,
   upcomingFromMissions,
 } from "@/lib/mission-utils";
+import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 export {
   flattenMissionSlots,
@@ -14,6 +17,8 @@ export {
   emptyAssignments,
   syncAssignmentSeats,
   upcomingFromMissions,
+  defaultGuardDayPositions,
+  normalizeSchedulingRules,
 } from "@/lib/mission-utils";
 export type { FlatSlot, UpcomingMissionItem } from "@/lib/mission-utils";
 
@@ -28,6 +33,7 @@ function rowFromDb(row: Record<string, unknown>): MissionDay {
     status: row.status as MissionDay["status"],
     positions: (row.positions as MissionDay["positions"]) || [],
     assignments: (row.assignments as Record<string, string[]>) || {},
+    scheduling_rules: normalizeSchedulingRules(row.scheduling_rules),
     notes: row.notes ? String(row.notes) : null,
     created_at: String(row.created_at),
     updated_at: String(row.updated_at),
@@ -94,6 +100,9 @@ export async function saveMissionDay(
     status: payload.status,
     positions,
     assignments,
+    scheduling_rules: normalizeSchedulingRules(
+      payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+    ),
     notes: payload.notes || null,
     updated_at: new Date().toISOString(),
   };

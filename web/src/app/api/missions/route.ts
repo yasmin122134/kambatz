@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import {
+  defaultGuardDayPositions,
   emptyAssignments,
   listMissionDays,
   newPosition,
+  normalizeSchedulingRules,
   saveMissionDay,
 } from "@/lib/missions";
+import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import type { MissionType } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -52,9 +55,18 @@ export async function POST(request: Request) {
   if (!positions?.length) {
     positions =
       mission_type === "guards"
-        ? [newPosition("עמדה 1"), newPosition("עמדה 2")]
-        : [newPosition(mission_type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס")];
+        ? defaultGuardDayPositions()
+        : [
+            newPosition(
+              mission_type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס",
+              { kind: mission_type === "kitchen" ? "kitchen" : "duty" },
+            ),
+          ];
   }
+
+  const scheduling_rules = normalizeSchedulingRules(
+    body.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+  );
 
   try {
     const saved = await saveMissionDay({
@@ -66,6 +78,7 @@ export async function POST(request: Request) {
       status: body.status === "published" ? "published" : "draft",
       positions,
       assignments: emptyAssignments(positions),
+      scheduling_rules,
       notes: body.notes || null,
     });
     return NextResponse.json(saved, { status: 201 });

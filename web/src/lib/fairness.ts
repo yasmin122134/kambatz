@@ -5,11 +5,13 @@ import type {
   FairnessBucket,
   FairnessRules,
   FairnessRuleRequest,
+  MissionPositionKind,
   MissionType,
   PersonFairnessStats,
   PersonMissionHistoryItem,
 } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
+import { isStandbyKind } from "@/lib/mission-utils";
 
 function parseTime(s: string): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
@@ -29,10 +31,16 @@ export function slotDurationHours(start: string, end: string): number {
 export function bucketForAssignment(
   missionType: MissionType,
   seatCount: number,
+  positionKind?: MissionPositionKind,
 ): FairnessBucket {
-  if (missionType === "guards") return seatCount <= 1 ? "solo" : "pair";
+  if (positionKind === "standby_carmel_a") return "standby_a";
+  if (positionKind === "standby_carmel_b") return "standby_b";
+  if (positionKind && isStandbyKind(positionKind)) return "standby";
+  if (positionKind === "kitchen") return "kitchen";
+  if (positionKind === "duty") return "duty";
   if (missionType === "kitchen") return "kitchen";
-  return "duty";
+  if (missionType === "base_work") return "duty";
+  return seatCount <= 1 ? "solo" : "pair";
 }
 
 export function normalizeFairnessRules(raw: unknown): FairnessRules {
@@ -92,7 +100,11 @@ export async function getPersonFairnessStats(
     for (const slot of flattenMissionSlots(mission)) {
       if (!slot.assignees.includes(personName)) continue;
       const hours = slotDurationHours(slot.startTime, slot.endTime);
-      const bucket = bucketForAssignment(mission.mission_type, slot.seatCount);
+      const bucket = bucketForAssignment(
+        mission.mission_type,
+        slot.seatCount,
+        slot.positionKind,
+      );
       const points = pointsForHours(hours, bucket, rules);
       history.push({
         id: `${mission.id}:${slot.slotId}:${personName}`,

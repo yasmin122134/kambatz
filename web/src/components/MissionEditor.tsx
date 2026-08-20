@@ -3,10 +3,14 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
+  DEFAULT_MISSION_SCHEDULING_RULES,
+  MISSION_POSITION_KIND_LABELS,
   MISSION_STATUS_LABELS,
   MISSION_TYPE_LABELS,
   type MissionDay,
   type MissionPosition,
+  type MissionPositionKind,
+  type MissionSchedulingRules,
   type MissionSlot,
   type MissionType,
 } from "@/lib/types";
@@ -19,9 +23,40 @@ function newSlot(start = "08:00", end = "10:00", seats = 1): MissionSlot {
   return { id: uid(), start_time: start, end_time: end, seat_count: seats };
 }
 
-function newPosition(name: string): MissionPosition {
-  return { id: uid(), name, slots: [newSlot()] };
+function newPosition(
+  name: string,
+  opts?: { kind?: MissionPositionKind; same_room?: boolean },
+): MissionPosition {
+  const kind = opts?.kind;
+  return {
+    id: uid(),
+    name,
+    kind,
+    same_room:
+      opts?.same_room ??
+      (kind === "standby_carmel_a" || kind === "standby_carmel_b"),
+    slots: [
+      kind === "standby_carmel_a" || kind === "standby_carmel_b"
+        ? newSlot("00:00", "00:00", 4)
+        : newSlot(),
+    ],
+  };
 }
+
+function guardDayTemplate(): MissionPosition[] {
+  return [
+    newPosition("כרמל א׳ (כוננות)", { kind: "standby_carmel_a", same_room: true }),
+    newPosition("כרמל ב׳ (כוננות)", { kind: "standby_carmel_b", same_room: true }),
+    newPosition("עמדה 1", { kind: "guard" }),
+    newPosition("עמדה 2", { kind: "guard" }),
+  ];
+}
+
+const GUARD_KINDS: MissionPositionKind[] = [
+  "guard",
+  "standby_carmel_a",
+  "standby_carmel_b",
+];
 
 function formatDatetimeLocal(iso: string) {
   const d = new Date(iso);
@@ -43,6 +78,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   const [status, setStatus] = useState<"draft" | "published">("draft");
   const [positions, setPositions] = useState<MissionPosition[]>([]);
   const [notes, setNotes] = useState("");
+  const [schedulingRules, setSchedulingRules] = useState<MissionSchedulingRules>(
+    DEFAULT_MISSION_SCHEDULING_RULES,
+  );
+  const [autoAssigning, setAutoAssigning] = useState(false);
 
   const load = useCallback(async () => {
     if (!missionId) return;
@@ -61,6 +100,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setEndsAt(formatDatetimeLocal(m.ends_at));
     setStatus(m.status);
     setPositions(m.positions);
+    setSchedulingRules(m.scheduling_rules || DEFAULT_MISSION_SCHEDULING_RULES);
     setNotes(m.notes || "");
     setLoading(false);
   }, [missionId]);
@@ -77,10 +117,15 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setStartsAt(`${date}T08:00`);
     setEndsAt(`${date}T20:00`);
     setTitle("");
+    setSchedulingRules({ ...DEFAULT_MISSION_SCHEDULING_RULES });
     setPositions(
       type === "guards"
-        ? [newPosition("עמדה 1"), newPosition("עמדה 2")]
-        : [newPosition(type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס")],
+        ? guardDayTemplate()
+        : [
+            newPosition(type === "kitchen" ? "משמרות מטבח" : "משמרות עב״ס", {
+              kind: type === "kitchen" ? "kitchen" : "duty",
+            }),
+          ],
     );
   }
 
@@ -98,6 +143,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       ends_at: new Date(endsAt).toISOString(),
       status,
       positions,
+      scheduling_rules: schedulingRules,
       notes: notes || null,
     };
 
@@ -118,6 +164,32 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }
+  }
+
+  async function runAutoAssign() {
+    if (!missionId) return;
+    if (!confirm("ליצור שיבוץ חכם? משבצות שכבר מלאות יישארו.")) return;
+    setAutoAssigning(true);
+    setErr("");
+    setMsg("");
+    const res = await fetch("/api/missions/auto-assign", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mission_id: missionId, keep_existing: true }),
+    });
+    const data = await res.json();
+    setAutoAssigning(false);
+    if (!res.ok) {
+      setErr(data.error || "שגיאה בשיבוץ");
+      return;
+    }
+    await load();
+    const warnCount = (data.warnings || []).length;
+    setMsg(
+      warnCount
+        ? `שובצו ${data.filled} משבצות. ${warnCount} לא מולאו.`
+        : `שובצו ${data.filled} משבצות.`,
+    );
   }
 
   function updateSlot(posId: string, slotId: string, patch: Partial<MissionSlot>) {
@@ -155,9 +227,25 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setPositions((prev) => [
       ...prev,
       newPosition(
-        missionType === "guards" ? `עמדה ${prev.length + 1}` : prev[0]?.name || "משמרת",
+        missionType === "guards" ? `עמדה ${prev.filter((p) => p.kind === "guard" || !p.kind).length + 1}` : prev[0]?.name || "משמרת",
+        { kind: missionType === "guards" ? "guard" : missionType === "kitchen" ? "kitchen" : "duty" },
       ),
     ]);
+  }
+
+  function updatePositionKind(posId: string, kind: MissionPositionKind) {
+    setPositions((prev) =>
+      prev.map((p) =>
+        p.id !== posId
+          ? p
+          : {
+              ...p,
+              kind,
+              same_room:
+                kind === "standby_carmel_a" || kind === "standby_carmel_b",
+            },
+      ),
+    );
   }
 
   if (loading) return <p className="hint p-5">טוען…</p>;
@@ -262,9 +350,92 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       </div>
 
       <div className="card space-y-4">
+        <h4 className="font-display text-base">כללי שיבוץ ליום זה</h4>
+        <p className="hint text-sm">
+          משמשים בשיבוץ החכם ובחיפוש מחליף — מנוחה, כלל 4-8, ומשקלי כוננות.
+        </p>
+        <div className="rowf">
+          <div className="field">
+            <label>מנוחה מינימלית (שעות)</label>
+            <input
+              type="number"
+              min={0}
+              max={24}
+              step={0.5}
+              value={schedulingRules.rest_hours}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({
+                  ...r,
+                  rest_hours: Math.max(0, +e.target.value || 0),
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>כלל 4-8 (יחס מרווח)</label>
+            <input
+              type="number"
+              min={0}
+              max={10}
+              step={0.5}
+              value={schedulingRules.guard_ratio}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({
+                  ...r,
+                  guard_ratio: Math.max(0, +e.target.value || 0),
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>שעת פתיחת לוח</label>
+            <input
+              type="time"
+              value={schedulingRules.board_start}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({ ...r, board_start: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+        <div className="rowf">
+          <div className="field">
+            <label>נק׳/שעה — כרמל א׳</label>
+            <input
+              type="number"
+              min={0}
+              step={0.05}
+              value={schedulingRules.standby_carmel_a_weight}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({
+                  ...r,
+                  standby_carmel_a_weight: Math.max(0, +e.target.value || 0),
+                }))
+              }
+            />
+          </div>
+          <div className="field">
+            <label>נק׳/שעה — כרמל ב׳</label>
+            <input
+              type="number"
+              min={0}
+              step={0.05}
+              value={schedulingRules.standby_carmel_b_weight}
+              onChange={(e) =>
+                setSchedulingRules((r) => ({
+                  ...r,
+                  standby_carmel_b_weight: Math.max(0, +e.target.value || 0),
+                }))
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="card space-y-4">
         <div className="bar spread">
           <h4 className="font-display text-base">
-            {missionType === "guards" ? "עמדות שמירה" : "משמרות"}
+            {missionType === "guards" ? "עמדות וכוננות" : "משמרות"}
           </h4>
           {missionType === "guards" && (
             <button type="button" className="btn-sm" onClick={addPosition}>
@@ -275,19 +446,43 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
 
         {positions.map((pos) => (
           <div key={pos.id} className="border border-line2 rounded p-3 space-y-3">
-            <div className="field">
-              <label>שם {missionType === "guards" ? "עמדה" : "קבוצה"}</label>
-              <input
-                value={pos.name}
-                onChange={(e) =>
-                  setPositions((prev) =>
-                    prev.map((p) =>
-                      p.id === pos.id ? { ...p, name: e.target.value } : p,
-                    ),
-                  )
-                }
-              />
+            <div className="rowf">
+              <div className="field flex-1">
+                <label>שם {missionType === "guards" ? "עמדה" : "קבוצה"}</label>
+                <input
+                  value={pos.name}
+                  onChange={(e) =>
+                    setPositions((prev) =>
+                      prev.map((p) =>
+                        p.id === pos.id ? { ...p, name: e.target.value } : p,
+                      ),
+                    )
+                  }
+                />
+              </div>
+              {missionType === "guards" && (
+                <div className="field">
+                  <label>סוג</label>
+                  <select
+                    value={pos.kind || "guard"}
+                    onChange={(e) =>
+                      updatePositionKind(pos.id, e.target.value as MissionPositionKind)
+                    }
+                  >
+                    {GUARD_KINDS.map((k) => (
+                      <option key={k} value={k}>
+                        {MISSION_POSITION_KIND_LABELS[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
+            {(pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") && (
+              <p className="hint text-xs">
+                כוננות מאותו חדר — השיבוץ החכם יבחר חדר שלם ({pos.kind === "standby_carmel_a" ? "כרמל א׳ — קשה יותר" : "כרמל ב׳"})
+              </p>
+            )}
 
             {pos.slots.map((slot) => (
               <div key={slot.id} className="rowf items-end">
@@ -347,10 +542,20 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       {err && <p className="msg-err">{err}</p>}
       {msg && <p className="msg-ok">{msg}</p>}
 
-      <div className="bar">
+      <div className="bar flex-wrap gap-2">
         <button type="submit" className="btn-pri" disabled={saving}>
           {saving ? "שומר…" : "שמור"}
         </button>
+        {missionId && (
+          <button
+            type="button"
+            className="btn-pri"
+            disabled={autoAssigning || saving}
+            onClick={runAutoAssign}
+          >
+            {autoAssigning ? "משבץ…" : "שיבוץ חכם"}
+          </button>
+        )}
         <Link href="/admin/missions" className="btn">
           חזרה לרשימה
         </Link>

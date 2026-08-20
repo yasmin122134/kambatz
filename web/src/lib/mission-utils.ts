@@ -1,15 +1,30 @@
-import type { MissionDay, MissionPosition, MissionSlot, MissionType } from "@/lib/types";
+import type {
+  FairnessRules,
+  Issue,
+  MissionDay,
+  MissionPosition,
+  MissionPositionKind,
+  MissionSchedulingRules,
+  MissionSlot,
+  MissionType,
+  Person,
+} from "@/lib/types";
+import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 export type FlatSlot = {
   slotId: string;
   positionId: string;
   positionName: string;
+  positionKind: MissionPositionKind;
+  sameRoom: boolean;
   startTime: string;
   endTime: string;
   timeLabel: string;
   seatCount: number;
   assignees: string[];
   sortKey: number;
+  durationMinutes: number;
+  cyclicStart: number;
 };
 
 export type UpcomingMissionItem = {
@@ -28,32 +43,122 @@ function timeLabel(start: string, end: string) {
   return `${start}–${end}`;
 }
 
-function parseTime(s: string): number | null {
+export function parseTimeMinutes(s: string): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
   if (!m) return null;
   return +m[1] * 60 + +m[2];
 }
 
-export function flattenMissionSlots(mission: MissionDay): FlatSlot[] {
+export function slotDurationMinutes(start: string, end: string): number {
+  const a = parseTimeMinutes(start);
+  const b = parseTimeMinutes(end);
+  if (a === null || b === null) return 0;
+  if (b > a) return b - a;
+  if (b === a) return 1440;
+  return 1440 - a + b;
+}
+
+export function defaultPositionKind(
+  missionType: MissionType,
+  name = "",
+): MissionPositionKind {
+  const n = name.trim();
+  if (/כרמל\s*א/.test(n)) return "standby_carmel_a";
+  if (/כרמל\s*ב/.test(n)) return "standby_carmel_b";
+  if (missionType === "kitchen") return "kitchen";
+  if (missionType === "base_work") return "duty";
+  return "guard";
+}
+
+export function resolvePositionKind(
+  missionType: MissionType,
+  pos: MissionPosition,
+): MissionPositionKind {
+  if (pos.kind) return pos.kind;
+  return defaultPositionKind(missionType, pos.name);
+}
+
+export function isStandbyKind(kind: MissionPositionKind): boolean {
+  return kind === "standby_carmel_a" || kind === "standby_carmel_b";
+}
+
+export function isGuardKind(kind: MissionPositionKind): boolean {
+  return kind === "guard";
+}
+
+export function eatsRest(kind: MissionPositionKind): boolean {
+  return kind !== "standby_carmel_a" && kind !== "standby_carmel_b";
+}
+
+export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
+  const src = (raw || {}) as Partial<MissionSchedulingRules>;
+  const out = { ...DEFAULT_MISSION_SCHEDULING_RULES };
+  if (src.rest_hours != null) {
+    const v = +src.rest_hours;
+    if (!Number.isNaN(v) && v >= 0 && v <= 24) out.rest_hours = v;
+  }
+  if (src.guard_ratio != null) {
+    const v = +src.guard_ratio;
+    if (!Number.isNaN(v) && v >= 0) out.guard_ratio = v;
+  }
+  if (src.board_start && /^\d{1,2}:\d{2}$/.test(src.board_start)) {
+    out.board_start = src.board_start;
+  }
+  if (src.standby_carmel_a_weight != null) {
+    const v = +src.standby_carmel_a_weight;
+    if (!Number.isNaN(v) && v >= 0) out.standby_carmel_a_weight = v;
+  }
+  if (src.standby_carmel_b_weight != null) {
+    const v = +src.standby_carmel_b_weight;
+    if (!Number.isNaN(v) && v >= 0) out.standby_carmel_b_weight = v;
+  }
+  return out;
+}
+
+export function cyclicPos(minute: number, boardStart: number): number {
+  return ((minute - boardStart) % 1440 + 1440) % 1440;
+}
+
+export function flattenMissionSlots(
+  mission: MissionDay,
+  boardStart?: number,
+): FlatSlot[] {
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const t0 =
+    boardStart ??
+    parseTimeMinutes(rules.board_start) ??
+    20 * 60;
   const out: FlatSlot[] = [];
+
   for (const pos of mission.positions || []) {
+    const kind = resolvePositionKind(mission.mission_type, pos);
+    const sameRoom = pos.same_room ?? isStandbyKind(kind);
     for (const slot of pos.slots || []) {
       const assignees = (mission.assignments[slot.id] || []).filter(Boolean);
-      const startMin = parseTime(slot.start_time) ?? 0;
+      const startMin = parseTimeMinutes(slot.start_time) ?? 0;
+      const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       out.push({
         slotId: slot.id,
         positionId: pos.id,
         positionName: pos.name,
+        positionKind: kind,
+        sameRoom,
         startTime: slot.start_time,
         endTime: slot.end_time,
         timeLabel: timeLabel(slot.start_time, slot.end_time),
         seatCount: slot.seat_count,
         assignees,
         sortKey: startMin,
+        durationMinutes: dur,
+        cyclicStart: cyclicPos(startMin, t0),
       });
     }
   }
-  out.sort((a, b) => a.sortKey - b.sortKey || a.positionName.localeCompare(b.positionName));
+
+  out.sort(
+    (a, b) =>
+      a.sortKey - b.sortKey || a.positionName.localeCompare(b.positionName),
+  );
   return out;
 }
 
@@ -66,12 +171,39 @@ export function newSlot(start = "08:00", end = "10:00", seats = 1): MissionSlot 
   };
 }
 
-export function newPosition(name: string, slots?: MissionSlot[]): MissionPosition {
+export function newPosition(
+  name: string,
+  opts?: {
+    kind?: MissionPositionKind;
+    same_room?: boolean;
+    slots?: MissionSlot[];
+  },
+): MissionPosition {
+  const kind = opts?.kind;
   return {
     id: crypto.randomUUID(),
     name,
-    slots: slots || [newSlot()],
+    kind,
+    same_room: opts?.same_room ?? (kind ? isStandbyKind(kind) : undefined),
+    slots: opts?.slots || [newSlot()],
   };
+}
+
+export function defaultGuardDayPositions(): MissionPosition[] {
+  return [
+    newPosition("כרמל א׳ (כוננות)", {
+      kind: "standby_carmel_a",
+      same_room: true,
+      slots: [newSlot("00:00", "00:00", 4)],
+    }),
+    newPosition("כרמל ב׳ (כוננות)", {
+      kind: "standby_carmel_b",
+      same_room: true,
+      slots: [newSlot("00:00", "00:00", 4)],
+    }),
+    newPosition("עמדה 1", { kind: "guard" }),
+    newPosition("עמדה 2", { kind: "guard" }),
+  ];
 }
 
 export function emptyAssignments(positions: MissionPosition[]): Record<string, string[]> {
@@ -136,3 +268,5 @@ export function upcomingFromMissions(
   items.sort((a, b) => a.sortKey - b.sortKey);
   return items.filter((i) => i.sortKey >= now - 3600_000);
 }
+
+export type { Person, Issue, FairnessRules, MissionSchedulingRules };

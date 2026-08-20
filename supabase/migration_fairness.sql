@@ -6,6 +6,8 @@ create table if not exists fairness_rules (
     "solo": 1.5,
     "pair": 1.0,
     "standby": 0.15,
+    "standby_a": 0.45,
+    "standby_b": 0.15,
     "duty": 0.1,
     "kitchen": 0.1,
     "hist": 0.7
@@ -17,6 +19,8 @@ insert into fairness_rules (id, rules) values (1, '{
   "solo": 1.5,
   "pair": 1.0,
   "standby": 0.15,
+  "standby_a": 0.45,
+  "standby_b": 0.15,
   "duty": 0.1,
   "kitchen": 0.1,
   "hist": 0.7

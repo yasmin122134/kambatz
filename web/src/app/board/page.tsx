@@ -12,7 +12,7 @@ export default async function BoardPage() {
   }
 
   const admin = await isAdmin();
-  const missions = await listMissionDays(true);
+  const missions = await listMissionDays(!admin);
 
   return (
     <AppShell title="רשימה מלאה">
