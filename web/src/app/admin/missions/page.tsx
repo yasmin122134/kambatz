@@ -42,9 +42,17 @@ export default function AdminMissionsPage() {
       <main className="mx-auto max-w-3xl px-5 py-8">
         <div className="bar spread mb-6">
           <h2 className="font-display text-xl">ימי משימה</h2>
-          <Link href="/admin/missions/new" className="btn-pri btn-sm">
-            + יום משימה חדש
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/missions/new?type=guards" className="btn-pri btn-sm">
+              + הוסף יום שמירה
+            </Link>
+            <Link href="/admin/missions/new?type=kitchen" className="btn-sm">
+              + מטבח
+            </Link>
+            <Link href="/admin/missions/new?type=base_work" className="btn-sm">
+              + עב״ס
+            </Link>
+          </div>
         </div>
 
         {loading ? (
@@ -52,8 +60,8 @@ export default function AdminMissionsPage() {
         ) : missions.length === 0 ? (
           <div className="card">
             <p className="hint mb-3">אין ימי משימה. צרו את הראשון.</p>
-            <Link href="/admin/missions/new" className="btn-pri btn-sm">
-              צור יום משימה
+            <Link href="/admin/missions/new?type=guards" className="btn-pri btn-sm">
+              הוסף יום שמירה
             </Link>
           </div>
         ) : (

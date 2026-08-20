@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   DEFAULT_BASE_WORK_SCHEDULING_RULES,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
@@ -25,6 +26,8 @@ import {
   STANDARD_GUARD_DAY_SUMMARY,
   STANDARD_KITCHEN_SUMMARY,
   standardMissionPositions,
+  guardPositionHint,
+  summarizeGuardSlots,
 } from "@/lib/mission-templates";
 
 function uid() {
@@ -69,6 +72,15 @@ function formatDatetimeLocal(iso: string) {
 }
 
 export function MissionEditor({ missionId }: { missionId?: string }) {
+  const searchParams = useSearchParams();
+  const initialTypeParam = searchParams.get("type");
+  const initialType =
+    initialTypeParam === "guards" ||
+    initialTypeParam === "kitchen" ||
+    initialTypeParam === "base_work"
+      ? initialTypeParam
+      : null;
+  const createInitDone = useRef(false);
   const templateFixDone = useRef(false);
   const [loading, setLoading] = useState(!!missionId);
   const [saving, setSaving] = useState(false);
@@ -154,6 +166,12 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     load();
   }, [load]);
 
+  useEffect(() => {
+    if (missionId || createInitDone.current || !initialType) return;
+    createInitDone.current = true;
+    initCreate(initialType);
+  }, [missionId, initialType]);
+
   function initCreate(type: MissionType) {
     const date = new Date().toISOString().slice(0, 10);
     const window = defaultMissionWindow(type, date);
@@ -174,7 +192,14 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       starts_at: new Date(startsAt).toISOString(),
       ends_at: new Date(endsAt).toISOString(),
       status,
-      positions,
+      positions: missionTemplateComplete(missionType, positions)
+        ? positions
+        : standardMissionPositions({
+            missionType,
+            startsAt: new Date(startsAt).toISOString(),
+            endsAt: new Date(endsAt).toISOString(),
+            scheduling: schedulingRules,
+          }),
       scheduling_rules: schedulingRules,
       notes: notes || null,
     };
@@ -190,6 +215,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (!res.ok) {
       setErr(data.error || "שגיאה");
       return;
+    }
+
+    if (!missionTemplateComplete(missionType, positions)) {
+      setPositions(payload.positions);
     }
 
     setMsg("נשמר");
@@ -282,7 +311,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
 
   if (loading) return <p className="hint p-5">טוען…</p>;
 
-  if (!missionId && !positions.length) {
+  if (!missionId && !positions.length && !initialType) {
     return (
       <div className="card space-y-4">
         <h3 className="font-display text-lg">יצירת יום משימה חדש</h3>
@@ -652,14 +681,21 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           <h4 className="font-display text-base">
             {missionType === "guards" ? "עמדות וכוננות" : "משמרות"}
           </h4>
-          {missionType === "guards" && (
+          {missionType === "guards" && !missionTemplateComplete("guards", positions) && (
             <button type="button" className="btn-sm" onClick={addPosition}>
-              + עמדה
+              + עמדה נוספת
             </button>
           )}
         </div>
 
-        {positions.map((pos) => (
+        {positions.map((pos) => {
+          const guardHint = missionType === "guards" ? guardPositionHint(pos) : null;
+          const slotSummary =
+            missionType === "guards" && pos.slots.length > 1
+              ? summarizeGuardSlots(pos.slots)
+              : null;
+
+          return (
           <div key={pos.id} className="border border-line2 rounded p-3 space-y-3">
             <div className="rowf">
               <div className="field flex-1">
@@ -693,14 +729,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 </div>
               )}
             </div>
-            {(pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") && (
-              <p className="hint text-xs">
-                כוננות — 3 צוערים, אותו חדר ומין, מתחילת יום המשימה עד סופה.
-                {pos.kind === "standby_carmel_a"
-                  ? " מותר במקביל למטבח."
-                  : " מותר במקביל לעב״ס (רס״ר) ולמטבח."}
-              </p>
-            )}
+            {guardHint && <p className="hint text-xs">{guardHint}</p>}
+            {slotSummary && <p className="hint text-xs">{slotSummary}</p>}
             {missionType === "kitchen" && (
               <p className="hint text-xs">
                 ערוך שעות ומספר מקומות לכל משמרת (ברירת מחדל 35).
@@ -759,7 +789,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               + משמרת / חלון שעות
             </button>
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {err && <p className="msg-err">{err}</p>}

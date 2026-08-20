@@ -1,5 +1,10 @@
 import { defaultBaseWorkPositions } from "@/lib/base-work-template";
-import { buildGuardDayPositions } from "@/lib/guard-day-template";
+import {
+  buildGuardDayPositions,
+  guardPositionHint,
+  summarizeGuardSlots,
+} from "@/lib/guard-day-template";
+export { guardPositionHint, summarizeGuardSlots };
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import type { MissionPosition, MissionSchedulingRules, MissionType } from "@/lib/types";
 import {
