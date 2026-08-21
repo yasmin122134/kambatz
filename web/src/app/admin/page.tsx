@@ -314,7 +314,17 @@ export default function AdminPage() {
           </button>
         </form>
         <p className="hint mt-3">
-          {people.map((p) => p.name).join(" · ") || "אין שמות"}
+          {people
+            .map((p) =>
+              p.is_officer || p.is_admin
+                ? `${p.name} (קצין תורן / מנהל)`
+                : p.name,
+            )
+            .join(" · ") || "אין שמות"}
+        </p>
+        <p className="hint text-xs mt-2">
+          קצינים תורנים: רני פלג, יסמין חדד — הרצו{" "}
+          <code className="mono">migration_officer.sql</code> ב-Supabase לסימון ב-DB.
         </p>
       </section>
       </main>

@@ -1,7 +1,7 @@
-/** מיילים עם הרשאות מפקד — גם לפני הרצת migration_admin.sql */
-export const DEFAULT_ADMIN_EMAILS = [
-  "yasmin.haddad.yh.47@gmail.com",
-];
+import { DUTY_OFFICER_EMAILS } from "@/lib/officers";
+
+/** מיילים עם הרשאות מפקד — גם לפני הרצת migration_officer.sql */
+export const DEFAULT_ADMIN_EMAILS = [...DUTY_OFFICER_EMAILS];
 
 export function adminEmailsFromEnv(): string[] {
   const raw = process.env.ADMIN_EMAILS || "";

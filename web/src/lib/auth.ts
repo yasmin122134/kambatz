@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { isKnownAdminEmail } from "@/lib/admins";
+import { personIsSiteAdmin } from "@/lib/officers";
 import { getAuthUser, getPersonByEmail } from "@/lib/session";
 
 const COOKIE = "bahadix_admin";
@@ -14,7 +15,7 @@ export async function isAdmin(): Promise<boolean> {
   if (isKnownAdminEmail(user.email)) return true;
 
   const person = await getPersonByEmail(user.email);
-  return person?.is_admin === true;
+  return personIsSiteAdmin(person);
 }
 
 export function adminCookieOptions(maxAge = 60 * 60 * 24 * 7) {

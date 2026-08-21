@@ -12,9 +12,7 @@ import {
 } from "@/lib/mission-utils";
 import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
 import {
-  PEOPLE_FLAG_SELECT,
-  probePeopleFlags,
-  probePeopleSquad,
+  fetchActivePeople,
 } from "@/lib/people";
 import {
   assignBaseWorkShift,
@@ -39,23 +37,7 @@ export type AutoAssignResult = {
 
 async function loadPeople(): Promise<Person[]> {
   const supabase = await createClient();
-  const [withFlags, withSquad] = await Promise.all([
-    probePeopleFlags(supabase),
-    probePeopleSquad(supabase),
-  ]);
-  const cols = ["id", "name", "email", "room", "gender", "active", "created_at"];
-  if (withSquad) cols.splice(5, 0, "squad");
-  if (withFlags) cols.push(...PEOPLE_FLAG_SELECT.split(","));
-  const select = cols.join(",");
-
-  const { data, error } = await supabase
-    .from("people")
-    .select(select)
-    .eq("active", true)
-    .order("name");
-
-  if (error) throw new Error(error.message);
-  return (data || []) as unknown as Person[];
+  return fetchActivePeople(supabase);
 }
 
 async function loadApprovedIssues(): Promise<Issue[]> {
@@ -103,12 +85,12 @@ function autoAssignKitchenMission(
         placePerson(
           name,
           slot,
-          guardMission.id,
+          mission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          guardMission.mission_type,
+          mission.mission_type,
         );
       }
       skipped += keptNames.length;
@@ -211,12 +193,12 @@ function autoAssignBaseWorkMission(
         placePerson(
           name,
           slot,
-          guardMission.id,
+          mission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          guardMission.mission_type,
+          mission.mission_type,
         );
       }
       skipped += keptNames.length;

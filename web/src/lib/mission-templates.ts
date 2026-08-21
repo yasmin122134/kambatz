@@ -137,17 +137,15 @@ export function resolveMissionPositions(input: {
 }): MissionPosition[] {
   const scheduling =
     input.scheduling ?? defaultSchedulingForType(input.missionType, input.startsAt);
-  const base =
-    input.clientPositions?.length &&
-    missionTemplateComplete(input.missionType, input.clientPositions)
-      ? input.clientPositions
-      : standardMissionPositions({
-          missionType: input.missionType,
-          startsAt: input.startsAt,
-          endsAt: input.endsAt,
-          scheduling,
-          season: input.season,
-        });
+  const base = input.clientPositions?.length
+    ? input.clientPositions
+    : standardMissionPositions({
+        missionType: input.missionType,
+        startsAt: input.startsAt,
+        endsAt: input.endsAt,
+        scheduling,
+        season: input.season,
+      });
 
   if (input.missionType !== "guards") return base;
 
@@ -236,7 +234,7 @@ export const STANDARD_GUARD_DAY_SUMMARY = [
   "ש״ג רכב אחורי — בדיוק 1 ב־06–18, בדיוק 2 בשאר השעות · חילוף מסונכרן",
   "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — בדיוק 1 ב־06–19, 0 בשאר השעות",
   "פטל, תצפיתן, ימ״ח, נשקייה, בונקר — 1 תמיד",
-  "כוח עתודה — 3 תמיד · קצין תורן — 1 תמיד, שתי משמרות (חצי יום כל אחת)",
+  "כוח עתודה — 3 תמיד · קצין תורן — רק רני פלג / יסמין חדד, שתי משמרות (חצי יום כל אחת)",
 ] as const;
 
 export const STANDARD_KITCHEN_SUMMARY = [

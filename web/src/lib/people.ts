@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Person } from "@/lib/types";
 
 /** Columns always present after initial schema.sql */
 export const PEOPLE_BASE_SELECT =
@@ -108,6 +109,38 @@ export async function probePeopleAdmin(
 ): Promise<boolean> {
   const { error } = await supabase.from("people").select("is_admin").limit(1);
   return !error;
+}
+
+export async function probePeopleOfficer(
+  supabase: SupabaseClient,
+): Promise<boolean> {
+  const { error } = await supabase.from("people").select("is_officer").limit(1);
+  return !error;
+}
+
+export async function fetchActivePeople(
+  supabase: SupabaseClient,
+): Promise<Person[]> {
+  const [withFlags, withSquad, withAdmin, withOfficer] = await Promise.all([
+    probePeopleFlags(supabase),
+    probePeopleSquad(supabase),
+    probePeopleAdmin(supabase),
+    probePeopleOfficer(supabase),
+  ]);
+  const cols = ["id", "name", "email", "room", "gender", "active", "created_at"];
+  if (withSquad) cols.splice(5, 0, "squad");
+  if (withFlags) cols.push(...PEOPLE_FLAG_SELECT.split(","));
+  if (withAdmin) cols.push("is_admin");
+  if (withOfficer) cols.push("is_officer");
+
+  const { data, error } = await supabase
+    .from("people")
+    .select(cols.join(","))
+    .eq("active", true)
+    .order("name");
+
+  if (error) throw new Error(error.message);
+  return (data || []) as unknown as Person[];
 }
 
 export function peopleToSchedulerList(

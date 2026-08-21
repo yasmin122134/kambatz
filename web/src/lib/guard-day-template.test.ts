@@ -5,6 +5,7 @@ import {
   mergeAdjacentGuardSlots,
   syncGuardShiftSlots,
 } from "@/lib/guard-day-template";
+import { resolveMissionPositions } from "@/lib/mission-templates";
 
 describe("merge adjacent guard slots", () => {
   it("merges 06:00–08:00 + 08:00–09:00 when same seats and total ≤ 4h", () => {
@@ -100,6 +101,63 @@ describe("pure 4-hour guard grid", () => {
       true,
     );
     expect(windows.map((w) => `${w.startMin}-${w.endMin}`)).toContain(`${6 * 60}-${8 * 60}`);
+  });
+
+  it("sync merges legacy 06–08 + 08–09 on foot patrol into one slot", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "06:00",
+      shiftHours: 4,
+      season: "summer",
+      missionStartsAt: "2026-01-01T06:00:00",
+      missionEndsAt: "2026-01-01T09:00:00",
+    });
+    const foot = positions.find((p) => p.name.includes("רגלי"))!;
+    foot.slots = [
+      { id: "legacy-a", start_time: "06:00", end_time: "08:00", seat_count: 1 },
+      { id: "legacy-b", start_time: "08:00", end_time: "09:00", seat_count: 1 },
+    ];
+    const synced = syncGuardShiftSlots(positions, {
+      boardStart: "06:00",
+      shiftHours: 4,
+      missionStartsAt: "2026-01-01T06:00:00",
+      missionEndsAt: "2026-01-01T09:00:00",
+    });
+    const slots = synced.find((p) => p.name.includes("רגלי"))!.slots;
+    expect(slots).toHaveLength(1);
+    expect(slots[0].start_time).toBe("06:00");
+    expect(slots[0].end_time).toBe("09:00");
+    expect(slots[0].id).toBe("legacy-a");
+  });
+
+  it("resolve keeps custom positions and merges their slots", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "06:00",
+      shiftHours: 4,
+      season: "summer",
+      missionStartsAt: "2026-01-01T06:00:00",
+      missionEndsAt: "2026-01-01T09:00:00",
+    });
+    positions.push({
+      id: "radley",
+      name: "ש״ג רדלי",
+      kind: "guard",
+      slots: [
+        { id: "legacy-a", start_time: "06:00", end_time: "08:00", seat_count: 1 },
+        { id: "legacy-b", start_time: "08:00", end_time: "09:00", seat_count: 1 },
+      ],
+    });
+    const resolved = resolveMissionPositions({
+      missionType: "guards",
+      startsAt: "2026-01-01T06:00:00",
+      endsAt: "2026-01-01T09:00:00",
+      scheduling: { board_start: "06:00", shift_hours: 4, rest_hours: 7, guard_ratio: 2 },
+      clientPositions: positions,
+    });
+    const radley = resolved.find((p) => p.name === "ש״ג רדלי");
+    expect(radley).toBeDefined();
+    expect(radley!.slots).toHaveLength(1);
+    expect(radley!.slots[0].start_time).toBe("06:00");
+    expect(radley!.slots[0].end_time).toBe("09:00");
   });
 
   it("sync merges legacy 18–19 + 19–22 splits into one 4h slot", () => {

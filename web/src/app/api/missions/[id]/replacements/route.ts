@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
 import { listMissionDays } from "@/lib/missions";
-import {
-  PEOPLE_BASE_SELECT,
-  PEOPLE_FLAG_SELECT,
-  probePeopleFlags,
-} from "@/lib/people";
+import { fetchActivePeople } from "@/lib/people";
 import { findReplacements } from "@/lib/scheduling-engine";
 import { isAdmin } from "@/lib/auth";
 import type { Issue, Person } from "@/lib/types";
@@ -15,17 +11,7 @@ type Params = { params: Promise<{ id: string }> };
 
 async function loadPeople(): Promise<Person[]> {
   const supabase = await createClient();
-  const withFlags = await probePeopleFlags(supabase);
-  const select = withFlags
-    ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`
-    : PEOPLE_BASE_SELECT;
-  const { data, error } = await supabase
-    .from("people")
-    .select(select)
-    .eq("active", true)
-    .order("name");
-  if (error) throw new Error(error.message);
-  return (data || []) as unknown as Person[];
+  return fetchActivePeople(supabase);
 }
 
 async function loadIssues(): Promise<Issue[]> {

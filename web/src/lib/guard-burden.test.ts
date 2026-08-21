@@ -223,6 +223,28 @@ describe("hard constraints still gate eligibility", () => {
   const emptyTracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
   const peopleByName: Record<string, Person> = {};
 
+  it("only duty officers can fill officer_duty", () => {
+    const officer: Person = {
+      id: "o1",
+      name: "רני פלג",
+      email: null,
+      room: null,
+      gender: null,
+      active: true,
+      is_officer: true,
+      km: false,
+      exam: false,
+      no_weapon: false,
+      no_guard: false,
+      no_mag: false,
+      prior_score: 0,
+      created_at: "",
+    };
+    const cadet: Person = { ...officer, id: "c1", name: "צוער", is_officer: false };
+    expect(canAssignKind(officer, "officer_duty")).toBe(true);
+    expect(canAssignKind(cadet, "officer_duty")).toBe(false);
+  });
+
   it("no_guard cannot be assigned", () => {
     const p: Person = {
       id: "1",

@@ -6,7 +6,9 @@ import {
   probePeopleAdmin,
   probePeopleEmail,
   probePeopleFlags,
+  probePeopleOfficer,
 } from "@/lib/people";
+import { personIsSiteAdmin } from "@/lib/officers";
 
 export async function getAuthUser() {
   const supabase = await createClient();
@@ -25,10 +27,12 @@ export async function getPersonByEmail(
 
   const withFlags = await probePeopleFlags(supabase);
   const withAdmin = await probePeopleAdmin(supabase);
+  const withOfficer = await probePeopleOfficer(supabase);
   let select = withFlags
     ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`
     : PEOPLE_BASE_SELECT;
   if (withAdmin) select += ",is_admin";
+  if (withOfficer) select += ",is_officer";
 
   const normalized = email.trim().toLowerCase();
   const { data, error } = await supabase

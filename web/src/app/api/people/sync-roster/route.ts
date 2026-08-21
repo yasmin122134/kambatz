@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
+import { DUTY_OFFICER_EMAILS } from "@/lib/officers";
 import { createClient } from "@/lib/supabase/server";
 import roster from "@/data/platoon-d-roster.json";
 
@@ -59,7 +60,12 @@ export async function POST() {
     if (row) {
       const patch: Record<string, string | boolean> = { email };
       if (row.name !== entry.name) patch.name = entry.name;
-      if (email === "yasmin.haddad.yh.47@gmail.com") patch.is_admin = true;
+      if (
+        (DUTY_OFFICER_EMAILS as readonly string[]).includes(email)
+      ) {
+        patch.is_admin = true;
+        patch.is_officer = true;
+      }
 
       const { error } = await supabase
         .from("people")

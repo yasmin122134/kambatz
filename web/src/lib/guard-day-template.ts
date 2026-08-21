@@ -795,6 +795,8 @@ export function syncGuardShiftSlots(
   const ctx = resolveGuardDayContext(options);
   const windows = buildGuardDayWindows(ctx);
 
+  const maxMin = Math.round(ctx.shift * 60);
+
   return ensureUniqueSlotIds(
     positions.map((pos) => {
       if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
@@ -807,9 +809,15 @@ export function syncGuardShiftSlots(
         return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
       }
 
+      if (pos.kind === "officer_duty") {
+        const next = guardSlotsForPosition(pos, windows, ctx);
+        return next ? { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) } : pos;
+      }
+
       const next = guardSlotsForPosition(pos, windows, ctx);
       if (!next) return pos;
-      return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
+      const synced = mergeSlotsPreservingIds(pos.slots, next);
+      return { ...pos, slots: mergeAdjacentGuardSlots(synced, maxMin) };
     }),
   );
 }
@@ -888,7 +896,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "standby_carmel_b":
       return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (רס״ר) ולמטבח.";
     case "officer_duty":
-      return "קצין תורן אחד — שתי משמרות שמחלקות את יום השמירות לשניים (לא רשת משמרות כמו שאר העמדות).";
+      return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
     case "duty":
       if (pos.name.includes("עתודה")) {
         return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";

@@ -1164,8 +1164,11 @@ function blockLabel(block: BusyBlock): string {
       : block.positionKind;
 }
 
-/** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים) */
-export function findAssignmentConflicts(mission: MissionDay): string[] {
+/** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים, זכאות לתפקיד) */
+export function findAssignmentConflicts(
+  mission: MissionDay,
+  peopleByName?: Record<string, Person>,
+): string[] {
   const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
   const slots = flattenMissionSlots(mission);
   const messages: string[] = [];
@@ -1210,6 +1213,20 @@ export function findAssignmentConflicts(mission: MissionDay): string[] {
     const seats = mission.assignments[slot.slotId] || [];
     for (const name of seats) {
       if (!name) continue;
+
+      if (peopleByName) {
+        const person = peopleByName[name];
+        if (!person) {
+          messages.push(`${name}: לא נמצא במחזור`);
+        } else if (!canAssignKind(person, slot.positionKind)) {
+          if (slot.positionKind === "officer_duty") {
+            messages.push(`${name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`);
+          } else {
+            messages.push(`${name}: לא זכאי ל«${slot.positionName}»`);
+          }
+        }
+      }
+
       if (overlapsSlot(name, slot, tracker, scheduling)) {
         const blocker = (tracker.busy[name] || []).find(
           (b) =>

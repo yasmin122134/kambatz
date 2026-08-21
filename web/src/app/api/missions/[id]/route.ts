@@ -13,9 +13,45 @@ import {
   saveMissionDay,
   syncAssignmentSeats,
 } from "@/lib/missions";
+import { fetchActivePeople } from "@/lib/people";
+import { canAssignKind } from "@/lib/scheduling-engine";
+import { flattenMissionSlots } from "@/lib/mission-utils";
+import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
+import type { Person } from "@/lib/types";
 
 type Params = { params: Promise<{ id: string }> };
+
+async function peopleByNameMap(): Promise<Record<string, Person>> {
+  const supabase = await createClient();
+  try {
+    const people = await fetchActivePeople(supabase);
+    return Object.fromEntries(people.map((p) => [p.name, p]));
+  } catch {
+    return {};
+  }
+}
+
+function slotById(mission: Awaited<ReturnType<typeof getMissionDay>>, slotId: string) {
+  if (!mission) return undefined;
+  return flattenMissionSlots(mission).find((s) => s.slotId === slotId);
+}
+
+function assertCanAssign(
+  person: Person | undefined,
+  slotKind: ReturnType<typeof flattenMissionSlots>[0]["positionKind"] | undefined,
+  personName: string,
+): string | null {
+  if (!slotKind) return "משמרת לא נמצאה";
+  if (!person) return `${personName}: לא נמצא במחזור`;
+  if (!canAssignKind(person, slotKind)) {
+    if (slotKind === "officer_duty") {
+      return `${personName}: רק קצין תורן יכול לשמש בתפקיד זה`;
+    }
+    return `${personName}: לא זכאי לתפקיד זה`;
+  }
+  return null;
+}
 
 export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
@@ -132,10 +168,16 @@ export async function PATCH(request: Request, { params }: Params) {
 
   const admin = await isAdmin();
   const personName = session.person.name;
+  const peopleByName = await peopleByNameMap();
 
   let updated = mission;
 
   if (action === "take") {
+    const slot = slotById(mission, slot_id);
+    const err = assertCanAssign(session.person, slot?.positionKind, personName);
+    if (err) {
+      return NextResponse.json({ error: err }, { status: 400 });
+    }
     const assignees = [...(mission.assignments[slot_id] || [])];
     if (assignees[seat_index] && assignees[seat_index] !== personName) {
       return NextResponse.json({ error: "המשבצת תפוסה" }, { status: 400 });
@@ -146,6 +188,8 @@ export async function PATCH(request: Request, { params }: Params) {
       assignments: { ...mission.assignments, [slot_id]: assignees },
     };
   } else if (action === "swap") {
+    const srcSlot = slotById(mission, slot_id);
+    const dstSlot = slotById(mission, target_slot_id);
     const src = [...(mission.assignments[slot_id] || [])];
     const dst = [...(mission.assignments[target_slot_id] || [])];
     const srcName = src[seat_index];
@@ -155,6 +199,14 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (!dstName) {
       return NextResponse.json({ error: "אין עם מי להחליף" }, { status: 400 });
+    }
+    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot?.positionKind, dstName);
+    if (srcErr) {
+      return NextResponse.json({ error: srcErr }, { status: 400 });
+    }
+    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot?.positionKind, srcName);
+    if (dstErr) {
+      return NextResponse.json({ error: dstErr }, { status: 400 });
     }
     src[seat_index] = dstName;
     dst[target_seat_index] = srcName;
@@ -167,6 +219,14 @@ export async function PATCH(request: Request, { params }: Params) {
       },
     };
   } else if (action === "admin_set" && admin) {
+    const slot = slotById(mission, slot_id);
+    const nextName = String(name || "").trim();
+    if (nextName) {
+      const err = assertCanAssign(peopleByName[nextName], slot?.positionKind, nextName);
+      if (err) {
+        return NextResponse.json({ error: err }, { status: 400 });
+      }
+    }
     const seats = [...(mission.assignments[slot_id] || [])];
     seats[seat_index] = String(name || "").trim();
     updated = {

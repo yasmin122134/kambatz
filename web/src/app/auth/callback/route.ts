@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { isKnownAdminEmail } from "@/lib/admins";
+import { personIsSiteAdmin } from "@/lib/officers";
 import { ADMIN_COOKIE, adminCookieOptions } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { getPersonByEmail } from "@/lib/session";
@@ -25,7 +26,7 @@ export async function GET(request: Request) {
         isAdmin = isKnownAdminEmail(user.email);
         if (!isAdmin) {
           const person = await getPersonByEmail(user.email);
-          isAdmin = person?.is_admin === true;
+          isAdmin = personIsSiteAdmin(person);
         }
       }
 

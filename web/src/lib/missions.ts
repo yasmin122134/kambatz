@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { findAssignmentConflicts } from "@/lib/scheduling-engine";
-import type { MissionDay } from "@/lib/types";
+import { fetchActivePeople } from "@/lib/people";
+import type { MissionDay, Person } from "@/lib/types";
 import {
   defaultGuardDayPositions,
   emptyAssignments,
@@ -110,7 +111,15 @@ export async function saveMissionDay(
       created_at: "",
       updated_at: "",
     };
-    const conflicts = findAssignmentConflicts(draft);
+    const supabase = await createClient();
+    let peopleByName: Record<string, Person> | undefined;
+    try {
+      const people = await fetchActivePeople(supabase);
+      peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+    } catch {
+      // עמודת is_officer עדיין לא קיימת — בדיקת חפיפות בלבד
+    }
+    const conflicts = findAssignmentConflicts(draft, peopleByName);
     if (conflicts.length) {
       throw new Error(`שיבוץ לא תקין:\n${conflicts.join("\n")}`);
     }

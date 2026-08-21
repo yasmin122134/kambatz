@@ -9,6 +9,8 @@ type Props = {
   required?: boolean;
   placeholder?: string;
   className?: string;
+  /** אם מוגדר — רק שמות אלו מוצעים (למשל קצינים תורנים) */
+  allowedNames?: string[];
 };
 
 export function NameCombobox({
@@ -18,12 +20,17 @@ export function NameCombobox({
   required,
   placeholder = "הקלידו שם…",
   className,
+  allowedNames,
 }: Props) {
   const rawId = useId();
   const listId = `names-${rawId.replace(/:/g, "")}`;
-  const [names, setNames] = useState<string[]>([]);
+  const [names, setNames] = useState<string[]>(allowedNames || []);
 
   useEffect(() => {
+    if (allowedNames?.length) {
+      setNames(allowedNames);
+      return;
+    }
     fetch("/api/people")
       .then((r) => r.json())
       .then((data) => {
@@ -32,7 +39,7 @@ export function NameCombobox({
         }
       })
       .catch(() => {});
-  }, []);
+  }, [allowedNames]);
 
   return (
     <>

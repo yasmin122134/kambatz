@@ -15,7 +15,9 @@ import {
   DEFAULT_FAIRNESS_RULES,
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
+import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
+import type { Person } from "@/lib/types";
 
 type Props = {
   personName: string;
@@ -62,6 +64,9 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       totalWithHistory: number;
     }>
   >([]);
+  const [dutyOfficerNames, setDutyOfficerNames] = useState<string[]>([
+    ...DUTY_OFFICER_NAMES,
+  ]);
 
   const dayMissions = useMemo(
     () => missions.filter((m) => m.mission_date === activeDate),
@@ -93,7 +98,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;
-    const [i, p, f, rulesRes] = await Promise.all([
+    const [i, p, f, rulesRes, peopleRes] = await Promise.all([
       fetch("/api/issues?status=pending").then((r) => (r.ok ? r.json() : [])),
       fetch("/api/profile-requests?status=pending").then((r) =>
         r.ok ? r.json() : [],
@@ -102,11 +107,18 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
         r.ok ? r.json() : [],
       ),
       fetch("/api/fairness").then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/people").then((r) => (r.ok ? r.json() : [])),
     ]);
     setIssues(i);
     setProfileRequests(p);
     setFairnessRequests(f);
     if (rulesRes?.rules) setPublishedRules(rulesRes.rules);
+    if (Array.isArray(peopleRes)) {
+      const officers = (peopleRes as Person[])
+        .filter((person) => person.is_officer)
+        .map((person) => person.name);
+      if (officers.length) setDutyOfficerNames(officers);
+    }
   }, [isAdminUser]);
 
   useEffect(() => {
@@ -380,6 +392,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
               mission={guardsMission}
               personName={personName}
               isAdmin={isAdminUser}
+              dutyOfficerNames={dutyOfficerNames}
               mySlots={mySlots}
               swapTarget={swapTarget}
               swapMode={swapMode}
@@ -616,6 +629,7 @@ function MissionPanel({
   mission,
   personName,
   isAdmin,
+  dutyOfficerNames,
   mySlots,
   swapTarget,
   swapMode,
@@ -630,6 +644,7 @@ function MissionPanel({
   mission: MissionDay;
   personName: string;
   isAdmin: boolean;
+  dutyOfficerNames?: string[];
   mySlots: ReturnType<typeof flattenMissionSlots>;
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
@@ -666,6 +681,7 @@ function MissionPanel({
                       slot={slot}
                       personName={personName}
                       isAdmin={isAdmin}
+                      dutyOfficerNames={dutyOfficerNames}
                       swapTarget={swapTarget}
                       swapMode={swapMode}
                       mySlotIds={new Set(mySlots.map((s) => s.slotId))}
@@ -826,6 +842,7 @@ function SlotCard({
   slot,
   personName,
   isAdmin,
+  dutyOfficerNames,
   swapTarget,
   swapMode,
   mySlotIds,
@@ -841,6 +858,7 @@ function SlotCard({
   slot: ReturnType<typeof flattenMissionSlots>[0];
   personName: string;
   isAdmin: boolean;
+  dutyOfficerNames?: string[];
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
   mySlotIds: Set<string>;
@@ -888,7 +906,12 @@ function SlotCard({
                   <NameCombobox
                     value={name}
                     onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
-                    placeholder="שם"
+                    placeholder={
+                      slot.positionKind === "officer_duty" ? "קצין תורן…" : "שם"
+                    }
+                    allowedNames={
+                      slot.positionKind === "officer_duty" ? dutyOfficerNames : undefined
+                    }
                     className="flex-1 min-w-[140px]"
                   />
                   {name && (

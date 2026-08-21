@@ -6,6 +6,8 @@ import {
   PEOPLE_FLAG_SELECT,
   probePeopleEmail,
   probePeopleFlags,
+  probePeopleAdmin,
+  probePeopleOfficer,
 } from "@/lib/people";
 import { pickPersonalFlags } from "@/lib/session";
 
@@ -14,11 +16,15 @@ export async function GET() {
   const admin = await isAdmin();
   const withFlags = await probePeopleFlags(supabase);
   const withEmail = admin && (await probePeopleEmail(supabase));
+  const withAdmin = admin && (await probePeopleAdmin(supabase));
+  const withOfficer = admin && (await probePeopleOfficer(supabase));
 
   const base = withEmail
     ? PEOPLE_BASE_SELECT
     : "id,name,room,gender,active,created_at";
-  const select = withFlags ? `${base},${PEOPLE_FLAG_SELECT}` : base;
+  let select = withFlags ? `${base},${PEOPLE_FLAG_SELECT}` : base;
+  if (withAdmin) select += ",is_admin";
+  if (withOfficer) select += ",is_officer";
 
   const { data, error } = await supabase
     .from("people")
@@ -88,11 +94,20 @@ export async function PATCH(request: Request) {
     );
   }
 
+  const withOfficer = await probePeopleOfficer(supabase);
+  const patch: Record<string, unknown> = { ...flags };
+  if (withOfficer && typeof body.is_officer === "boolean") {
+    patch.is_officer = body.is_officer;
+    patch.is_admin = body.is_officer;
+  }
+
   const { data, error } = await supabase
     .from("people")
-    .update(flags)
+    .update(patch)
     .eq("id", id)
-    .select(`${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}`)
+    .select(
+      `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}${withOfficer ? ",is_officer,is_admin" : ""}`,
+    )
     .single();
 
   if (error) {
