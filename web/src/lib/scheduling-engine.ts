@@ -13,6 +13,7 @@ import {
   slotEatsRest,
   flattenMissionSlots,
   isGuardKind,
+  isObservationPost,
   isStandbyKind,
   normalizeSchedulingRules,
   parseTimeMinutes,
@@ -146,16 +147,85 @@ function blockedByIssue(
 }
 
 export function canGuardPerson(person: Person): boolean {
-  return !person.no_guard && !person.no_weapon;
+  return !person.no_guard;
 }
 
-export function canAssignKind(person: Person, kind: MissionPositionKind): boolean {
+export type AssignKindContext = {
+  positionName?: string;
+  missionType?: MissionType;
+};
+
+export function canAssignKind(
+  person: Person,
+  kind: MissionPositionKind,
+  ctx?: AssignKindContext,
+): boolean {
   if (kind === "officer_duty") {
     return personIsDutyOfficer(person);
   }
-  if (isGuardKind(kind)) return canGuardPerson(person);
-  if (person.no_guard) return false;
+  if (kind === "kitchen") {
+    return !person.no_kitchen;
+  }
+  if (kind === "standby_carmel_a" || kind === "standby_carmel_b") {
+    return !person.no_standby;
+  }
+  if (kind === "duty") {
+    if (ctx?.missionType === "base_work") return !person.no_base_work;
+    return !person.no_guard;
+  }
+  if (isGuardKind(kind)) {
+    if (person.no_guard) return false;
+    if (
+      person.no_standing &&
+      ctx?.positionName &&
+      !isObservationPost(ctx.positionName)
+    ) {
+      return false;
+    }
+    return true;
+  }
   return true;
+}
+
+function assignKindContext(slot: FlatSlot): AssignKindContext {
+  return { positionName: slot.positionName, missionType: slot.missionType };
+}
+
+function ineligibilityMessage(
+  person: Person,
+  slot: FlatSlot,
+): string {
+  const ctx = assignKindContext(slot);
+  const kind = slot.positionKind;
+  if (kind === "officer_duty") {
+    return `${person.name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`;
+  }
+  if (kind === "kitchen" && person.no_kitchen) {
+    return `${person.name}: ` + "פטור מטבח";
+  }
+  if (
+    (kind === "standby_carmel_a" || kind === "standby_carmel_b") &&
+    person.no_standby
+  ) {
+    return `${person.name}: פטור מכוננות (כרמל)`;
+  }
+  if (kind === "duty" && ctx.missionType === "base_work" && person.no_base_work) {
+    return `${person.name}: פטור מעב״ס`;
+  }
+  if (isGuardKind(kind)) {
+    if (person.no_guard) return `${person.name}: פטור משמירה`;
+    if (
+      person.no_standing &&
+      ctx.positionName &&
+      !isObservationPost(ctx.positionName)
+    ) {
+      return `${person.name}: פטור עמידה — רק תצפיתן`;
+    }
+  }
+  if (kind === "duty" && person.no_guard) {
+    return `${person.name}: פטור משמירה`;
+  }
+  return `${person.name}: לא זכאי ל«${slot.positionName}»`;
 }
 
 /** קצין תורן שכבר משובץ במשמרת האחות (חצי יום שני) */
@@ -398,7 +468,7 @@ export function explainFitsPersonFailure(
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
 ): string | null {
-  if (!canAssignKind(person, slot.positionKind)) return "canAssignKind";
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
   if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
   if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) return "guardOk";
@@ -418,7 +488,7 @@ export function fitsPerson(
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
 ): boolean {
-  if (!canAssignKind(person, slot.positionKind)) return false;
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
   if (blockedByIssue(person.name, slot, issues)) return false;
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
   if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
@@ -688,12 +758,8 @@ export function describeAssignmentWarnings(
   peopleByName: Record<string, Person>,
 ): string[] {
   const msgs: string[] = [];
-  if (!canAssignKind(person, slot.positionKind)) {
-    if (slot.positionKind === "officer_duty") {
-      msgs.push(`${person.name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`);
-    } else {
-      msgs.push(`${person.name}: לא זכאי ל«${slot.positionName}»`);
-    }
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
+    msgs.push(ineligibilityMessage(person, slot));
   }
   if (blockedByIssue(person.name, slot, issues)) {
     msgs.push(`${person.name}: חסום בגלל אילוץ מאושר ב${slot.timeLabel}`);
@@ -782,7 +848,7 @@ export function pickRelaxedCandidate(
 ): Person | null {
   const candidates = people.filter((p) => {
     if (exclude.has(p.name) || mates.includes(p.name)) return false;
-    if (!canAssignKind(p, slot.positionKind)) return false;
+    if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
     if (blockedByIssue(p.name, slot, issues)) return false;
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
     if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
@@ -1002,10 +1068,6 @@ export function pickBestCandidate(
       ? projectedGuardCandidateScore(b, slot, tracker, rules, meanPrior, scheduling)
       : workScore(b, tracker, rules, meanPrior, scheduling);
     let sc = preferHigh ? wb - wa : wa - wb;
-    if (a.exam !== b.exam) {
-      if (isGuardKind(slot.positionKind)) sc += a.exam ? 1000 : -1000;
-      else sc += a.exam ? -1000 : 1000;
-    }
     if (sc !== 0) return sc;
     if (useGuardBurden) {
       const ga = personBurdenBreakdown(a.name, tracker, rules, scheduling).guardAssignmentCount;
@@ -1070,7 +1132,6 @@ export function assignStandbyRoom(
     const wa = workScore(a, tracker, rules, meanPrior);
     const wb = workScore(b, tracker, rules, meanPrior);
     if (wa !== wb) return wa - wb;
-    if (a.exam !== b.exam) return a.exam ? -1 : 1;
     return a.name.localeCompare(b.name, "he");
   });
 
@@ -1225,7 +1286,7 @@ function classifyCandidateRejection(
   mates: string[],
   peopleByName: Record<string, Person>,
 ): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
-  if (!canAssignKind(person, slot.positionKind)) return "rejectedIneligible";
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "rejectedIneligible";
   if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
   if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
@@ -1627,12 +1688,8 @@ export function findAssignmentConflicts(
         const person = peopleByName[name];
         if (!person) {
           messages.push(`${name}: לא נמצא במחזור`);
-        } else if (!canAssignKind(person, slot.positionKind)) {
-          if (slot.positionKind === "officer_duty") {
-            messages.push(`${name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`);
-          } else {
-            messages.push(`${name}: לא זכאי ל«${slot.positionName}»`);
-          }
+        } else if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
+          messages.push(ineligibilityMessage(person, slot));
         }
       }
 
@@ -1775,8 +1832,8 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
       for (const name of filled) {
         if (!name) continue;
         const person = peopleByName[name];
-        if (person && !canAssignKind(person, slot.positionKind)) {
-          messages.push(`${name}: not eligible for ${slot.positionName}`);
+        if (person && !canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
+          messages.push(ineligibilityMessage(person, slot));
         }
         if (blockedByIssue(name, slot, issues)) {
           messages.push(`${name}: blocked by approved issue during ${slot.timeLabel}`);

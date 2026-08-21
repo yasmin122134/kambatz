@@ -55,13 +55,6 @@ export async function PATCH(request: Request) {
   const body = await request.json();
   const flags = pickPersonalFlags(body);
 
-  if (flags.no_weapon && flags.no_guard) {
-    return NextResponse.json(
-      { error: "לא ניתן לסמן גם ללא נשק וגם פטור שמירה" },
-      { status: 400 },
-    );
-  }
-
   const supabase = await createClient();
 
   const existing = await fetchPendingRequest(supabase, session.person.id);

@@ -170,11 +170,11 @@ describe("fairness candidate selection", () => {
       room: "1",
       gender: "m",
       active: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
-      no_guard: false,
-      no_mag: false,
+    no_guard: false,
+    no_standby: false,
+    no_standing: false,
+    no_base_work: false,
+    no_kitchen: false,
       prior_score: 0,
       created_at: "",
     };
@@ -229,72 +229,49 @@ describe("hard constraints still gate eligibility", () => {
   const emptyTracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
   const peopleByName: Record<string, Person> = {};
 
+  const basePerson = (overrides: Partial<Person> = {}): Person => ({
+    id: "p1",
+    name: "צוער",
+    email: null,
+    room: null,
+    gender: null,
+    active: true,
+    no_guard: false,
+    no_standby: false,
+    no_standing: false,
+    no_base_work: false,
+    no_kitchen: false,
+    prior_score: 0,
+    created_at: "",
+    ...overrides,
+  });
+
   it("only duty officers can fill officer_duty", () => {
-    const officer: Person = {
-      id: "o1",
-      name: "רני פלג",
-      email: null,
-      room: null,
-      gender: null,
-      active: true,
-      is_officer: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
-      no_guard: false,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
-    };
-    const cadet: Person = { ...officer, id: "c1", name: "צוער", is_officer: false };
+    const officer = basePerson({ id: "o1", name: "רני פלג", is_officer: true });
+    const cadet = basePerson({ id: "c1", name: "צוער", is_officer: false });
     expect(canAssignKind(officer, "officer_duty")).toBe(true);
     expect(canAssignKind(cadet, "officer_duty")).toBe(false);
   });
 
   it("duty officer with no_guard can still fill officer_duty", () => {
-    const yasmin: Person = {
+    const yasmin = basePerson({
       id: "y1",
       name: "יסמין חדד",
-      email: "yasmin.haddad.yh.47@gmail.com",
-      room: null,
-      gender: null,
-      active: true,
       is_officer: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
       no_guard: true,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
-    };
+    });
     expect(canAssignKind(yasmin, "officer_duty")).toBe(true);
     expect(canAssignKind(yasmin, "guard")).toBe(false);
   });
 
   it("prefers the other duty officer for the second half-day shift", () => {
-    const rani: Person = {
-      id: "r1",
-      name: "רני פלג",
-      email: null,
-      room: null,
-      gender: null,
-      active: true,
-      is_officer: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
-      no_guard: false,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
-    };
-    const yasmin: Person = {
-      ...rani,
-      id: "y1",
+    const rani = basePerson({ id: "r1", name: "רני פלג", is_officer: true });
+    const yasmin = basePerson({
+      id: "y2",
       name: "יסמין חדד",
+      is_officer: true,
       no_guard: true,
-    };
+    });
     const officerSlot: FlatSlot = {
       ...flatSlot("12:00", "00:00", 1),
       positionKind: "officer_duty",
@@ -311,65 +288,56 @@ describe("hard constraints still gate eligibility", () => {
     expect(chosen?.name).toBe("יסמין חדד");
   });
 
-  it("no_guard cannot be assigned", () => {
-    const p: Person = {
-      id: "1",
-      name: "פטור",
-      email: null,
-      room: null,
-      gender: null,
-      active: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
-      no_guard: true,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
-    };
+  it("no_guard cannot be assigned to guard", () => {
+    const p = basePerson({ id: "1", name: "פטור", no_guard: true });
     expect(canAssignKind(p, "guard")).toBe(false);
     expect(
       fitsPerson(p, slot, emptyTracker, [], scheduling, [], peopleByName),
     ).toBe(false);
   });
 
-  it("no_weapon cannot guard", () => {
-    const p: Person = {
-      id: "2",
-      name: "ללא נשק",
-      email: null,
-      room: null,
-      gender: null,
-      active: true,
-      km: false,
-      exam: false,
-      no_weapon: true,
-      no_guard: false,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
+  it("no_standing only allows observation post", () => {
+    const p = basePerson({ id: "2", name: "יושב", no_standing: true });
+    const patrol: FlatSlot = {
+      ...slot,
+      positionName: "פטל",
     };
-    expect(fitsPerson(p, slot, emptyTracker, [], scheduling, [], peopleByName)).toBe(
-      false,
-    );
+    const watch: FlatSlot = {
+      ...slot,
+      positionName: "תצפיתן",
+    };
+    expect(
+      canAssignKind(p, "guard", { positionName: patrol.positionName }),
+    ).toBe(false);
+    expect(
+      canAssignKind(p, "guard", { positionName: watch.positionName }),
+    ).toBe(true);
+    expect(
+      fitsPerson(p, patrol, emptyTracker, [], scheduling, [], peopleByName),
+    ).toBe(false);
+    expect(
+      fitsPerson(p, watch, emptyTracker, [], scheduling, [], peopleByName),
+    ).toBe(true);
+  });
+
+  it("no_kitchen blocks kitchen duty", () => {
+    const p = basePerson({ id: "3", name: "לא מטבח", no_kitchen: true });
+    expect(canAssignKind(p, "kitchen")).toBe(false);
+  });
+
+  it("no_standby blocks carmel", () => {
+    const p = basePerson({ id: "4", name: "לא כרמל", no_standby: true });
+    expect(canAssignKind(p, "standby_carmel_a")).toBe(false);
+    expect(canAssignKind(p, "standby_carmel_b")).toBe(false);
+  });
+
+  it("no_base_work blocks base work", () => {
+    const p = basePerson({ id: "5", name: "לא עבס", no_base_work: true });
+    expect(canAssignKind(p, "duty", { missionType: "base_work" })).toBe(false);
   });
 
   it("approved issue blocks assignment", () => {
-    const p: Person = {
-      id: "3",
-      name: "חסום",
-      email: null,
-      room: null,
-      gender: null,
-      active: true,
-      km: false,
-      exam: false,
-      no_weapon: false,
-      no_guard: false,
-      no_mag: false,
-      prior_score: 0,
-      created_at: "",
-    };
+    const p = basePerson({ id: "6", name: "חסום" });
     peopleByName[p.name] = p;
     const issues: Issue[] = [
       {

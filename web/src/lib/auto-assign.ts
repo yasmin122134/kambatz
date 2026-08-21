@@ -212,6 +212,7 @@ export async function autoAssignMission(
   options: { keepExisting?: boolean; includeSameDay?: boolean } = {},
 ): Promise<AutoAssignResult> {
   const keepExisting = options.keepExisting !== false;
+  const includeSameDay = options.includeSameDay !== false;
   const mission = await getMissionDay(missionId);
   if (!mission) throw new Error("יום משימה לא נמצא");
 
@@ -225,7 +226,7 @@ export async function autoAssignMission(
   if (!people.length) throw new Error("אין צוערים פעילים במאגר");
 
   const scopeMissions =
-    options.includeSameDay === false
+    !includeSameDay
       ? [mission]
       : sameDayMissionScope(mission, allMissions);
 

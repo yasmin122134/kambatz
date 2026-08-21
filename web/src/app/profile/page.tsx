@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import {
   ISSUE_STATUS_LABELS,
+  PERSONAL_FLAG_HINTS,
   PERSONAL_FLAG_LABELS,
   FAIRNESS_BUCKET_LABELS,
   MISSION_TYPE_LABELS,
@@ -18,25 +19,33 @@ import { createClient } from "@/lib/supabase/client";
 
 const FLAG_KEYS = Object.keys(PERSONAL_FLAG_LABELS) as (keyof PersonalFlags)[];
 
+const EMPTY_FLAGS: PersonalFlags = {
+  no_guard: false,
+  no_standby: false,
+  no_standing: false,
+  no_base_work: false,
+  no_kitchen: false,
+};
+
 type ProfileResponse = Person & { pending_request: ProfileRequest | null };
 
 function flagsFromPerson(p: Person): PersonalFlags {
   return {
-    km: p.km,
-    exam: p.exam,
-    no_weapon: p.no_weapon,
     no_guard: p.no_guard,
-    no_mag: p.no_mag,
+    no_standby: p.no_standby,
+    no_standing: p.no_standing,
+    no_base_work: p.no_base_work,
+    no_kitchen: p.no_kitchen,
   };
 }
 
 function flagsFromRequest(r: ProfileRequest): PersonalFlags {
   return {
-    km: r.km,
-    exam: r.exam,
-    no_weapon: r.no_weapon,
     no_guard: r.no_guard,
-    no_mag: r.no_mag,
+    no_standby: r.no_standby,
+    no_standing: r.no_standing,
+    no_base_work: r.no_base_work,
+    no_kitchen: r.no_kitchen,
   };
 }
 
@@ -50,13 +59,7 @@ export default function ProfilePage() {
   const [pendingRequest, setPendingRequest] = useState<ProfileRequest | null>(
     null,
   );
-  const [flags, setFlags] = useState<PersonalFlags>({
-    km: false,
-    exam: false,
-    no_weapon: false,
-    no_guard: false,
-    no_mag: false,
-  });
+  const [flags, setFlags] = useState<PersonalFlags>(EMPTY_FLAGS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -180,7 +183,7 @@ export default function ProfilePage() {
       <main className="mx-auto max-w-lg px-5 py-8">
         <div className="card mb-4">
           <h2 className="font-display text-xl">הפרופיל שלי</h2>
-          <p className="lede">שינוי סימונים דורש אישור מפקד.</p>
+          <p className="lede">עדכון פטורים דורש אישור מפקד — משפיע על השיבוץ האוטומטי.</p>
         </div>
       <div className="card space-y-5">
         <div>
@@ -243,9 +246,9 @@ export default function ProfilePage() {
         )}
 
         <div className="rounded-2xl border border-line2 bg-bone2/50 p-4 space-y-2">
-          <p className="font-display text-sm">סימונים מאושרים (בשיבוץ)</p>
+          <p className="font-display text-sm">פטורים מאושרים (בשיבוץ)</p>
           {approvedList.length === 0 ? (
-            <p className="hint text-sm">אין סימונים פעילים</p>
+            <p className="hint text-sm">אין פטורים פעילים</p>
           ) : (
             <ul className="text-sm space-y-1">
               {approvedList.map((label) => (
@@ -264,21 +267,28 @@ export default function ProfilePage() {
 
         <form onSubmit={save} className="space-y-4">
           <div className="space-y-3">
-            <p className="font-display text-base">בקשה לעדכון סימונים</p>
+            <p className="font-display text-base">בקשה לעדכון פטורים</p>
             {FLAG_KEYS.map((key) => (
               <label
                 key={key}
-                className="flex flex-row-reverse items-center justify-end gap-3 cursor-pointer w-fit max-w-full"
+                className="flex flex-col items-end gap-0.5 cursor-pointer w-full"
               >
-                <input
-                  type="checkbox"
-                  className="shrink-0 size-4"
-                  checked={flags[key]}
-                  onChange={(e) =>
-                    setFlags((f) => ({ ...f, [key]: e.target.checked }))
-                  }
-                />
-                <span className="text-right">{PERSONAL_FLAG_LABELS[key]}</span>
+                <span className="flex flex-row-reverse items-center justify-end gap-3 w-fit max-w-full">
+                  <input
+                    type="checkbox"
+                    className="shrink-0 size-4"
+                    checked={flags[key]}
+                    onChange={(e) =>
+                      setFlags((f) => ({ ...f, [key]: e.target.checked }))
+                    }
+                  />
+                  <span className="text-right">{PERSONAL_FLAG_LABELS[key]}</span>
+                </span>
+                {PERSONAL_FLAG_HINTS[key] && (
+                  <span className="text-xs text-ink3 pr-7">
+                    {PERSONAL_FLAG_HINTS[key]}
+                  </span>
+                )}
               </label>
             ))}
           </div>

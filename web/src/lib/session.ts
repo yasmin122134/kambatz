@@ -64,19 +64,19 @@ export async function getSessionPerson(): Promise<{
 }
 
 export const EDITABLE_PERSONAL_KEYS = [
-  "km",
-  "exam",
-  "no_weapon",
   "no_guard",
-  "no_mag",
+  "no_standby",
+  "no_standing",
+  "no_base_work",
+  "no_kitchen",
 ] as const satisfies readonly (keyof PersonalFlags)[];
 
 export function pickPersonalFlags(body: Record<string, unknown>): PersonalFlags {
   return {
-    km: !!body.km,
-    exam: !!body.exam,
-    no_weapon: !!body.no_weapon,
     no_guard: !!body.no_guard,
-    no_mag: !!body.no_mag,
+    no_standby: !!body.no_standby,
+    no_standing: !!body.no_standing,
+    no_base_work: !!body.no_base_work,
+    no_kitchen: !!body.no_kitchen,
   };
 }

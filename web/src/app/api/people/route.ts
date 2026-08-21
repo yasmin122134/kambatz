@@ -75,12 +75,6 @@ export async function PATCH(request: Request) {
   }
 
   const flags = pickPersonalFlags(body);
-  if (flags.no_weapon && flags.no_guard) {
-    return NextResponse.json(
-      { error: "לא ניתן לסמן גם ללא נשק וגם פטור שמירה" },
-      { status: 400 },
-    );
-  }
 
   const supabase = await createClient();
   const withFlags = await probePeopleFlags(supabase);
@@ -88,7 +82,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json(
       {
         error:
-          "עמודות הסימונים חסרות — הריצו supabase/migration_scheduler.sql",
+          "עמודות הפטורים חסרות — הריצו supabase/migration_scheduling_exemptions.sql",
       },
       { status: 500 },
     );

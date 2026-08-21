@@ -16,7 +16,7 @@ import {
   syncAssignmentSeats,
 } from "@/lib/mission-utils";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
-import { enumerateCarmelGroups, summarizeCarmelRooms } from "./carmel-groups";
+import { enumerateCarmelGroups, hasCarmelGroupCandidates, summarizeCarmelRooms } from "./carmel-groups";
 import {
   buildUnresolvedRequirements,
   countFilledSeats,
@@ -41,6 +41,14 @@ type SolverState = {
 type CandidateChoice =
   | { kind: "carmel"; group: CarmelGroupCandidate }
   | { kind: "seat"; person: Person };
+
+/** Branching limits — keeps server-side assign under ~15s on full guard days. */
+const DEFAULT_MAX_NODES = 12_000;
+const DEFAULT_MAX_ATTEMPTS = 2;
+const DEFAULT_DEADLINE_MS = 10_000;
+const MAX_SEAT_BRANCH = 20;
+/** Above this many open seats, greedy-only (backtracking is too slow). */
+const BACKTRACK_UNIT_LIMIT = 55;
 
 function cloneTracker(tracker: ScheduleTracker): ScheduleTracker {
   const busy: ScheduleTracker["busy"] = {};
@@ -195,7 +203,7 @@ function countCarmelCandidates(
   peopleByName: Record<string, Person>,
 ): number {
   const scheduling = schedulingFor(unit.mission);
-  return enumerateCarmelGroups({
+  return hasCarmelGroupCandidates({
     slot: unit.slot,
     people,
     need: unit.need,
@@ -204,7 +212,9 @@ function countCarmelCandidates(
     issues,
     scheduling,
     peopleByName,
-  }).length;
+  })
+    ? 1
+    : 0;
 }
 
 function unitDifficulty(
@@ -319,13 +329,17 @@ function listSeatCandidates(
       fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName),
   );
 
+  const scarcity = new Map(
+    pool.map((p) => [p.name, countPersonScarcity(p, units, issues, state, peopleByName)]),
+  );
+
   return pool.sort((a, b) => {
     if (unit.slot.positionKind === "officer_duty" && siblingOfficer) {
       if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
       if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
     }
-    const eligibleA = countPersonScarcity(a, units, issues, state, peopleByName);
-    const eligibleB = countPersonScarcity(b, units, issues, state, peopleByName);
+    const eligibleA = scarcity.get(a.name) ?? 0;
+    const eligibleB = scarcity.get(b.name) ?? 0;
     if (eligibleA !== eligibleB) return eligibleA - eligibleB;
     const wa = workScore(a, state.tracker, rules, meanPrior);
     const wb = workScore(b, state.tracker, rules, meanPrior);
@@ -493,6 +507,66 @@ function lexBetter(a: number[], b: number[]): boolean {
   return false;
 }
 
+function solveGreedy(input: {
+  units: AssignmentUnit[];
+  people: Person[];
+  issues: Issue[];
+  rules: FairnessRules;
+  meanPrior: number;
+  initialState: SolverState;
+  seed: number;
+}): SolverState {
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const state: SolverState = {
+    tracker: cloneTracker(input.initialState.tracker),
+    assignmentsByMission: cloneAssignments(input.initialState.assignmentsByMission),
+    assignedUnitIds: new Set(input.initialState.assignedUnitIds),
+  };
+
+  for (;;) {
+    const unit = pickNextUnit(input.units, state, input.people, input.issues, peopleByName);
+    if (!unit) break;
+
+    const choice: CandidateChoice | null =
+      unit.kind === "carmel"
+        ? (() => {
+            const group = listCarmelCandidates(
+              unit,
+              state,
+              input.people,
+              input.issues,
+              input.rules,
+              input.meanPrior,
+              peopleByName,
+              input.seed,
+            )[0];
+            return group ? { kind: "carmel", group } : null;
+          })()
+        : (() => {
+            const person = listSeatCandidates(
+              unit,
+              state,
+              input.people,
+              input.issues,
+              input.rules,
+              input.meanPrior,
+              peopleByName,
+              input.seed,
+              input.units,
+            )[0];
+            return person ? { kind: "seat", person } : null;
+          })();
+
+    if (!choice) {
+      state.assignedUnitIds.add(unit.id);
+      continue;
+    }
+    applyChoice(unit, choice, state, input.rules);
+  }
+
+  return state;
+}
+
 function solveBacktracking(input: {
   units: AssignmentUnit[];
   people: Person[];
@@ -502,10 +576,13 @@ function solveBacktracking(input: {
   initialState: SolverState;
   seed: number;
   maxNodes: number;
-}): { state: SolverState; nodes: number; score: number[] } {
+  deadlineMs: number;
+}): { state: SolverState; nodes: number; score: number[]; timedOut: boolean } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const deadline = Date.now() + input.deadlineMs;
 
   let nodes = 0;
+  let timedOut = false;
   let bestState = cloneState(input.initialState);
   let bestScore = evaluateLex(input.units, bestState);
 
@@ -517,8 +594,17 @@ function solveBacktracking(input: {
     };
   }
 
+  function overBudget(): boolean {
+    if (nodes >= input.maxNodes) return true;
+    if (Date.now() >= deadline) {
+      timedOut = true;
+      return true;
+    }
+    return false;
+  }
+
   function dfs(state: SolverState): void {
-    if (nodes >= input.maxNodes) return;
+    if (overBudget()) return;
     nodes += 1;
 
     if (state.assignedUnitIds.size === input.units.length) {
@@ -555,7 +641,9 @@ function solveBacktracking(input: {
             peopleByName,
             input.seed,
             input.units,
-          ).map((person) => ({ kind: "seat", person }));
+          )
+            .slice(0, MAX_SEAT_BRANCH)
+            .map((person) => ({ kind: "seat", person }));
 
     if (!choices.length) {
       const score = evaluateLex(input.units, state);
@@ -572,12 +660,12 @@ function solveBacktracking(input: {
         dfs(state);
       }
       revertChoice(unit, choice, state, input.rules);
-      if (nodes >= input.maxNodes) break;
+      if (overBudget()) break;
     }
   }
 
   dfs(cloneState(input.initialState));
-  return { state: bestState, nodes, score: bestScore };
+  return { state: bestState, nodes, score: bestScore, timedOut };
 }
 
 function buildCarmelSnapshots(
@@ -616,8 +704,9 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   const missions = input.missions;
   const crossDay = input.crossDayMissions ?? [];
   const keepExisting = input.keepExisting;
-  const maxNodes = input.maxNodes ?? 80_000;
-  const maxAttempts = input.maxAttempts ?? 4;
+  const maxNodes = input.maxNodes ?? DEFAULT_MAX_NODES;
+  const maxAttempts = input.maxAttempts ?? DEFAULT_MAX_ATTEMPTS;
+  const deadlineMs = input.deadlineMs ?? DEFAULT_DEADLINE_MS;
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
 
   const units = buildUnits(missions, keepExisting);
@@ -646,7 +735,29 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     ),
   };
 
-  let bestResult: { state: SolverState; nodes: number; score: number[] } | null = null;
+  let bestResult: { state: SolverState; nodes: number; score: number[]; timedOut: boolean } | null = null;
+  let totalNodes = 0;
+  let timedOut = false;
+
+  const greedyState = solveGreedy({
+    units,
+    people: input.people,
+    issues: input.issues,
+    rules: input.rules,
+    meanPrior: input.meanPrior,
+    initialState,
+    seed: 0,
+  });
+  bestResult = {
+    state: greedyState,
+    nodes: 0,
+    score: evaluateLex(units, greedyState),
+    timedOut: false,
+  };
+
+  if (bestResult.score[0] >= requiredSeats && bestResult.score[1] === 1) {
+    // Greedy already filled everything — skip expensive backtracking.
+  } else if (units.length <= BACKTRACK_UNIT_LIMIT) {
   for (let seed = 0; seed < maxAttempts; seed++) {
     const result = solveBacktracking({
       units,
@@ -657,11 +768,16 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       initialState,
       seed,
       maxNodes: Math.floor(maxNodes / maxAttempts),
+      deadlineMs: Math.floor(deadlineMs / maxAttempts),
     });
+    totalNodes += result.nodes;
+    timedOut = timedOut || result.timedOut;
     if (!bestResult || lexBetter(result.score, bestResult.score)) {
       bestResult = result;
     }
     if (bestResult.score[0] >= requiredSeats && bestResult.score[1] === 1) break;
+    if (timedOut) break;
+  }
   }
 
   const finalState = bestResult?.state ?? initialState;
@@ -693,6 +809,11 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     failureReasons,
   });
   const warnings = formatUnresolvedSummary(unresolved);
+  if (timedOut && filled < requiredSeats) {
+    warnings.unshift(
+      "החיפוש הופסק לאחר מגבלת זמן — ייתכן שיבוץ חלקי; נסו שוב או מלאו ידנית משבצות שנותרו.",
+    );
+  }
 
   let carmelFilled = 0;
   let carmelRequired = 0;
@@ -724,8 +845,9 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       carmelFilled,
       carmelRequired,
       fairnessSpread,
-      searchNodes: bestResult?.nodes ?? 0,
+      searchNodes: totalNodes,
       attempts: maxAttempts,
+      timedOut,
     },
   };
 }

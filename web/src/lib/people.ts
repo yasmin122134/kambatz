@@ -6,7 +6,7 @@ export const PEOPLE_BASE_SELECT =
   "id,name,email,room,gender,squad,active,created_at" as const;
 
 export const PEOPLE_FLAG_SELECT =
-  "km,exam,no_weapon,no_guard,no_mag,prior_score" as const;
+  "no_guard,no_standby,no_standing,no_base_work,no_kitchen,prior_score" as const;
 
 export type SchedulerPersonPayload = {
   id: string;
@@ -15,11 +15,11 @@ export type SchedulerPersonPayload = {
   room?: string;
   gender?: string;
   squad?: number;
-  km?: boolean;
-  exam?: boolean;
-  noWeapon?: boolean;
   noGuard?: boolean;
-  noMag?: boolean;
+  noStandby?: boolean;
+  noStanding?: boolean;
+  noBaseWork?: boolean;
+  noKitchen?: boolean;
   prior?: number;
 };
 
@@ -33,11 +33,11 @@ export function dbPersonToScheduler(
     room: p.room ? String(p.room) : undefined,
     gender: p.gender ? String(p.gender) : undefined,
     squad: p.squad != null ? Number(p.squad) : undefined,
-    km: p.km != null ? !!p.km : undefined,
-    exam: p.exam != null ? !!p.exam : undefined,
-    noWeapon: p.no_weapon != null ? !!p.no_weapon : undefined,
     noGuard: p.no_guard != null ? !!p.no_guard : undefined,
-    noMag: p.no_mag != null ? !!p.no_mag : undefined,
+    noStandby: p.no_standby != null ? !!p.no_standby : undefined,
+    noStanding: p.no_standing != null ? !!p.no_standing : undefined,
+    noBaseWork: p.no_base_work != null ? !!p.no_base_work : undefined,
+    noKitchen: p.no_kitchen != null ? !!p.no_kitchen : undefined,
     prior: p.prior_score != null ? Number(p.prior_score) : undefined,
   };
 }
@@ -55,11 +55,11 @@ export function schedulerPersonToDb(
     active: p.on !== false,
   };
   if (withFlags) {
-    row.km = !!p.km;
-    row.exam = !!p.exam;
-    row.no_weapon = !!p.noWeapon;
     row.no_guard = !!p.noGuard;
-    row.no_mag = !!p.noMag;
+    row.no_standby = !!p.noStandby;
+    row.no_standing = !!p.noStanding;
+    row.no_base_work = !!p.noBaseWork;
+    row.no_kitchen = !!p.noKitchen;
     row.prior_score = Number(p.prior ?? 0);
   }
   return row;
@@ -86,7 +86,7 @@ export function roomsFromPeople(people: SchedulerPersonPayload[]) {
 export async function probePeopleFlags(
   supabase: SupabaseClient,
 ): Promise<boolean> {
-  const { error } = await supabase.from("people").select("km").limit(1);
+  const { error } = await supabase.from("people").select("no_standby").limit(1);
   return !error;
 }
 

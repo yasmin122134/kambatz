@@ -5,6 +5,7 @@ import { NameCombobox } from "@/components/NameCombobox";
 import {
   ISSUE_TYPE_LABELS,
   ISSUE_TYPE_NOTE_PLACEHOLDERS,
+  PERSONAL_FLAG_HINTS,
   PERSONAL_FLAG_LABELS,
   type IssueType,
   type Person,
@@ -21,11 +22,11 @@ const TIME_PRESETS = [
 ];
 
 const EMPTY_FLAGS: PersonalFlags = {
-  km: false,
-  exam: false,
-  no_weapon: false,
   no_guard: false,
-  no_mag: false,
+  no_standby: false,
+  no_standing: false,
+  no_base_work: false,
+  no_kitchen: false,
 };
 
 type Props = {
@@ -53,11 +54,11 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
       return;
     }
     setFlags({
-      km: !!selected.km,
-      exam: !!selected.exam,
-      no_weapon: !!selected.no_weapon,
       no_guard: !!selected.no_guard,
-      no_mag: !!selected.no_mag,
+      no_standby: !!selected.no_standby,
+      no_standing: !!selected.no_standing,
+      no_base_work: !!selected.no_base_work,
+      no_kitchen: !!selected.no_kitchen,
     });
   }, [selected]);
 
@@ -121,7 +122,7 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
     <section className="card mb-6">
       <h3 className="font-display text-base mb-2">אילוצים ידניים</h3>
       <p className="lede mb-4">
-        הזינו סימונים אישיים או חסימות שעות ישירות — בלי לחכות לדיווח/אישור
+        הזינו פטורי שיבוץ או חסימות שעות ישירות — בלי לחכות לדיווח/אישור
         מהצוער.
       </p>
 
@@ -166,18 +167,25 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
             {FLAG_KEYS.map((key) => (
               <label
                 key={key}
-                className="flex flex-row-reverse items-center justify-end gap-3 cursor-pointer w-fit max-w-full"
+                className="flex flex-col items-end gap-0.5 cursor-pointer w-full"
               >
-                <input
-                  type="checkbox"
-                  className="shrink-0 size-4"
-                  checked={flags[key]}
-                  disabled={!selected}
-                  onChange={(e) =>
-                    setFlags((f) => ({ ...f, [key]: e.target.checked }))
-                  }
-                />
-                <span className="text-right">{PERSONAL_FLAG_LABELS[key]}</span>
+                <span className="flex flex-row-reverse items-center justify-end gap-3 w-fit max-w-full">
+                  <input
+                    type="checkbox"
+                    className="shrink-0 size-4"
+                    checked={flags[key]}
+                    disabled={!selected}
+                    onChange={(e) =>
+                      setFlags((f) => ({ ...f, [key]: e.target.checked }))
+                    }
+                  />
+                  <span className="text-right">{PERSONAL_FLAG_LABELS[key]}</span>
+                </span>
+                {PERSONAL_FLAG_HINTS[key] && (
+                  <span className="text-xs text-ink3 pr-7">
+                    {PERSONAL_FLAG_HINTS[key]}
+                  </span>
+                )}
               </label>
             ))}
           </div>

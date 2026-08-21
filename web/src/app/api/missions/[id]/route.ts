@@ -39,13 +39,16 @@ function slotById(mission: Awaited<ReturnType<typeof getMissionDay>>, slotId: st
 
 function assertCanAssign(
   person: Person | undefined,
-  slotKind: ReturnType<typeof flattenMissionSlots>[0]["positionKind"] | undefined,
+  slot: ReturnType<typeof flattenMissionSlots>[0] | undefined,
   personName: string,
 ): string | null {
-  if (!slotKind) return "משמרת לא נמצאה";
+  if (!slot) return "משמרת לא נמצאה";
   if (!person) return `${personName}: לא נמצא במחזור`;
-  if (!canAssignKind(person, slotKind)) {
-    if (slotKind === "officer_duty") {
+  if (!canAssignKind(person, slot.positionKind, {
+    positionName: slot.positionName,
+    missionType: slot.missionType,
+  })) {
+    if (slot.positionKind === "officer_duty") {
       return `${personName}: רק קצין תורן יכול לשמש בתפקיד זה`;
     }
     return `${personName}: לא זכאי לתפקיד זה`;
@@ -176,7 +179,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (action === "take") {
     const slot = slotById(mission, slot_id);
-    const err = assertCanAssign(session.person, slot?.positionKind, personName);
+    const err = assertCanAssign(session.person, slot, personName);
     if (err) {
       return NextResponse.json({ error: err }, { status: 400 });
     }
@@ -202,11 +205,11 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!dstName) {
       return NextResponse.json({ error: "אין עם מי להחליף" }, { status: 400 });
     }
-    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot?.positionKind, dstName);
+    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot, dstName);
     if (srcErr) {
       return NextResponse.json({ error: srcErr }, { status: 400 });
     }
-    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot?.positionKind, srcName);
+    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot, srcName);
     if (dstErr) {
       return NextResponse.json({ error: dstErr }, { status: 400 });
     }
@@ -224,7 +227,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const slot = slotById(mission, slot_id);
     const nextName = String(name || "").trim();
     if (nextName) {
-      const err = assertCanAssign(peopleByName[nextName], slot?.positionKind, nextName);
+      const err = assertCanAssign(peopleByName[nextName], slot, nextName);
       if (err) {
         return NextResponse.json({ error: err }, { status: 400 });
       }

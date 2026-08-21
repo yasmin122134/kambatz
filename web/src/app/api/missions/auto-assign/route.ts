@@ -11,10 +11,11 @@ export async function POST(request: Request) {
   const missionId = body.mission_id ? String(body.mission_id) : "";
   const missionDate = body.mission_date ? String(body.mission_date).slice(0, 10) : "";
   const keepExisting = body.keep_existing !== false;
+  const includeSameDay = body.include_same_day !== false;
 
   try {
     if (missionId) {
-      const result = await autoAssignMission(missionId, { keepExisting });
+      const result = await autoAssignMission(missionId, { keepExisting, includeSameDay });
       return NextResponse.json(result);
     }
 

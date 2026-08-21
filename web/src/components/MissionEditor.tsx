@@ -261,7 +261,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     const res = await fetch("/api/missions/auto-assign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mission_id: missionId, keep_existing: true }),
+      body: JSON.stringify({
+        mission_id: missionId,
+        keep_existing: true,
+        include_same_day: false,
+      }),
     });
     const data = await res.json();
     setAutoAssigning(false);

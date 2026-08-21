@@ -5,11 +5,11 @@ export interface ProfileRequest {
   id: string;
   person_id: string | null;
   person_name: string;
-  km: boolean;
-  exam: boolean;
-  no_weapon: boolean;
   no_guard: boolean;
-  no_mag: boolean;
+  no_standby: boolean;
+  no_standing: boolean;
+  no_base_work: boolean;
+  no_kitchen: boolean;
   status: IssueStatus;
   created_at: string;
 }
@@ -25,26 +25,30 @@ export interface Person {
   active: boolean;
   is_admin?: boolean;
   is_officer?: boolean;
-  km: boolean;
-  exam: boolean;
-  no_weapon: boolean;
   no_guard: boolean;
-  no_mag: boolean;
+  no_standby: boolean;
+  no_standing: boolean;
+  no_base_work: boolean;
+  no_kitchen: boolean;
   prior_score: number;
   created_at: string;
 }
 
 export type PersonalFlags = Pick<
   Person,
-  "km" | "exam" | "no_weapon" | "no_guard" | "no_mag"
+  "no_guard" | "no_standby" | "no_standing" | "no_base_work" | "no_kitchen"
 >;
 
 export const PERSONAL_FLAG_LABELS: Record<keyof PersonalFlags, string> = {
-  km: "כושר מיוחד (כ״מ)",
-  exam: "יש לי מבחן — העדיפו כוננות",
-  no_weapon: "ללא נשק — רק חמגשיות/עב״ס",
-  no_guard: "פטור שמירה",
-  no_mag: "פטור מחסניות",
+  no_guard: "פטור משמירה",
+  no_standby: "פטור מכוננות (כרמל א׳ ו-ב׳)",
+  no_standing: "פטור עמידה — שיבוץ לתצפיתן בלבד",
+  no_base_work: "פטור מעב״ס",
+  no_kitchen: "פטור מטבח",
+};
+
+export const PERSONAL_FLAG_HINTS: Partial<Record<keyof PersonalFlags, string>> = {
+  no_standing: "בשמירות — רק עמדת תצפיתן",
 };
 
 export interface Issue {

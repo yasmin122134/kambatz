@@ -35,6 +35,7 @@ export type SmartAssignObjectiveSummary = {
   fairnessSpread: number;
   searchNodes: number;
   attempts: number;
+  timedOut?: boolean;
 };
 
 export type CarmelAssignmentUnit = {
@@ -68,6 +69,8 @@ export type GlobalAssignInput = {
   crossDayMissions?: MissionDay[];
   maxNodes?: number;
   maxAttempts?: number;
+  /** Wall-clock budget for the whole search (ms). */
+  deadlineMs?: number;
 };
 
 export type GlobalAssignOutput = {

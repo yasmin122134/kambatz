@@ -106,6 +106,11 @@ export function isGuardKind(kind: MissionPositionKind): boolean {
   return kind === "guard" || kind === "officer_duty";
 }
 
+/** עמדת תצפיתן — היחידה המותרת לפטור עמידה */
+export function isObservationPost(positionName: string): boolean {
+  return positionName.includes("תצפיתן");
+}
+
 export function eatsRest(kind: MissionPositionKind): boolean {
   return kind !== "standby_carmel_a" && kind !== "standby_carmel_b";
 }
