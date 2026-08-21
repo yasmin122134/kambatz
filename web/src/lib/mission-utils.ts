@@ -16,7 +16,7 @@ import {
   type BaseWorkSchedulingRules,
   type KitchenSchedulingRules,
 } from "@/lib/types";
-import { resolveSlotAbsoluteInterval } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -110,6 +110,24 @@ export function eatsRest(kind: MissionPositionKind): boolean {
   return kind !== "standby_carmel_a" && kind !== "standby_carmel_b";
 }
 
+/** כוח עתודה — חוסם זמן אך לא צורך מנוחה */
+export function isReserveForceSlot(
+  slot: Pick<FlatSlot, "positionName" | "positionKind" | "missionType">,
+): boolean {
+  return (
+    slot.missionType === "guards" &&
+    slot.positionKind === "duty" &&
+    slot.positionName.includes("עתודה")
+  );
+}
+
+/** האם השיבוץ צורך מנוחה (נפרד מחסימת זמן) */
+export function slotEatsRest(slot: FlatSlot): boolean {
+  if (isStandbyKind(slot.positionKind)) return false;
+  if (isReserveForceSlot(slot)) return false;
+  return eatsRest(slot.positionKind);
+}
+
 export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
   const src = (raw || {}) as Partial<MissionSchedulingRules> & {
     kitchen?: Partial<KitchenSchedulingRules>;
@@ -188,6 +206,10 @@ export function flattenMissionSlots(
     boardStart ??
     parseTimeMinutes(rules.board_start) ??
     20 * 60;
+  const missionDateMidnight = new Date(mission.starts_at);
+  missionDateMidnight.setHours(0, 0, 0, 0);
+  const missionDateMidnightMs = missionDateMidnight.getTime();
+
   const out: FlatSlot[] = [];
   let kitchenIdx = 0;
   let baseWorkIdx = 0;
@@ -202,17 +224,14 @@ export function flattenMissionSlots(
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
       const isBaseWorkSlot = mission.mission_type === "base_work";
-      const abs = resolveSlotAbsoluteInterval(
-        mission.starts_at,
-        mission.ends_at,
-        slot.start_time,
-        slot.end_time,
+      const abs = resolveCanonicalSlotInterval(mission, slot);
+      if (!abs) continue;
+      const startAtMs = abs.startMs;
+      const endAtMs = abs.endMs;
+      const calendarDayOffset = Math.max(
+        0,
+        Math.floor((startAtMs - missionDateMidnightMs) / 86_400_000),
       );
-      const fallbackStartMs =
-        new Date(`${mission.mission_date}T${slot.start_time}:00`).getTime() +
-        (mission.mission_type === "guards" && startMin < t0 ? 86_400_000 : 0);
-      const startAtMs = abs?.startMs ?? fallbackStartMs;
-      const endAtMs = abs?.endMs ?? startAtMs + dur * 60_000;
       out.push({
         slotId: slot.id,
         positionId: pos.id,
@@ -230,8 +249,7 @@ export function flattenMissionSlots(
         durationMinutes: dur,
         cyclicStart: cyclicPos(startMin, t0),
         wallStartMin: startMin,
-        calendarDayOffset:
-          mission.mission_type === "guards" && startMin < t0 ? 1 : 0,
+        calendarDayOffset,
         startAtMs,
         endAtMs,
         kitchenShiftIndex: isKitchenSlot ? kitchenIdx++ : undefined,

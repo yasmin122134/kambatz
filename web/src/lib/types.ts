@@ -150,6 +150,10 @@ export interface MissionSlot {
   start_time: string;
   end_time: string;
   seat_count: number;
+  /** Canonical absolute start — authoritative when present */
+  starts_at?: string;
+  /** Canonical absolute end — authoritative when present */
+  ends_at?: string;
 }
 
 export interface MissionPosition {

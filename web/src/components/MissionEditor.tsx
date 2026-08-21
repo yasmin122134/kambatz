@@ -23,6 +23,7 @@ import {
   defaultSchedulingForType,
   missionTemplateComplete,
   resolveMissionPositions,
+  generateGuardMissionStructure,
   STANDARD_BASE_WORK_SUMMARY,
   STANDARD_GUARD_DAY_SUMMARY,
   STANDARD_KITCHEN_SUMMARY,
@@ -146,23 +147,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       m.status === "draft" &&
       !templateFixDone.current &&
       !missionTemplateComplete(m.mission_type, m.positions);
-    const positions =
-      m.mission_type === "guards"
-        ? resolveMissionPositions({
-            missionType: m.mission_type,
-            startsAt: m.starts_at,
-            endsAt: m.ends_at,
-            scheduling: rules,
-            clientPositions: m.positions,
-          })
-        : needsTemplateFix
-          ? standardMissionPositions({
-              missionType: m.mission_type,
-              startsAt: m.starts_at,
-              endsAt: m.ends_at,
-              scheduling: rules,
-            })
-          : m.positions;
+    const positions = needsTemplateFix
+      ? resolveMissionPositions({
+          missionType: m.mission_type,
+          startsAt: m.starts_at,
+          endsAt: m.ends_at,
+          scheduling: rules,
+          clientPositions: m.positions,
+          regenerateStructure: m.mission_type === "guards",
+        })
+      : m.positions;
 
     setTitle(m.title);
     setMissionType(m.mission_type);
@@ -176,18 +170,6 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (needsTemplateFix) {
       templateFixDone.current = true;
       setMsg("נטענה תבנית סטנדרטית — לחצו «שמור» כדי לעדכן את יום המשימה");
-    } else if (
-      m.mission_type === "guards" &&
-      positions !== m.positions &&
-      positions.some((pos, i) => {
-        const prev = m.positions[i];
-        if (!prev || prev.name !== pos.name) return true;
-        const prevKeys = prev.slots.map((s) => `${s.start_time}-${s.end_time}-${s.seat_count}`);
-        const nextKeys = pos.slots.map((s) => `${s.start_time}-${s.end_time}-${s.seat_count}`);
-        return prevKeys.join("|") !== nextKeys.join("|");
-      })
-    ) {
-      setMsg("מבנה המשמרות סונכרן לרשת 4 שעות — לחצו «שמור» כדי לעדכן");
     }
     setLoading(false);
   }, [missionId]);
@@ -209,19 +191,30 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setTitle("");
   }
 
+  function regenerateGuardStructure() {
+    if (missionType !== "guards") return;
+    if (
+      !confirm(
+        "ליצור מחדש את מבנה המשמרות לפי שעות יום המשימה? שיבוצים קיימים עלולים לא להתאים.",
+      )
+    ) {
+      return;
+    }
+    setPositions(
+      generateGuardMissionStructure(positions, {
+        startsAt: new Date(startsAt).toISOString(),
+        endsAt: new Date(endsAt).toISOString(),
+        scheduling: schedulingRules,
+      }),
+    );
+    setMsg("מבנה המשמרות עודכן — לחצו «שמור» כדי לשמור");
+  }
+
   async function save(e: FormEvent) {
     e.preventDefault();
     setSaving(true);
     setMsg("");
     setErr("");
-
-    const syncedPositions = resolveMissionPositions({
-      missionType,
-      startsAt: new Date(startsAt).toISOString(),
-      endsAt: new Date(endsAt).toISOString(),
-      scheduling: schedulingRules,
-      clientPositions: positions,
-    });
 
     const payload = {
       title: title || `${missionDate} · ${MISSION_TYPE_LABELS[missionType]}`,
@@ -230,9 +223,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       starts_at: new Date(startsAt).toISOString(),
       ends_at: new Date(endsAt).toISOString(),
       status,
-      positions: syncedPositions,
+      positions,
       scheduling_rules: schedulingRules,
       notes: notes || null,
+      regenerate_structure: false,
     };
 
     const res = await fetch(missionId ? `/api/missions/${missionId}` : "/api/missions", {
@@ -249,7 +243,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     }
 
     if (missionType === "guards" || !missionTemplateComplete(missionType, positions)) {
-      setPositions(payload.positions);
+      setPositions(data.positions ?? positions);
     }
 
     setMsg("נשמר");
@@ -276,17 +270,31 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
     await load();
+    const status = data.status as string | undefined;
+    const assignedSeats = data.assignedSeats ?? data.filled;
+    const requiredSeats = data.requiredSeats;
     const warnings: string[] = data.warnings || [];
+    const statusLine =
+      status === "complete"
+        ? `שיבוץ הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+        : status === "infeasible"
+          ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
+          : status === "partial"
+            ? `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`
+            : `שובצו ${data.filled} משבצות`;
     if (warnings.length) {
-      const preview = warnings.slice(0, 6).join(" · ");
-      const more = warnings.length > 6 ? ` · …ועוד ${warnings.length - 6}` : "";
-      setMsg(`שובצו ${data.filled} משבצות. ${preview}${more}`);
+      const preview = warnings.slice(0, 4).join(" · ");
+      const more = warnings.length > 4 ? ` · …ועוד ${warnings.length - 4}` : "";
+      setMsg(`${statusLine}. ${preview}${more}`);
     } else {
-      setMsg(`שובצו ${data.filled} משבצות.`);
+      setMsg(statusLine);
     }
   }
 
   function updateSlot(posId: string, slotId: string, patch: Partial<MissionSlot>) {
+    if ("start_time" in patch || "end_time" in patch) {
+      patch = { ...patch, starts_at: undefined, ends_at: undefined };
+    }
     setPositions((prev) =>
       prev.map((p) =>
         p.id !== posId
@@ -877,6 +885,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         <button type="submit" className="btn-pri" disabled={saving}>
           {saving ? "שומר…" : "שמור"}
         </button>
+        {missionType === "guards" && (
+          <button
+            type="button"
+            className="btn"
+            disabled={saving || autoAssigning}
+            onClick={regenerateGuardStructure}
+          >
+            סנכרן מבנה משמרות
+          </button>
+        )}
         {missionId && (
           <button
             type="button"

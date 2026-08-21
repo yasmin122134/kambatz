@@ -17,6 +17,7 @@ import {
 } from "@/lib/staffing-profile";
 import {
   fmtTimeLabel,
+  materializeSlotAbsoluteBounds,
   missionInterval,
   parseIsoMs,
   parseTimeMinutes,
@@ -69,7 +70,14 @@ export function carmelSlotFromMission(
 ): MissionSlot {
   const start = isoToTimeLabel(missionStartsAt) ?? boardStart ?? "20:00";
   const end = isoToTimeLabel(missionEndsAt) ?? start;
-  return newSlot(start, end, seats);
+  const slot: MissionSlot = { id: uid(), start_time: start, end_time: end, seat_count: seats };
+  if (missionStartsAt && missionEndsAt) {
+    const abs = resolveSlotAbsoluteInterval(missionStartsAt, missionEndsAt, start, end);
+    if (abs) {
+      Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
+    }
+  }
+  return slot;
 }
 
 function newPosition(
@@ -199,12 +207,16 @@ function officerDutySlots(missionStartMs: number, missionEndMs: number): Mission
       start_time: fmtTimeLabel(missionStartMs),
       end_time: fmtTimeLabel(mid),
       seat_count: 1,
+      starts_at: new Date(missionStartMs).toISOString(),
+      ends_at: new Date(mid).toISOString(),
     },
     {
       id: uid(),
       start_time: fmtTimeLabel(mid),
       end_time: fmtTimeLabel(missionEndMs),
       seat_count: 1,
+      starts_at: new Date(mid).toISOString(),
+      ends_at: new Date(missionEndMs).toISOString(),
     },
   ];
 }
@@ -392,13 +404,21 @@ function generatedSlotsToMissionSlots(
   generated: GeneratedPositionSlot[],
   boardStart: string,
 ): MissionSlot[] {
-  const slots = generated.map((g) => ({
-    id: uid(),
-    start_time: fmtTimeLabel(g.startMs),
-    end_time: fmtTimeLabel(g.endMs),
-    seat_count: g.requiredSeats,
-    _key: slotStructuralKey(positionId, g.startMs, g.endMs),
-  }));
+  const slots = generated.map((g) => {
+    const bounds = materializeSlotAbsoluteBounds(
+      { start_time: fmtTimeLabel(g.startMs), end_time: fmtTimeLabel(g.endMs) },
+      { startMs: g.startMs, endMs: g.endMs },
+    );
+    return {
+      id: uid(),
+      start_time: fmtTimeLabel(g.startMs),
+      end_time: fmtTimeLabel(g.endMs),
+      seat_count: g.requiredSeats,
+      starts_at: bounds.starts_at,
+      ends_at: bounds.ends_at,
+      _key: slotStructuralKey(positionId, g.startMs, g.endMs),
+    };
+  });
   return sortSlotsByBoardCycle(
     slots.map(({ _key, ...s }) => s),
     boardStart,

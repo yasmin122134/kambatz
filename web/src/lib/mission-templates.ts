@@ -125,14 +125,31 @@ export function finalizeGuardMissionPositions(
   });
 }
 
-export function resolveMissionPositions(input: {
+/** Operation A — regenerate guard slot structure from mission window + rules. */
+export function generateGuardMissionStructure(
+  positions: MissionPosition[],
+  input: {
+    startsAt: string;
+    endsAt: string;
+    scheduling?: MissionSchedulingRules;
+    season?: "summer" | "winter";
+  },
+): MissionPosition[] {
+  return finalizeGuardMissionPositions(positions, input);
+}
+
+export type ResolveMissionPositionsInput = {
   missionType: MissionType;
   startsAt: string;
   endsAt: string;
   scheduling?: MissionSchedulingRules;
   season?: "summer" | "winter";
   clientPositions?: MissionPosition[];
-}): MissionPosition[] {
+  /** When false (default), persisted client positions are authoritative. */
+  regenerateStructure?: boolean;
+};
+
+export function resolveMissionPositions(input: ResolveMissionPositionsInput): MissionPosition[] {
   const scheduling =
     input.scheduling ?? defaultSchedulingForType(input.missionType, input.startsAt);
   const base = input.clientPositions?.length
@@ -147,7 +164,9 @@ export function resolveMissionPositions(input: {
 
   if (input.missionType !== "guards") return base;
 
-  return finalizeGuardMissionPositions(base, {
+  if (!input.regenerateStructure) return base;
+
+  return generateGuardMissionStructure(base, {
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     scheduling,

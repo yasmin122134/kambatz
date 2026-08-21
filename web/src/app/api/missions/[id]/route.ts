@@ -93,6 +93,7 @@ export async function PUT(request: Request, { params }: Params) {
     : existing.scheduling_rules;
 
   const clientPositions = body.positions ?? existing.positions;
+  const regenerateStructure = body.regenerate_structure === true;
   const positions = resolveMissionPositions({
     missionType: mission_type,
     startsAt: starts_at,
@@ -100,6 +101,7 @@ export async function PUT(request: Request, { params }: Params) {
     scheduling:
       scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
     clientPositions,
+    regenerateStructure,
   });
 
   const templateWasIncomplete =

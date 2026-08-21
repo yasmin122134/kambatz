@@ -5,6 +5,7 @@ import {
   isStandbyKind,
   parseTimeMinutes,
   slotDurationMinutes,
+  slotEatsRest,
 } from "@/lib/mission-utils";
 import type {
   FairnessRules,
@@ -336,7 +337,7 @@ export function blockFromFlatSlot(
     wallStartMin: slot.wallStartMin,
     calendarDayOffset: slot.calendarDayOffset,
     durationMinutes: slot.durationMinutes,
-    eatsRest: slot.positionKind !== "standby_carmel_a" && slot.positionKind !== "standby_carmel_b",
+    eatsRest: slotEatsRest(slot),
     positionKind: slot.positionKind,
     missionType,
     seatCount: seatCount ?? slot.seatCount,

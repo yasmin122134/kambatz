@@ -1,29 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
-import { guardSlotDifficultyRank, calculatePersonBurden } from "@/lib/guard-burden";
+import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
-  assignBaseWorkShift,
-  assignKitchenShift,
-  assignStandbyRoom,
-  buildTrackerFromMissions,
   findAssignmentConflicts,
-  fitsPerson,
-  forceFillEmptySeats,
-  formatBaseWorkDiagnostics,
-  pickBestCandidate,
-  placePerson,
-  repairGuardAssignmentGaps,
-  slotRank,
+  validateGeneratedRoster,
   validateNoPersonOverlaps,
 } from "@/lib/scheduling-engine";
+import { syncAssignmentSeats } from "@/lib/mission-utils";
 import {
-  flattenMissionSlots,
-  isGuardKind,
-  isStandbyKind,
-  normalizeSchedulingRules,
-  resolvePositionKind,
-  syncAssignmentSeats,
-} from "@/lib/mission-utils";
+  applyAssignmentsOnly,
+  assertMissionStructureUnchanged,
+  cloneMissionPositions,
+  snapshotMissionStructure,
+  validateMissionStructureForAssignment,
+} from "@/lib/mission-slot-structure";
 import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import type { Issue, MissionDay, Person } from "@/lib/types";
@@ -33,39 +23,33 @@ export type AutoAssignResult = {
   filled: number;
   skipped: number;
   warnings: string[];
+  status?: SmartAssignStatus;
+  assignedSeats?: number;
+  requiredSeats?: number;
+  unresolved?: UnresolvedRequirement[];
+};
+
+export type SmartAssignDayResult = {
+  status: SmartAssignStatus;
+  assignedSeats: number;
+  requiredSeats: number;
+  results: AutoAssignResult[];
+  warnings: string[];
+  unresolved: UnresolvedRequirement[];
+  objectiveSummary?: {
+    filledSeats: number;
+    requiredSeats: number;
+    carmelFilled: number;
+    carmelRequired: number;
+    fairnessSpread: number;
+    searchNodes: number;
+    attempts: number;
+  };
 };
 
 async function loadPeople(): Promise<Person[]> {
   const supabase = await createClient();
   return fetchActivePeople(supabase);
-}
-
-async function finalizeAutoAssign(
-  mission: MissionDay,
-  assignments: Record<string, string[]>,
-  warnings: string[],
-  peopleByName: Record<string, Person>,
-  filled: number,
-  skipped: number,
-  overlapScope: MissionDay[] = [],
-): Promise<AutoAssignResult> {
-  const draft: MissionDay = { ...mission, assignments };
-  for (const msg of findAssignmentConflicts(draft, peopleByName)) {
-    if (!warnings.includes(msg)) warnings.push(msg);
-  }
-
-  const scope = overlapScope.length
-    ? overlapScope.map((m) => (m.id === mission.id ? draft : m))
-    : [draft];
-  for (const msg of validateNoPersonOverlaps(scope)) {
-    if (!warnings.includes(msg)) warnings.push(`⚠ ${msg}`);
-  }
-
-  const saved = await saveMissionDay(
-    { ...mission, assignments },
-    { validateAssignments: false },
-  );
-  return { mission: saved, filled, skipped, warnings };
 }
 
 async function loadApprovedIssues(): Promise<Issue[]> {
@@ -82,272 +66,145 @@ async function loadApprovedIssues(): Promise<Issue[]> {
   return (data || []) as Issue[];
 }
 
-function autoAssignKitchenMission(
-  mission: MissionDay,
-  people: Person[],
-  issues: Issue[],
-  rules: Awaited<ReturnType<typeof getFairnessRules>>,
-  tracker: ReturnType<typeof buildTrackerFromMissions>,
-  scheduling: ReturnType<typeof normalizeSchedulingRules>,
-  meanPrior: number,
-  keepExisting: boolean,
-): { assignments: Record<string, string[]>; filled: number; skipped: number; warnings: string[] } {
-  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
-  const warnings: string[] = [];
-  let filled = 0;
-  let skipped = 0;
-
-  const slots = flattenMissionSlots(mission).sort(
-    (a, b) => (a.kitchenShiftIndex ?? 0) - (b.kitchenShiftIndex ?? 0),
-  );
-
-  for (const slot of slots) {
-    const seats = assignments[slot.slotId] || [];
-    const shiftIndex = slot.kitchenShiftIndex ?? 0;
-    const restSquad =
-      scheduling.kitchen?.squad_rest_by_shift?.[shiftIndex % 4] ?? shiftIndex + 1;
-
-    if (keepExisting && seats.every(Boolean)) {
-      const keptNames = seats.filter(Boolean);
-      for (const name of keptNames) {
-        placePerson(
-          name,
-          slot,
-          mission.id,
-          tracker,
-          rules,
-          scheduling,
-          slot.seatCount,
-          mission.mission_type,
-        );
-      }
-      skipped += keptNames.length;
-      continue;
-    }
-
-    const kept = keepExisting ? seats.filter(Boolean) : [];
-    for (const name of kept) {
-      placePerson(
-        name,
-        slot,
-        mission.id,
-        tracker,
-        rules,
-        scheduling,
-        slot.seatCount,
-        mission.mission_type,
-      );
-    }
-
-    const need =
-      (scheduling.kitchen?.seats_per_shift ?? slot.seatCount) - kept.length;
-    if (need <= 0) {
-      assignments[slot.slotId] = seats;
-      continue;
-    }
-
-    const { names, usedRestSquad } = assignKitchenShift({
-      people,
-      slot,
-      shiftIndex,
-      need,
-      taken: kept,
-      tracker,
-      issues,
-      scheduling,
-      rules,
-      meanPrior,
-      missionId: mission.id,
-      missionType: mission.mission_type,
-    });
-
-    if (usedRestSquad) {
-      warnings.push(
-        `${slot.positionName} ${slot.timeLabel}: נוספו צוערים מצוות ${restSquad} (מנוחה) כדי להגיע ל-${scheduling.kitchen?.seats_per_shift ?? 35}`,
-      );
-    }
-
-    let ni = 0;
-    for (let i = 0; i < seats.length; i++) {
-      if (keepExisting && seats[i]) continue;
-      if (ni < names.length) {
-        seats[i] = names[ni++];
-        filled++;
-      } else {
-        seats[i] = "";
-      }
-    }
-
-    if (names.length < need) {
-      warnings.push(
-        `${slot.positionName} ${slot.timeLabel}: חסרים ${need - names.length} מתוך ${need} (צוות ${restSquad} במנוחה)`,
-      );
-    }
-
-    assignments[slot.slotId] = seats;
-  }
-
-  return { assignments, filled, skipped, warnings };
-}
-
-function autoAssignBaseWorkMission(
-  mission: MissionDay,
-  people: Person[],
-  issues: Issue[],
-  rules: Awaited<ReturnType<typeof getFairnessRules>>,
-  tracker: ReturnType<typeof buildTrackerFromMissions>,
-  scheduling: ReturnType<typeof normalizeSchedulingRules>,
-  meanPrior: number,
-  keepExisting: boolean,
-): { assignments: Record<string, string[]>; filled: number; skipped: number; warnings: string[] } {
-  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
-  const warnings: string[] = [];
-  let filled = 0;
-  let skipped = 0;
-
-  const slots = flattenMissionSlots(mission).sort(
-    (a, b) => (a.baseWorkShiftIndex ?? 0) - (b.baseWorkShiftIndex ?? 0),
-  );
-
-  for (const slot of slots) {
-    const seats = assignments[slot.slotId] || [];
-    const shiftIndex = slot.baseWorkShiftIndex ?? 0;
-    const restSquad =
-      scheduling.base_work?.squad_rest_by_shift?.[shiftIndex % 3] ?? shiftIndex + 1;
-
-    if (keepExisting && seats.every(Boolean)) {
-      const keptNames = seats.filter(Boolean);
-      for (const name of keptNames) {
-        placePerson(
-          name,
-          slot,
-          mission.id,
-          tracker,
-          rules,
-          scheduling,
-          slot.seatCount,
-          mission.mission_type,
-        );
-      }
-      skipped += keptNames.length;
-      continue;
-    }
-
-    const kept = keepExisting ? seats.filter(Boolean) : [];
-    for (const name of kept) {
-      placePerson(
-        name,
-        slot,
-        mission.id,
-        tracker,
-        rules,
-        scheduling,
-        slot.seatCount,
-        mission.mission_type,
-      );
-    }
-
-    if (kept.length >= slot.seatCount) {
-      assignments[slot.slotId] = seats;
-      continue;
-    }
-
-    const { names, workSquad, usedFallback, diagnostics } = assignBaseWorkShift({
-      people,
-      slot,
-      shiftIndex,
-      taken: kept,
-      tracker,
-      issues,
-      scheduling,
-      rules,
-      meanPrior,
-      missionId: mission.id,
-      missionType: mission.mission_type,
-    });
-
-    let ni = 0;
-    for (let i = 0; i < seats.length; i++) {
-      if (keepExisting && seats[i]) continue;
-      if (ni < names.length) {
-        seats[i] = names[ni++];
-        filled++;
-      } else {
-        seats[i] = "";
-      }
-    }
-
-    if (workSquad) {
-      warnings.push(
-        `${slot.timeLabel}: צוות ${workSquad} (${diagnostics.assigned} צוערים) · צ${restSquad} במנוחה`,
-      );
-    }
-    if (usedFallback) {
-      warnings.push(`${slot.timeLabel}: שיבוץ חלקי — לא נמצא צוות שלם פנוי`);
-    }
-    if (diagnostics.assigned < diagnostics.required) {
-      warnings.push(formatBaseWorkDiagnostics(slot.timeLabel, diagnostics));
-    }
-
-    assignments[slot.slotId] = seats;
-  }
-
-  return { assignments, filled, skipped, warnings };
-}
-
-function sameDayMissionScope(
-  mission: MissionDay,
-  allMissions: MissionDay[],
-): MissionDay[] {
+function sameDayMissionScope(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
   const date = mission.mission_date.slice(0, 10);
   return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
 }
 
-function missionHasAnyAssignment(mission: MissionDay): boolean {
-  return Object.values(mission.assignments).some((seats) => seats.some(Boolean));
+function countSkippedSeats(mission: MissionDay, keepExisting: boolean): number {
+  if (!keepExisting) return 0;
+  let skipped = 0;
+  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+  for (const seats of Object.values(assignments)) {
+    skipped += seats.filter(Boolean).length;
+  }
+  return skipped;
 }
 
-async function ensureLinkedBaseWorkAssigned(input: {
-  guardsMission: MissionDay;
+function countMissionRequiredSeats(mission: MissionDay): number {
+  let total = 0;
+  for (const pos of mission.positions) {
+    for (const slot of pos.slots) {
+      total += slot.seat_count;
+    }
+  }
+  return total;
+}
+
+function countMissionFilledSeats(assignments: Record<string, string[]>): number {
+  let filled = 0;
+  for (const seats of Object.values(assignments)) {
+    filled += seats.filter(Boolean).length;
+  }
+  return filled;
+}
+
+async function smartAssignScope(input: {
+  scopeMissions: MissionDay[];
   allMissions: MissionDay[];
   people: Person[];
   issues: Issue[];
   rules: Awaited<ReturnType<typeof getFairnessRules>>;
-  meanPrior: number;
   keepExisting: boolean;
-}): Promise<{ allMissions: MissionDay[]; warnings: string[] }> {
-  const warnings: string[] = [];
-  const scheduling = normalizeSchedulingRules(input.guardsMission.scheduling_rules);
-  const linkedId = scheduling.linked_mission_id;
-  if (!linkedId) return { allMissions: input.allMissions, warnings };
-
-  let linked = input.allMissions.find((m) => m.id === linkedId);
-  if (!linked || linked.mission_type !== "base_work") {
-    return { allMissions: input.allMissions, warnings };
-  }
-  if (missionHasAnyAssignment(linked)) {
-    return { allMissions: input.allMissions, warnings };
-  }
-
-  const tracker = buildTrackerFromMissions(input.allMissions, input.rules, new Set([linked.id]));
+  preWarnings?: string[];
+}): Promise<SmartAssignDayResult> {
+  const meanPrior =
+    input.people.reduce((sum, p) => sum + (p.prior_score || 0), 0) /
+    (input.people.length || 1);
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
-  const result = autoAssignBaseWorkMission(
-    linked,
-    input.people,
-    input.issues,
-    input.rules,
-    tracker,
-    normalizeSchedulingRules(linked.scheduling_rules),
-    input.meanPrior,
-    input.keepExisting,
-  );
-  warnings.push(...result.warnings);
-  const saved = await saveMissionDay(
-    { ...linked, assignments: result.assignments },
-    { validateAssignments: false },
-  );
-  const allMissions = input.allMissions.map((m) => (m.id === saved.id ? saved : m));
-  return { allMissions, warnings };
+
+  const structureBefore = input.scopeMissions.map((m) => snapshotMissionStructure(m));
+  for (const mission of input.scopeMissions) {
+    const structureErrors = validateMissionStructureForAssignment(mission);
+    if (structureErrors.length) {
+      throw new Error(
+        `מבנה המשימה אינו תקין — תקנו או סנכרנו משמרות לפני שיבוץ:\n${structureErrors.join("\n")}`,
+      );
+    }
+  }
+
+  const output = runGlobalAssign({
+    missions: input.scopeMissions,
+    people: input.people,
+    issues: input.issues,
+    rules: input.rules,
+    meanPrior,
+    keepExisting: input.keepExisting,
+    crossDayMissions: input.allMissions.filter(
+      (m) => !input.scopeMissions.some((s) => s.id === m.id),
+    ),
+  });
+
+  const draftMissions = input.scopeMissions.map((mission) => ({
+    ...mission,
+    assignments: output.assignmentsByMission.get(mission.id) ?? mission.assignments,
+  }));
+
+  const validationErrors = [
+    ...validateGeneratedRoster({
+      missions: draftMissions,
+      issues: input.issues,
+      peopleByName,
+    }),
+    ...validateNoPersonOverlaps(draftMissions).map((msg) => `⚠ ${msg}`),
+  ];
+
+  let status = output.status;
+  if (validationErrors.length) {
+    status = output.filled >= output.requiredSeats ? "partial" : status;
+  } else if (output.filled >= output.requiredSeats) {
+    status = "complete";
+  }
+
+  const warnings = [...(input.preWarnings ?? []), ...output.warnings, ...validationErrors];
+
+  const results: AutoAssignResult[] = [];
+  for (let mi = 0; mi < input.scopeMissions.length; mi++) {
+    const mission = input.scopeMissions[mi];
+    const assignments = output.assignmentsByMission.get(mission.id) ?? mission.assignments;
+    const structureAfter = snapshotMissionStructure({
+      ...mission,
+      assignments,
+      positions: cloneMissionPositions(mission.positions),
+    });
+    assertMissionStructureUnchanged(structureBefore[mi], structureAfter);
+
+    const draft: MissionDay = applyAssignmentsOnly(mission, assignments);
+    const missionWarnings = [...warnings];
+    for (const msg of findAssignmentConflicts(draft, peopleByName)) {
+      if (!missionWarnings.includes(msg)) missionWarnings.push(msg);
+    }
+
+    const saved = await saveMissionDay(
+      applyAssignmentsOnly(mission, assignments),
+      { validateAssignments: status === "complete" },
+    );
+
+    const requiredSeats = countMissionRequiredSeats(mission);
+    const assignedSeats = countMissionFilledSeats(assignments);
+    const missionUnresolved = output.unresolved.filter((u) => u.missionId === mission.id);
+
+    results.push({
+      mission: saved,
+      filled: Math.max(0, assignedSeats - countSkippedSeats(mission, input.keepExisting)),
+      skipped: countSkippedSeats(mission, input.keepExisting),
+      warnings: missionWarnings,
+      status,
+      assignedSeats,
+      requiredSeats,
+      unresolved: missionUnresolved,
+    });
+  }
+
+  return {
+    status,
+    assignedSeats: output.filled,
+    requiredSeats: output.requiredSeats,
+    results,
+    warnings,
+    unresolved: output.unresolved,
+    objectiveSummary: output.objectiveSummary,
+  };
 }
 
 export async function autoAssignMission(
@@ -367,321 +224,38 @@ export async function autoAssignMission(
 
   if (!people.length) throw new Error("אין צוערים פעילים במאגר");
 
-  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-  const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
-  const excludeIds = new Set([mission.id]);
-  let scopedMissions = allMissions;
-  let preWarnings: string[] = [];
+  const scopeMissions =
+    options.includeSameDay === false
+      ? [mission]
+      : sameDayMissionScope(mission, allMissions);
 
-  if (mission.mission_type === "guards") {
-    const ensured = await ensureLinkedBaseWorkAssigned({
-      guardsMission: mission,
-      allMissions,
-      people,
-      issues,
-      rules,
-      meanPrior: people.reduce((sum, p) => sum + (p.prior_score || 0), 0) / (people.length || 1),
-      keepExisting,
-    });
-    scopedMissions = ensured.allMissions;
-    preWarnings = ensured.warnings;
-  }
-
-  const sameDayScope = sameDayMissionScope(mission, scopedMissions);
-
-  const tracker = buildTrackerFromMissions(scopedMissions, rules, excludeIds);
-  if (options.includeSameDay !== false) {
-    const sameDayOthers = sameDayScope.filter((m) => m.id !== mission.id);
-    for (const other of sameDayOthers) {
-      const t2 = buildTrackerFromMissions([other], rules);
-      for (const [name, blocks] of Object.entries(t2.busy)) {
-        tracker.busy[name] = [...(tracker.busy[name] || []), ...blocks];
-      }
-      for (const [name, gs] of Object.entries(t2.guardShifts)) {
-        tracker.guardShifts[name] = [...(tracker.guardShifts[name] || []), ...gs];
-      }
-    }
-    for (const name of Object.keys(tracker.busy)) {
-      tracker.periodPoints[name] = calculatePersonBurden(
-        tracker.busy[name] || [],
-        rules,
-        scheduling,
-      ).totalBurden;
-    }
-  }
-
-  const meanPrior =
-    people.reduce((sum, p) => sum + (p.prior_score || 0), 0) / (people.length || 1);
-
-  if (mission.mission_type === "kitchen") {
-    const result = autoAssignKitchenMission(
-      mission,
-      people,
-      issues,
-      rules,
-      tracker,
-      scheduling,
-      meanPrior,
-      keepExisting,
-    );
-    const forced = forceFillEmptySeats({
-      mission,
-      assignments: result.assignments,
-      people,
-      tracker,
-      issues,
-      scheduling,
-      rules,
-      meanPrior,
-    });
-    return finalizeAutoAssign(
-      mission,
-      forced.assignments,
-      [...preWarnings, ...result.warnings, ...forced.warnings],
-      peopleByName,
-      result.filled + forced.filled,
-      result.skipped,
-      sameDayScope,
-    );
-  }
-
-  if (mission.mission_type === "base_work") {
-    const result = autoAssignBaseWorkMission(
-      mission,
-      people,
-      issues,
-      rules,
-      tracker,
-      scheduling,
-      meanPrior,
-      keepExisting,
-    );
-    const forced = forceFillEmptySeats({
-      mission,
-      assignments: result.assignments,
-      people,
-      tracker,
-      issues,
-      scheduling,
-      rules,
-      meanPrior,
-    });
-    return finalizeAutoAssign(
-      mission,
-      forced.assignments,
-      [...preWarnings, ...result.warnings, ...forced.warnings],
-      peopleByName,
-      result.filled + forced.filled,
-      result.skipped,
-      sameDayScope,
-    );
-  }
-
-  const guardMission = mission;
-  const assignments = syncAssignmentSeats(guardMission.positions, { ...guardMission.assignments });
-  const warnings: string[] = [];
-  let filled = 0;
-  let skipped = 0;
-
-  const slots = flattenMissionSlots(guardMission).sort((a, b) => {
-    const countEligible = (slot: (typeof a)) => {
-      if (!isGuardKind(slot.positionKind)) return 10;
-      return people.filter((p) =>
-        fitsPerson(p, slot, tracker, issues, scheduling, [], peopleByName),
-      ).length;
-    };
-    const rankA = isGuardKind(a.positionKind)
-      ? guardSlotDifficultyRank(a, countEligible(a))
-      : slotRank(a, rules);
-    const rankB = isGuardKind(b.positionKind)
-      ? guardSlotDifficultyRank(b, countEligible(b))
-      : slotRank(b, rules);
-    return rankB - rankA || b.durationMinutes - a.durationMinutes;
-  });
-
-  const standbyPositions = new Set(
-    guardMission.positions
-      .filter((p) => isStandbyKind(resolvePositionKind(guardMission.mission_type, p)))
-      .map((p) => p.id),
-  );
-
-  for (const slot of slots) {
-    const seats = assignments[slot.slotId] || [];
-    const inSlot = new Set<string>();
-
-    if (slot.sameRoom && standbyPositions.has(slot.positionId)) {
-      const emptySeats = seats
-        .map((name, i) => ({ name, i }))
-        .filter(({ name }) => !name || (!keepExisting && name));
-      const need = emptySeats.length;
-      if (need === 0) {
-        for (const name of seats.filter(Boolean)) {
-          placePerson(
-            name,
-            slot,
-            guardMission.id,
-            tracker,
-            rules,
-            scheduling,
-            slot.seatCount,
-            guardMission.mission_type,
-          );
-          skipped++;
-        }
-        continue;
-      }
-
-      const kept = keepExisting ? seats.filter(Boolean) : [];
-      for (const name of kept) {
-        placePerson(
-          name,
-          slot,
-          guardMission.id,
-          tracker,
-          rules,
-          scheduling,
-          slot.seatCount,
-          guardMission.mission_type,
-        );
-      }
-
-      const assigned = assignStandbyRoom(
-        people,
-        slot,
-        need,
-        kept,
-        tracker,
-        issues,
-        scheduling,
-        rules,
-        meanPrior,
-        guardMission.id,
-      );
-
-      let ai = 0;
-      for (let i = 0; i < seats.length; i++) {
-        if (keepExisting && seats[i]) continue;
-        if (ai < assigned.length) {
-          seats[i] = assigned[ai++];
-          filled++;
-        } else {
-          seats[i] = "";
-          warnings.push(
-            `${slot.positionName}: לא נמצא חדר שלם פנוי (${need} מקומות, אותו מין)`,
-          );
-        }
-      }
-      assignments[slot.slotId] = seats;
-      continue;
-    }
-
-    for (let i = 0; i < slot.seatCount; i++) {
-      const current = seats[i] || "";
-      if (keepExisting && current) {
-        placePerson(
-          current,
-          slot,
-          guardMission.id,
-          tracker,
-          rules,
-          scheduling,
-          slot.seatCount,
-          guardMission.mission_type,
-        );
-        skipped++;
-        continue;
-      }
-
-      const mates = seats.filter((n, idx) => n && idx !== i);
-      const candidates = people.filter(
-        (p) =>
-          !inSlot.has(p.name) &&
-          fitsPerson(p, slot, tracker, issues, scheduling, mates, peopleByName),
-      );
-
-      const chosen = pickBestCandidate(
-        candidates,
-        slot,
-        tracker,
-        rules,
-        meanPrior,
-        { scheduling },
-      );
-      if (!chosen) {
-        warnings.push(
-          `${slot.positionName} ${slot.timeLabel} — משבצת ${i + 1}: לא נמצא צוער שעומד בכללים`,
-        );
-        seats[i] = "";
-        continue;
-      }
-
-      seats[i] = chosen.name;
-      inSlot.add(chosen.name);
-      placePerson(
-        chosen.name,
-        slot,
-        guardMission.id,
-        tracker,
-        rules,
-        scheduling,
-        slot.seatCount,
-        guardMission.mission_type,
-      );
-      filled++;
-    }
-
-    assignments[slot.slotId] = seats;
-  }
-
-  const repaired = repairGuardAssignmentGaps({
-    mission: guardMission,
-    assignments,
+  const dayResult = await smartAssignScope({
+    scopeMissions,
+    allMissions,
     people,
-    tracker,
     issues,
-    scheduling,
     rules,
-    meanPrior,
+    keepExisting,
   });
-  if (repaired.filled > 0) {
-    filled += repaired.filled;
-    Object.assign(assignments, repaired.assignments);
+
+  const focus = dayResult.results.find((r) => r.mission.id === missionId);
+  if (!focus) {
+    throw new Error("שגיאה בשמירת שיבוץ");
   }
-
-  const forced = forceFillEmptySeats({
-    mission: guardMission,
-    assignments,
-    people,
-    tracker,
-    issues,
-    scheduling,
-    rules,
-    meanPrior,
-  });
-  filled += forced.filled;
-  warnings.push(...forced.warnings);
-  Object.assign(assignments, forced.assignments);
-
-  return finalizeAutoAssign(
-    guardMission,
-    assignments,
-    [...preWarnings, ...warnings],
-    peopleByName,
-    filled,
-    skipped,
-    sameDayScope,
-  );
+  return focus;
 }
 
 export async function autoAssignDate(
   missionDate: string,
   options: { keepExisting?: boolean } = {},
-): Promise<{ results: AutoAssignResult[]; warnings: string[] }> {
-  const missions = (await listMissionDays(false)).filter(
+): Promise<SmartAssignDayResult> {
+  const keepExisting = options.keepExisting !== false;
+  const allMissions = await listMissionDays(false);
+  const scopeMissions = allMissions.filter(
     (m) => m.mission_date === missionDate.slice(0, 10),
   );
 
-  if (!missions.length) {
+  if (!scopeMissions.length) {
     throw new Error("אין ימי משימה בתאריך זה");
   }
 
@@ -690,23 +264,26 @@ export async function autoAssignDate(
     base_work: 1,
     guards: 2,
   };
-  missions.sort(
+  scopeMissions.sort(
     (a, b) =>
       (typeOrder[a.mission_type] ?? 9) - (typeOrder[b.mission_type] ?? 9) ||
       a.starts_at.localeCompare(b.starts_at),
   );
 
-  const results: AutoAssignResult[] = [];
-  const warnings: string[] = [];
+  const [people, issues, rules] = await Promise.all([
+    loadPeople(),
+    loadApprovedIssues(),
+    getFairnessRules(),
+  ]);
 
-  for (const m of missions) {
-    const result = await autoAssignMission(m.id, {
-      ...options,
-      includeSameDay: true,
-    });
-    results.push(result);
-    warnings.push(...result.warnings);
-  }
+  if (!people.length) throw new Error("אין צוערים פעילים במאגר");
 
-  return { results, warnings };
+  return smartAssignScope({
+    scopeMissions,
+    allMissions,
+    people,
+    issues,
+    rules,
+    keepExisting,
+  });
 }

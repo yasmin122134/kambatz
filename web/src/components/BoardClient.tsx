@@ -16,7 +16,8 @@ import {
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
-import { flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
+import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules, parseTimeMinutes } from "@/lib/mission-utils";
+import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
 
 type Props = {
@@ -256,17 +257,25 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       return;
     }
     await loadMissions();
-    const filled = (data.results || []).reduce(
-      (sum: number, r: { filled: number }) => sum + r.filled,
+    const status = data.status as string | undefined;
+    const assignedSeats = data.assignedSeats ?? (data.results || []).reduce(
+      (sum: number, r: { filled: number; skipped?: number }) => sum + r.filled + (r.skipped ?? 0),
       0,
     );
+    const requiredSeats = data.requiredSeats;
     const warnings: string[] = data.warnings || [];
+    const statusLine =
+      status === "complete"
+        ? `שיבוץ הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+        : status === "infeasible"
+          ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
+          : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
     if (warnings.length) {
-      const preview = warnings.slice(0, 6).join(" · ");
-      const more = warnings.length > 6 ? ` · …ועוד ${warnings.length - 6}` : "";
-      setMsg(`שובצו ${filled} משבצות. ${preview}${more}`);
+      const preview = warnings.slice(0, 4).join(" · ");
+      const more = warnings.length > 4 ? ` · …ועוד ${warnings.length - 4}` : "";
+      setMsg(`${statusLine}. ${preview}${more}`);
     } else {
-      setMsg(`שובצו ${filled} משבצות בהצלחה.`);
+      setMsg(statusLine);
     }
   }
 
@@ -627,6 +636,137 @@ function ConstraintsPanel({
   );
 }
 
+const TIMELINE_CYCLE_MIN = 1440;
+const TIMELINE_HEIGHT_PX = 960;
+const TIMELINE_TICK_STEP_MIN = 120;
+
+function formatWallTime(totalMin: number): string {
+  const h = Math.floor(totalMin / 60) % 24;
+  const m = totalMin % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function cyclicToPx(cyclicMin: number): number {
+  return (cyclicMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX;
+}
+
+function durationToPx(durationMin: number): number {
+  return Math.max((durationMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX, 32);
+}
+
+function GuardTimeline({
+  mission,
+  slots,
+  personName,
+  isAdmin,
+  dutyOfficerNames,
+  swapTarget,
+  swapMode,
+  mySlotIds,
+  onStartSwap,
+  onSwapMode,
+  onTake,
+  onSwap,
+  onAdminSet,
+  onAdminReplacementSwap,
+  onCancelSwap,
+}: {
+  mission: MissionDay;
+  slots: FlatSlot[];
+  personName: string;
+  isAdmin: boolean;
+  dutyOfficerNames?: string[];
+  swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
+  swapMode: SwapMode;
+  mySlotIds: Set<string>;
+  onStartSwap: (slotId: string, seatIndex: number, label: string) => void;
+  onSwapMode: (m: SwapMode) => void;
+  onTake: (slotId: string, seatIndex: number) => void;
+  onSwap: (slotId: string, seatIndex: number) => void;
+  onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onAdminReplacementSwap: (
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
+  onCancelSwap: () => void;
+}) {
+  const positions = mission.positions || [];
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const boardStartMin = parseTimeMinutes(rules.board_start) ?? 20 * 60;
+  const hourStepPx = TIMELINE_HEIGHT_PX / 24;
+  const ticks = Array.from(
+    { length: TIMELINE_CYCLE_MIN / TIMELINE_TICK_STEP_MIN + 1 },
+    (_, i) => i * TIMELINE_TICK_STEP_MIN,
+  );
+
+  const timelineStyle = {
+    ["--timeline-height" as string]: `${TIMELINE_HEIGHT_PX}px`,
+    ["--timeline-hour-step" as string]: `${hourStepPx}px`,
+  };
+
+  return (
+    <div className="guard-timeline-wrap">
+      <div className="guard-timeline" style={timelineStyle}>
+        <div className="guard-timeline-axis" aria-hidden>
+          {ticks.map((cyclicMin) => (
+            <div
+              key={cyclicMin}
+              className="guard-timeline-tick"
+              style={{ top: `${cyclicToPx(cyclicMin)}px` }}
+            >
+              {formatWallTime((boardStartMin + cyclicMin) % TIMELINE_CYCLE_MIN)}
+            </div>
+          ))}
+        </div>
+        <div className="guard-timeline-cols">
+          {positions.map((pos) => {
+            const posSlots = slots.filter((s) => s.positionId === pos.id);
+            return (
+              <div key={pos.id} className="guard-timeline-col">
+                <div className="guard-timeline-col-header">{pos.name}</div>
+                <div className="guard-timeline-col-body">
+                  {posSlots.map((slot) => (
+                    <div
+                      key={slot.slotId}
+                      className="guard-timeline-slot"
+                      style={{
+                        top: `${cyclicToPx(slot.cyclicStart)}px`,
+                        height: `${durationToPx(slot.durationMinutes)}px`,
+                      }}
+                    >
+                      <SlotCard
+                        missionId={mission.id}
+                        slot={slot}
+                        personName={personName}
+                        isAdmin={isAdmin}
+                        dutyOfficerNames={dutyOfficerNames}
+                        swapTarget={swapTarget}
+                        swapMode={swapMode}
+                        mySlotIds={mySlotIds}
+                        variant="timeline"
+                        onStartSwap={onStartSwap}
+                        onSwapMode={onSwapMode}
+                        onTake={onTake}
+                        onSwap={onSwap}
+                        onAdminSet={onAdminSet}
+                        onAdminReplacementSwap={onAdminReplacementSwap}
+                        onCancelSwap={onCancelSwap}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MissionPanel({
   mission,
   personName,
@@ -667,40 +807,24 @@ function MissionPanel({
   const slots = flattenMissionSlots(mission);
 
   if (mission.mission_type === "guards") {
-    const positions = mission.positions || [];
     return (
-      <div className="guard-grid">
-          {positions.map((pos) => {
-            const posSlots = slots.filter((s) => s.positionId === pos.id);
-            return (
-              <div key={pos.id} className="guard-col">
-                <h4 className="font-display text-sm mb-3 text-center">{pos.name}</h4>
-                <div className="space-y-3">
-                  {posSlots.map((slot) => (
-                    <SlotCard
-                      key={slot.slotId}
-                      missionId={mission.id}
-                      slot={slot}
-                      personName={personName}
-                      isAdmin={isAdmin}
-                      dutyOfficerNames={dutyOfficerNames}
-                      swapTarget={swapTarget}
-                      swapMode={swapMode}
-                      mySlotIds={new Set(mySlots.map((s) => s.slotId))}
-                      onStartSwap={onStartSwap}
-                      onSwapMode={onSwapMode}
-                      onTake={onTake}
-                      onSwap={onSwap}
-                      onAdminSet={onAdminSet}
-                      onAdminReplacementSwap={onAdminReplacementSwap}
-                      onCancelSwap={onCancelSwap}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
-      </div>
+      <GuardTimeline
+        mission={mission}
+        slots={slots}
+        personName={personName}
+        isAdmin={isAdmin}
+        dutyOfficerNames={dutyOfficerNames}
+        swapTarget={swapTarget}
+        swapMode={swapMode}
+        mySlotIds={new Set(mySlots.map((s) => s.slotId))}
+        onStartSwap={onStartSwap}
+        onSwapMode={onSwapMode}
+        onTake={onTake}
+        onSwap={onSwap}
+        onAdminSet={onAdminSet}
+        onAdminReplacementSwap={onAdminReplacementSwap}
+        onCancelSwap={onCancelSwap}
+      />
     );
   }
 
@@ -848,6 +972,7 @@ function SlotCard({
   swapTarget,
   swapMode,
   mySlotIds,
+  variant = "stack",
   onStartSwap,
   onSwapMode,
   onTake,
@@ -857,13 +982,14 @@ function SlotCard({
   onCancelSwap,
 }: {
   missionId: string;
-  slot: ReturnType<typeof flattenMissionSlots>[0];
+  slot: FlatSlot;
   personName: string;
   isAdmin: boolean;
   dutyOfficerNames?: string[];
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
   mySlotIds: Set<string>;
+  variant?: "stack" | "timeline";
   onStartSwap: (slotId: string, seatIndex: number, label: string) => void;
   onSwapMode: (m: SwapMode) => void;
   onTake: (slotId: string, seatIndex: number) => void;
@@ -884,6 +1010,95 @@ function SlotCard({
     swapMode === "swap" &&
     swapTarget.slotId !== slot.slotId;
 
+  const assigneeList = (
+    <ul className={variant === "timeline" ? "space-y-0.5" : "mt-2 space-y-1"}>
+      {Array.from({ length: slot.seatCount }, (_, seatIndex) => {
+        const name = slot.assignees[seatIndex] || "";
+        const isEmpty = !name;
+        const isMySeat = name === personName;
+
+        return (
+          <li key={seatIndex} className="flex flex-wrap items-center gap-1 text-sm">
+            {isAdmin ? (
+              <>
+                <NameCombobox
+                  value={name}
+                  onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
+                  placeholder={
+                    slot.positionKind === "officer_duty" ? "קצין תורן…" : "שם"
+                  }
+                  allowedNames={
+                    slot.positionKind === "officer_duty" ? dutyOfficerNames : undefined
+                  }
+                  className="flex-1 min-w-[100px]"
+                />
+                {name && (
+                  <ReplacementPicker
+                    missionId={missionId}
+                    slotId={slot.slotId}
+                    seatIndex={seatIndex}
+                    currentName={name}
+                    onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
+                    onSwap={(targetSlotId, targetSeatIndex) =>
+                      onAdminReplacementSwap(
+                        missionId,
+                        slot.slotId,
+                        seatIndex,
+                        targetSlotId,
+                        targetSeatIndex,
+                      )
+                    }
+                  />
+                )}
+              </>
+            ) : (
+              <span className={isMySeat ? "schedule-you font-semibold" : ""}>
+                {name || "— פנוי —"}
+              </span>
+            )}
+            {!isAdmin && (isEmpty || isMySeat) && (
+              <SwapButtons
+                slotId={slot.slotId}
+                seatIndex={seatIndex}
+                label={`${slot.timeLabel} · ${slot.positionName}`}
+                swapTarget={swapTarget}
+                swapMode={swapMode}
+                mySlotIds={mySlotIds}
+                hasMyOtherSlot={mySlotIds.size > 0}
+                onStartSwap={onStartSwap}
+                onSwapMode={onSwapMode}
+                onTake={onTake}
+                onSwap={onSwap}
+                onCancelSwap={onCancelSwap}
+                isSwapPicking={!!isSwapPicking}
+                canPickThis={
+                  !!isSwapPicking && mySlotIds.has(slot.slotId) === false && !!name
+                }
+              />
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+
+  if (variant === "timeline") {
+    return (
+      <div className={`slot-card ${isMine ? "mine" : ""}`}>
+        <div className="slot-card-time">{slot.startTime}</div>
+        <div className="slot-card-body">
+          {isGuardKind(slot.positionKind) && (
+            <div className="text-[10px] text-ink3 mb-0.5" title={guardSlotBurdenTitle(slot)}>
+              {guardSlotBurdenLabel(slot)}
+            </div>
+          )}
+          {assigneeList}
+        </div>
+        <div className="slot-card-time slot-card-time-end">{slot.endTime}</div>
+      </div>
+    );
+  }
+
   return (
     <div className={`slot-card ${isMine ? "mine" : ""}`}>
       <div className="mono text-sm font-medium">{slot.timeLabel}</div>
@@ -895,75 +1110,7 @@ function SlotCard({
       {missionId && slot.positionName && (
         <div className="text-xs text-ink2">{slot.positionName}</div>
       )}
-      <ul className="mt-2 space-y-1">
-        {Array.from({ length: slot.seatCount }, (_, seatIndex) => {
-          const name = slot.assignees[seatIndex] || "";
-          const isEmpty = !name;
-          const isMySeat = name === personName;
-
-          return (
-            <li key={seatIndex} className="flex flex-wrap items-center gap-2 text-sm">
-              {isAdmin ? (
-                <>
-                  <NameCombobox
-                    value={name}
-                    onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
-                    placeholder={
-                      slot.positionKind === "officer_duty" ? "קצין תורן…" : "שם"
-                    }
-                    allowedNames={
-                      slot.positionKind === "officer_duty" ? dutyOfficerNames : undefined
-                    }
-                    className="flex-1 min-w-[140px]"
-                  />
-                  {name && (
-                    <ReplacementPicker
-                      missionId={missionId}
-                      slotId={slot.slotId}
-                      seatIndex={seatIndex}
-                      currentName={name}
-                      onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
-                      onSwap={(targetSlotId, targetSeatIndex) =>
-                        onAdminReplacementSwap(
-                          missionId,
-                          slot.slotId,
-                          seatIndex,
-                          targetSlotId,
-                          targetSeatIndex,
-                        )
-                      }
-                    />
-                  )}
-                </>
-              ) : (
-                <span className={isMySeat ? "schedule-you font-semibold" : ""}>
-                  {name || "— פנוי —"}
-                </span>
-              )}
-              {!isAdmin && (isEmpty || isMySeat) && (
-                <SwapButtons
-                  slotId={slot.slotId}
-                  seatIndex={seatIndex}
-                  label={`${slot.timeLabel} · ${slot.positionName}`}
-                  swapTarget={swapTarget}
-                  swapMode={swapMode}
-                  mySlotIds={mySlotIds}
-                  hasMyOtherSlot={mySlotIds.size > 0}
-                  onStartSwap={onStartSwap}
-                  onSwapMode={onSwapMode}
-                  onTake={onTake}
-                  onSwap={onSwap}
-                  onCancelSwap={onCancelSwap}
-                  isSwapPicking={!!isSwapPicking}
-                  canPickThis={
-                    !!isSwapPicking && mySlotIds.has(slot.slotId) === false && !!name
-                  }
-                />
-              )}
-            </li>
-          );
-        })}
-      </ul>
+      {assigneeList}
     </div>
   );
 }

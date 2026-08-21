@@ -10,6 +10,7 @@ import {
 import {
   type FlatSlot,
   eatsRest,
+  slotEatsRest,
   flattenMissionSlots,
   isGuardKind,
   isStandbyKind,
@@ -112,8 +113,9 @@ function needsDutyGuardGap(
   kindB: MissionPositionKind,
   typeB: MissionType,
 ): boolean {
-  const aBase = typeA === "base_work" || (typeA === "guards" && kindA === "duty");
-  const bBase = typeB === "base_work" || (typeB === "guards" && kindB === "duty");
+  // Reserve force (guards + duty) does not require spacing from guard shifts — only עב״ס does.
+  const aBase = typeA === "base_work";
+  const bBase = typeB === "base_work";
   const aGuard = typeA === "guards" && isGuardKind(kindA);
   const bGuard = typeB === "guards" && isGuardKind(kindB);
   return (aBase && bGuard) || (aGuard && bBase);
@@ -188,7 +190,7 @@ function restOk(
   tracker: ScheduleTracker,
   restHours: number,
 ): boolean {
-  if (!eatsRest(slot.positionKind)) return true;
+  if (!slotEatsRest(slot)) return true;
   const restMin = restHours * 60;
   const worked = workedRestMinutes(tracker.busy[personName] || []);
   return 1440 - worked - slot.durationMinutes >= restMin;
@@ -426,7 +428,7 @@ export function placePerson(
     wallStartMin: slot.wallStartMin,
     calendarDayOffset: slot.calendarDayOffset,
     durationMinutes: slot.durationMinutes,
-    eatsRest: eatsRest(slot.positionKind),
+    eatsRest: slotEatsRest(slot),
     positionKind: slot.positionKind,
     missionType: missionType ?? slot.missionType,
     seatCount,

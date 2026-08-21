@@ -100,6 +100,7 @@ describe("mission-relative guard grid", () => {
       endsAt: "2026-01-01T09:00:00",
       scheduling: { board_start: "06:00", shift_hours: 4, rest_hours: 7, guard_ratio: 2 },
       clientPositions: positions,
+      regenerateStructure: true,
     });
     expect(resolved.find((p) => p.name === "ש״ג רדלי")).toBeDefined();
   });

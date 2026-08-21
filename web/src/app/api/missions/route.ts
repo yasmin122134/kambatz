@@ -57,12 +57,15 @@ export async function POST(request: Request) {
   );
 
   const clientPositions = body.positions;
+  const regenerateStructure =
+    body.regenerate_structure === true || !clientPositions?.length;
   const positions = resolveMissionPositions({
     missionType: mission_type,
     startsAt: starts_at,
     endsAt: ends_at,
     scheduling: scheduling_rules,
     clientPositions,
+    regenerateStructure,
   });
 
   try {

@@ -105,7 +105,9 @@ function withCustomSlotTimes(
   const positions = mission.positions.map((pos) => ({
     ...pos,
     slots: pos.slots.map((slot) =>
-      slot.id === slotId ? { ...slot, start_time: start, end_time: end } : slot,
+      slot.id === slotId
+        ? { ...slot, start_time: start, end_time: end, starts_at: undefined, ends_at: undefined }
+        : slot,
     ),
   }));
   return { ...mission, positions };

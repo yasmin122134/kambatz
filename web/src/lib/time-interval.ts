@@ -69,6 +69,45 @@ export function missionInterval(startsAt: string, endsAt: string): TimeInterval 
   return { startMs, endMs };
 }
 
+/**
+ * Single conversion boundary: persisted slot → absolute interval.
+ * Prefers canonical slot.starts_at / slot.ends_at when consistent with wall-clock labels.
+ */
+export function resolveCanonicalSlotInterval(
+  mission: { starts_at: string; ends_at: string },
+  slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
+): TimeInterval | null {
+  const fromWall = resolveSlotAbsoluteInterval(
+    mission.starts_at,
+    mission.ends_at,
+    slot.start_time,
+    slot.end_time,
+  );
+
+  const fromStoredStart = parseIsoMs(slot.starts_at);
+  const fromStoredEnd = parseIsoMs(slot.ends_at);
+  if (fromStoredStart !== null && fromStoredEnd !== null && fromStoredEnd > fromStoredStart) {
+    const storedStartLabel = fmtTimeLabel(fromStoredStart);
+    const storedEndLabel = fmtTimeLabel(fromStoredEnd);
+    if (storedStartLabel === slot.start_time && storedEndLabel === slot.end_time) {
+      return { startMs: fromStoredStart, endMs: fromStoredEnd };
+    }
+  }
+
+  return fromWall;
+}
+
+/** Persist canonical ISO bounds on a slot from an absolute interval. */
+export function materializeSlotAbsoluteBounds(
+  slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
+  interval: TimeInterval,
+): { starts_at: string; ends_at: string } {
+  return {
+    starts_at: new Date(interval.startMs).toISOString(),
+    ends_at: new Date(interval.endMs).toISOString(),
+  };
+}
+
 /** Map a wall-clock HH:MM label to the absolute instant within a mission window. */
 export function resolveSlotAbsoluteInterval(
   missionStartsAt: string,
