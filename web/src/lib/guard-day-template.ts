@@ -141,6 +141,10 @@ export function buildUnifiedGuardShiftWindows(
   dayNightSplit = "18:00",
   extraWallBounds: string[] = [],
 ): GuardShiftWindow[] {
+  if (!dayNightSplit && extraWallBounds.length === 0) {
+    return buildPureFourHourShiftWindows(boardStart, cycleMin, shiftHours);
+  }
+
   const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
   const cycleEnd = boardMin + cycleMin;
   const bounds = new Set<number>([boardMin, cycleEnd]);
@@ -166,6 +170,67 @@ export function buildUnifiedGuardShiftWindows(
     }
   }
   return windows;
+}
+
+/** רשת משמרות 4 שעות בלבד — עוגן 08:00, בלי פיצולי יום/לילה גלובליים */
+export function buildPureFourHourShiftWindows(
+  boardStart: string,
+  cycleMin: number,
+  shiftHours: number,
+): GuardShiftWindow[] {
+  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
+  const cycleEnd = boardMin + cycleMin;
+  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
+  const refStart = parseTimeMinutes(CANONICAL_GUARD_GRID_START) ?? 8 * 60;
+  const bounds = new Set<number>([boardMin, cycleEnd]);
+  const boardWall = wallMin(boardMin);
+
+  for (let step = 0; step < 1440; step += shiftMin) {
+    const wall = wallMin(refStart + step);
+    let abs = boardMin - boardWall + wall;
+    if (abs <= boardMin) abs += 1440;
+    while (abs < cycleEnd) {
+      if (abs > boardMin && abs < cycleEnd) bounds.add(abs);
+      abs += 1440;
+    }
+  }
+
+  const sorted = [...bounds].sort((a, b) => a - b);
+  const windows: GuardShiftWindow[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i + 1] > sorted[i]) {
+      windows.push({ startMin: sorted[i], endMin: sorted[i + 1] });
+    }
+  }
+  return windows;
+}
+
+/** פיצול חלון בודד בגבול שעון (לש״ג אחורי / רגלי בלבד) */
+function splitWindowsAtWallClock(
+  windows: GuardShiftWindow[],
+  wallClockMin: number,
+): GuardShiftWindow[] {
+  const out: GuardShiftWindow[] = [];
+  for (const w of windows) {
+    const ws = wallMin(w.startMin);
+    const we = wallMin(w.endMin);
+    if (we <= ws) {
+      out.push(w);
+      continue;
+    }
+    if (wallClockMin <= ws || wallClockMin >= we) {
+      out.push(w);
+      continue;
+    }
+    const splitAbs = w.startMin + (wallClockMin - ws);
+    if (splitAbs <= w.startMin || splitAbs >= w.endMin) {
+      out.push(w);
+      continue;
+    }
+    out.push({ startMin: w.startMin, endMin: splitAbs });
+    out.push({ startMin: splitAbs, endMin: w.endMin });
+  }
+  return out;
 }
 
 function wallMin(absMin: number): number {
@@ -227,7 +292,8 @@ function rearVehicleSlotsFromWindows(
 ): MissionSlot[] {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-  return slotsFromWindows(windows, (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin), true);
+  const split = splitWindowsAtWallClock(windows, dayEndMin);
+  return slotsFromWindows(split, (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin), true);
 }
 
 function footPatrolSlotsFromWindows(
@@ -237,7 +303,8 @@ function footPatrolSlotsFromWindows(
 ): MissionSlot[] {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
-  return slotsFromWindows(windows, (w) => footSeatsForWindow(w, dayStartMin, dayEndMin), true);
+  const split = splitWindowsAtWallClock(windows, dayEndMin);
+  return slotsFromWindows(split, (w) => footSeatsForWindow(w, dayStartMin, dayEndMin), true);
 }
 
 /** קצין תורן — שתי משמרות בלבד, חצי מחזור יום השמירות כל אחת */
@@ -263,7 +330,9 @@ export function guardShiftWindowsAligned(positions: MissionPosition[]): boolean 
       p.kind !== "standby_carmel_a" &&
       p.kind !== "standby_carmel_b" &&
       p.kind !== "officer_duty" &&
-      !p.name.includes("כוננות"),
+      !p.name.includes("כוננות") &&
+      !p.name.includes("רכב אחורי") &&
+      !p.name.includes("רגלי"),
   );
   if (rotating.length < 2) return true;
 
@@ -573,10 +642,9 @@ function slotWindowKey(slot: Pick<MissionSlot, "start_time" | "end_time">): stri
   return `${slot.start_time}-${slot.end_time}`;
 }
 
-/** רשת משמרות מאוחדת — עוגן 08:00 + אילוצי ש״ג אחורי/רגלי */
+/** רשת משמרות מאוחדת — 4 שעות מעוגן 08:00; פיצולי יום/לילה רק לש״ג אחורי/רגלי */
 function buildGuardDayWindows(ctx: GuardDayContext): GuardShiftWindow[] {
-  const extra = [...new Set([ctx.day[0], ctx.footDay[1]])];
-  return buildUnifiedGuardShiftWindows(ctx.board, ctx.cycleMin, ctx.shift, ctx.day[1], extra);
+  return buildPureFourHourShiftWindows(ctx.board, ctx.cycleMin, ctx.shift);
 }
 
 function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
@@ -618,15 +686,17 @@ function guardSlotsForPosition(
     return officerDutySlots(ctx.board, ctx.cycleMin);
   }
   if (pos.name.includes("רכב אחורי")) {
+    const split = splitWindowsAtWallClock(windows, dayEndMin);
     return slotsFromWindows(
-      windows,
+      split,
       (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
       true,
     );
   }
   if (pos.name.includes("רגלי")) {
+    const split = splitWindowsAtWallClock(windows, footEndMin);
     return slotsFromWindows(
-      windows,
+      split,
       (w) => footSeatsForWindow(w, footStartMin, footEndMin),
       true,
     );

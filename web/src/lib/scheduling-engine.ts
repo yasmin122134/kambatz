@@ -417,6 +417,210 @@ export function placePerson(
   syncPersonPeriodPoints(personName, tracker, rules, scheduling);
 }
 
+function rebuildGuardShiftsForPerson(personName: string, tracker: ScheduleTracker) {
+  tracker.guardShifts[personName] = (tracker.busy[personName] || [])
+    .filter((b) => isGuardKind(b.positionKind))
+    .map((b) => ({ start: b.cyclicStart, duration: b.durationMinutes }));
+}
+
+export function unplacePerson(
+  personName: string,
+  slot: FlatSlot,
+  missionId: string,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+) {
+  tracker.busy[personName] = (tracker.busy[personName] || []).filter(
+    (b) => !(b.slotId === slot.slotId && b.missionId === missionId),
+  );
+  rebuildGuardShiftsForPerson(personName, tracker);
+  syncPersonPeriodPoints(personName, tracker, rules, scheduling);
+}
+
+/** מנסה למלא משבצות ריקות ע"י החלפות — עדיפות למילוי מלא על פני צדק */
+export function repairGuardAssignmentGaps(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+  people: Person[];
+  tracker: ScheduleTracker;
+  issues: Issue[];
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+  meanPrior: number;
+}): { assignments: Record<string, string[]>; filled: number } {
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  let filled = 0;
+  const slots = flattenMissionSlots(input.mission).filter(
+    (s) => isGuardKind(s.positionKind) && s.seatCount > 0,
+  );
+
+  let progress = true;
+  let guard = 0;
+  while (progress && guard < 80) {
+    progress = false;
+    guard += 1;
+
+    for (const slot of slots) {
+      const seats = assignments[slot.slotId] || [];
+      for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+        if (seats[seatIndex]) continue;
+
+        const mates = seats.filter((n, idx) => n && idx !== seatIndex);
+        const direct = input.people.filter((p) =>
+          fitsPerson(
+            p,
+            slot,
+            input.tracker,
+            input.issues,
+            input.scheduling,
+            mates,
+            peopleByName,
+          ),
+        );
+        const chosen = pickBestCandidate(
+          direct,
+          slot,
+          input.tracker,
+          input.rules,
+          input.meanPrior,
+          { scheduling: input.scheduling },
+        );
+        if (chosen) {
+          seats[seatIndex] = chosen.name;
+          placePerson(
+            chosen.name,
+            slot,
+            input.mission.id,
+            input.tracker,
+            input.rules,
+            input.scheduling,
+            slot.seatCount,
+            input.mission.mission_type,
+          );
+          filled += 1;
+          progress = true;
+          continue;
+        }
+
+        for (const donorSlot of slots) {
+          if (donorSlot.slotId === slot.slotId) continue;
+          const donorSeats = assignments[donorSlot.slotId] || [];
+          for (let donorIdx = 0; donorIdx < donorSlot.seatCount; donorIdx++) {
+            const donorName = donorSeats[donorIdx];
+            if (!donorName) continue;
+            const donorPerson = peopleByName[donorName];
+            if (!donorPerson) continue;
+
+            unplacePerson(
+              donorName,
+              donorSlot,
+              input.mission.id,
+              input.tracker,
+              input.rules,
+              input.scheduling,
+            );
+
+            const donorFitsTarget = fitsPerson(
+              donorPerson,
+              slot,
+              input.tracker,
+              input.issues,
+              input.scheduling,
+              mates,
+              peopleByName,
+            );
+            if (!donorFitsTarget) {
+              placePerson(
+                donorName,
+                donorSlot,
+                input.mission.id,
+                input.tracker,
+                input.rules,
+                input.scheduling,
+                donorSlot.seatCount,
+                input.mission.mission_type,
+              );
+              continue;
+            }
+
+            const donorMates = donorSeats.filter((n, idx) => n && idx !== donorIdx);
+            const replacement = pickBestCandidate(
+              input.people.filter(
+                (p) =>
+                  p.name !== donorName &&
+                  !donorMates.includes(p.name) &&
+                  fitsPerson(
+                    p,
+                    donorSlot,
+                    input.tracker,
+                    input.issues,
+                    input.scheduling,
+                    donorMates,
+                    peopleByName,
+                  ),
+              ),
+              donorSlot,
+              input.tracker,
+              input.rules,
+              input.meanPrior,
+              { scheduling: input.scheduling },
+            );
+
+            if (!replacement) {
+              placePerson(
+                donorName,
+                donorSlot,
+                input.mission.id,
+                input.tracker,
+                input.rules,
+                input.scheduling,
+                donorSlot.seatCount,
+                input.mission.mission_type,
+              );
+              continue;
+            }
+
+            donorSeats[donorIdx] = replacement.name;
+            seats[seatIndex] = donorName;
+            placePerson(
+              replacement.name,
+              donorSlot,
+              input.mission.id,
+              input.tracker,
+              input.rules,
+              input.scheduling,
+              donorSlot.seatCount,
+              input.mission.mission_type,
+            );
+            placePerson(
+              donorName,
+              slot,
+              input.mission.id,
+              input.tracker,
+              input.rules,
+              input.scheduling,
+              slot.seatCount,
+              input.mission.mission_type,
+            );
+            filled += 1;
+            progress = true;
+            break;
+          }
+          if (progress) break;
+        }
+      }
+      assignments[slot.slotId] = seats;
+    }
+  }
+
+  return { assignments, filled };
+}
+
 export function buildTrackerFromMissions(
   missions: MissionDay[],
   rules: FairnessRules,

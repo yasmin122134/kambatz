@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
 import { guardSlotDifficultyRank, calculatePersonBurden } from "@/lib/guard-burden";
+import { syncGuardShiftSlots } from "@/lib/guard-day-template";
 import {
   flattenMissionSlots,
   isGuardKind,
@@ -24,6 +25,7 @@ import {
   fitsPerson,
   pickBestCandidate,
   placePerson,
+  repairGuardAssignmentGaps,
   slotRank,
 } from "@/lib/scheduling-engine";
 import type { Issue, MissionDay, Person } from "@/lib/types";
@@ -101,12 +103,12 @@ function autoAssignKitchenMission(
         placePerson(
           name,
           slot,
-          mission.id,
+          guardMission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
+          guardMission.mission_type,
         );
       }
       skipped += keptNames.length;
@@ -209,12 +211,12 @@ function autoAssignBaseWorkMission(
         placePerson(
           name,
           slot,
-          mission.id,
+          guardMission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
+          guardMission.mission_type,
         );
       }
       skipped += keptNames.length;
@@ -371,12 +373,22 @@ export async function autoAssignMission(
     };
   }
 
-  const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+  let guardMission = mission;
+  const assignments = syncAssignmentSeats(guardMission.positions, { ...guardMission.assignments });
   const warnings: string[] = [];
   let filled = 0;
   let skipped = 0;
 
-  const slots = flattenMissionSlots(mission).sort((a, b) => {
+  const syncedPositions = syncGuardShiftSlots(guardMission.positions, {
+    shiftHours: scheduling.shift_hours,
+    boardStart: scheduling.board_start,
+    missionStartsAt: guardMission.starts_at,
+    missionEndsAt: guardMission.ends_at,
+  });
+  guardMission = { ...guardMission, positions: syncedPositions };
+  Object.assign(assignments, syncAssignmentSeats(syncedPositions, assignments));
+
+  const slots = flattenMissionSlots(guardMission).sort((a, b) => {
     const countEligible = (slot: (typeof a)) => {
       if (!isGuardKind(slot.positionKind)) return 10;
       return people.filter((p) =>
@@ -393,8 +405,8 @@ export async function autoAssignMission(
   });
 
   const standbyPositions = new Set(
-    mission.positions
-      .filter((p) => isStandbyKind(resolvePositionKind(mission.mission_type, p)))
+    guardMission.positions
+      .filter((p) => isStandbyKind(resolvePositionKind(guardMission.mission_type, p)))
       .map((p) => p.id),
   );
 
@@ -412,12 +424,12 @@ export async function autoAssignMission(
           placePerson(
             name,
             slot,
-            mission.id,
+            guardMission.id,
             tracker,
             rules,
             scheduling,
             slot.seatCount,
-            mission.mission_type,
+            guardMission.mission_type,
           );
           skipped++;
         }
@@ -429,12 +441,12 @@ export async function autoAssignMission(
         placePerson(
           name,
           slot,
-          mission.id,
+          guardMission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
+          guardMission.mission_type,
         );
       }
 
@@ -448,7 +460,7 @@ export async function autoAssignMission(
         scheduling,
         rules,
         meanPrior,
-        mission.id,
+        guardMission.id,
       );
 
       let ai = 0;
@@ -474,12 +486,12 @@ export async function autoAssignMission(
         placePerson(
           current,
           slot,
-          mission.id,
+          guardMission.id,
           tracker,
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
+          guardMission.mission_type,
         );
         skipped++;
         continue;
@@ -513,12 +525,12 @@ export async function autoAssignMission(
       placePerson(
         chosen.name,
         slot,
-        mission.id,
+        guardMission.id,
         tracker,
         rules,
         scheduling,
         slot.seatCount,
-        mission.mission_type,
+        guardMission.mission_type,
       );
       filled++;
     }
@@ -526,12 +538,27 @@ export async function autoAssignMission(
     assignments[slot.slotId] = seats;
   }
 
-  const draftMission: MissionDay = { ...mission, assignments };
+  const repaired = repairGuardAssignmentGaps({
+    mission: guardMission,
+    assignments,
+    people,
+    tracker,
+    issues,
+    scheduling,
+    rules,
+    meanPrior,
+  });
+  if (repaired.filled > 0) {
+    filled += repaired.filled;
+    Object.assign(assignments, repaired.assignments);
+  }
+
+  const draftMission: MissionDay = { ...guardMission, assignments };
   for (const msg of findAssignmentConflicts(draftMission)) {
     warnings.push(msg);
   }
 
-  const saved = await saveMissionDay({ ...mission, assignments });
+  const saved = await saveMissionDay({ ...guardMission, assignments });
   return { mission: saved, filled, skipped, warnings };
 }
 
