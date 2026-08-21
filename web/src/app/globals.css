@@ -6,14 +6,13 @@
   --color-bone: #ebe6f4;
   --color-bone2: #f5f2fa;
   --color-card: #fdfcff;
-  --color-bg: #f5f2fa;
   --color-ink: #1a1523;
   --color-ink2: #5a5468;
   --color-ink3: #8e8799;
   --color-line: #d0c8e0;
   --color-line2: #e4dff0;
-  --color-olive: #6d5b9e;
-  --color-olive-light: #b8a8d9;
+  --color-accent: #6d5b9e;
+  --color-accent-light: #b8a8d9;
   --color-accent-bg: #ede8f8;
   --color-accent-bg-hover: #e2daf4;
   --color-brick: #b44a5c;
@@ -68,7 +67,7 @@ body {
 }
 
 .card-link:hover {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   box-shadow: 0 4px 20px rgba(109, 91, 158, 0.12);
 }
 
@@ -116,7 +115,7 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   box-shadow: 0 0 0 3px rgba(109, 91, 158, 0.16);
 }
 
@@ -161,14 +160,14 @@ button,
 
 button:hover,
 .btn:hover {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   background: #fff;
 }
 
 .btn-pri {
-  background: var(--color-olive);
+  background: var(--color-accent);
   color: #f8f5ff;
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   box-shadow: 0 2px 10px rgba(109, 91, 158, 0.22);
 }
 
@@ -189,28 +188,6 @@ button:hover,
   background: var(--color-ink);
   color: var(--color-bone2);
   border-color: var(--color-ink);
-}
-
-.stamp {
-  border: 2px solid var(--color-olive-light);
-  color: #e8dff8;
-  border-radius: var(--radius-sm);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  padding: 5px 10px;
-  text-transform: uppercase;
-  text-decoration: none;
-}
-
-.stamp:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.stamp.on {
-  background: rgba(255, 255, 255, 0.18);
-  border-color: #f8f5ff;
-  color: #fff;
 }
 
 .msg-ok {
@@ -255,7 +232,7 @@ button:hover,
 
 .schedule-you {
   font-weight: 700;
-  color: var(--color-olive);
+  color: var(--color-accent);
 }
 
 .schedule-row {
@@ -270,13 +247,8 @@ button:hover,
 }
 
 .schedule-mine {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   background: var(--color-accent-bg);
-}
-
-.schedule-now {
-  border-color: var(--color-brick);
-  background: #fbeeea;
 }
 
 .schedule-table-wrap {
@@ -311,19 +283,6 @@ button:hover,
 
 .schedule-table tbody tr:hover {
   background: rgba(255, 255, 255, 0.6);
-}
-
-.schedule-tr-mine {
-  background: var(--color-accent-bg) !important;
-}
-
-.schedule-tr-mine:hover {
-  background: var(--color-accent-bg-hover) !important;
-}
-
-.schedule-tr-now {
-  background: #fbeeea !important;
-  box-shadow: inset 3px 0 0 var(--color-brick);
 }
 
 .menu-btn {
@@ -382,7 +341,7 @@ button:hover,
 
 .menu-drawer a.on {
   background: var(--color-accent-bg);
-  color: var(--color-olive);
+  color: var(--color-accent);
 }
 
 .day-tabs {
@@ -406,7 +365,7 @@ button:hover,
 }
 
 .day-tab.on {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   background: var(--color-accent-bg);
   font-weight: 700;
 }
@@ -441,7 +400,7 @@ button:hover,
 }
 
 .slot-card.mine {
-  border-color: var(--color-olive);
+  border-color: var(--color-accent);
   background: var(--color-accent-bg);
 }
 
@@ -453,7 +412,7 @@ button:hover,
 }
 
 .app-header {
-  background: linear-gradient(135deg, var(--color-olive) 0%, #5a4890 100%);
+  background: linear-gradient(135deg, var(--color-accent) 0%, #5a4890 100%);
   color: var(--color-bone2);
   box-shadow: 0 4px 24px rgba(109, 91, 158, 0.28);
 }

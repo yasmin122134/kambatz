@@ -213,7 +213,7 @@ export default function ProfilePage() {
               </div>
               <div>
                 <p className="hint text-xs">סה״כ</p>
-                <p className="font-display text-lg text-olive">{fairness.totalPoints}</p>
+                <p className="font-display text-lg text-accent">{fairness.totalPoints}</p>
               </div>
             </div>
             {fairness.history.length > 0 ? (
@@ -230,7 +230,7 @@ export default function ProfilePage() {
                       {MISSION_TYPE_LABELS[h.missionType]} ·{" "}
                       {FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "")}
                     </span>
-                    <span className="mr-auto font-semibold text-olive">
+                    <span className="mr-auto font-semibold text-accent">
                       +{h.points}
                     </span>
                   </li>

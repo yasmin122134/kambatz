@@ -3,7 +3,6 @@ import { findAssignmentConflicts } from "@/lib/scheduling-engine";
 import { fetchActivePeople } from "@/lib/people";
 import type { MissionDay, Person } from "@/lib/types";
 import {
-  defaultGuardDayPositions,
   emptyAssignments,
   newPosition,
   normalizeSchedulingRules,
@@ -19,7 +18,6 @@ export {
   emptyAssignments,
   syncAssignmentSeats,
   upcomingFromMissions,
-  defaultGuardDayPositions,
   normalizeSchedulingRules,
 } from "@/lib/mission-utils";
 export type { FlatSlot, UpcomingMissionItem } from "@/lib/mission-utils";
@@ -88,7 +86,9 @@ export async function getUpcomingForPersonFromMissions(personName: string) {
 
 export async function saveMissionDay(
   payload: Omit<MissionDay, "id" | "created_at" | "updated_at"> & { id?: string },
+  options?: { validateAssignments?: boolean },
 ): Promise<MissionDay> {
+  const validateAssignments = options?.validateAssignments !== false;
   const supabase = await createClient();
   const positions = payload.positions || [];
   const assignments = syncAssignmentSeats(positions, payload.assignments || {});
@@ -111,7 +111,6 @@ export async function saveMissionDay(
       created_at: "",
       updated_at: "",
     };
-    const supabase = await createClient();
     let peopleByName: Record<string, Person> | undefined;
     try {
       const people = await fetchActivePeople(supabase);
@@ -120,7 +119,7 @@ export async function saveMissionDay(
       // עמודת is_officer עדיין לא קיימת — בדיקת חפיפות בלבד
     }
     const conflicts = findAssignmentConflicts(draft, peopleByName);
-    if (conflicts.length) {
+    if (validateAssignments && conflicts.length) {
       throw new Error(`שיבוץ לא תקין:\n${conflicts.join("\n")}`);
     }
   }

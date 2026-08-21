@@ -260,12 +260,14 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       (sum: number, r: { filled: number }) => sum + r.filled,
       0,
     );
-    const warnCount = (data.warnings || []).length;
-    setMsg(
-      warnCount
-        ? `שובצו ${filled} משבצות. ${warnCount} משבצות לא מולאו — אין מספיק צוערים פנויים.`
-        : `שובצו ${filled} משבצות בהצלחה.`,
-    );
+    const warnings: string[] = data.warnings || [];
+    if (warnings.length) {
+      const preview = warnings.slice(0, 6).join(" · ");
+      const more = warnings.length > 6 ? ` · …ועוד ${warnings.length - 6}` : "";
+      setMsg(`שובצו ${filled} משבצות. ${preview}${more}`);
+    } else {
+      setMsg(`שובצו ${filled} משבצות בהצלחה.`);
+    }
   }
 
   async function setFairnessStatus(id: string, status: "approved" | "rejected") {

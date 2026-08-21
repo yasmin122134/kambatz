@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { PageShell } from "@/components/PageShell";
+import { AppShell } from "@/components/AppShell";
 import { createClient } from "@/lib/supabase/client";
 
 const ERROR_HINTS: Record<string, string> = {
@@ -53,50 +53,55 @@ export default function LoginPage() {
   }
 
   return (
-    <PageShell
-      title="התחברות צוער"
-      lede="התחברו עם המייל שמופיע בדוק הפלוגה כדי לערוך את הפרטים האישיים שלכם."
-    >
-      <div className="card max-w-md space-y-4">
-        {error && <p className="msg-err">{error}</p>}
-        <button
-          type="button"
-          className="btn-pri w-full"
-          disabled={loading}
-          onClick={signInWithGoogle}
-        >
-          {loading ? "מעביר לגוגל…" : "התחברות עם Google"}
-        </button>
-        <details className="hint">
-          <summary className="cursor-pointer text-ink2">
-            Google לא עובד? הגדרה חד-פעמית ב-Supabase
-          </summary>
-          <ol className="mt-2 list-decimal mr-4 space-y-1 text-sm">
-            <li>
-              Supabase → Authentication → Providers → הפעילו <b>Google</b>
-            </li>
-            <li>
-              Google Cloud Console → OAuth Client → הוסיפו Redirect URI:{" "}
-              <code className="mono text-xs break-all">
-                https://hwkowvgxqwkrlrnobchr.supabase.co/auth/v1/callback
-              </code>
-            </li>
-            <li>
-              Supabase → URL Configuration → Redirect URLs:{" "}
-              <code className="mono text-xs">https://kambatz.vercel.app/auth/callback</code>
-              {" "}וגם{" "}
-              <code className="mono text-xs">http://localhost:3000/auth/callback</code>
-            </li>
-          </ol>
-        </details>
-        <p className="hint">
-          יש להשתמש באותו מייל שמולא בטופס הדוק. אם המייל לא נמצא במאגר — פנו
-          למפקד.
-        </p>
-        <Link href="/" className="text-sm text-ink2 hover:text-brick">
-          ← חזרה לדף הבית
-        </Link>
-      </div>
-    </PageShell>
+    <AppShell title="התחברות">
+      <main className="mx-auto max-w-lg px-5 py-8 flex-1">
+        <div className="card mb-6">
+          <h2 className="font-display text-xl">התחברות צוער</h2>
+          <p className="lede">
+            התחברו עם המייל שמופיע בדוק הפלוגה כדי לערוך את הפרטים האישיים שלכם.
+          </p>
+        </div>
+        <div className="card max-w-md space-y-4">
+          {error && <p className="msg-err">{error}</p>}
+          <button
+            type="button"
+            className="btn-pri w-full"
+            disabled={loading}
+            onClick={signInWithGoogle}
+          >
+            {loading ? "מעביר לגוגל…" : "התחברות עם Google"}
+          </button>
+          <details className="hint">
+            <summary className="cursor-pointer text-ink2">
+              Google לא עובד? הגדרה חד-פעמית ב-Supabase
+            </summary>
+            <ol className="mt-2 list-decimal mr-4 space-y-1 text-sm">
+              <li>
+                Supabase → Authentication → Providers → הפעילו <b>Google</b>
+              </li>
+              <li>
+                Google Cloud Console → OAuth Client → הוסיפו Redirect URI:{" "}
+                <code className="mono text-xs break-all">
+                  https://hwkowvgxqwkrlrnobchr.supabase.co/auth/v1/callback
+                </code>
+              </li>
+              <li>
+                Supabase → URL Configuration → Redirect URLs:{" "}
+                <code className="mono text-xs">https://kambatz.vercel.app/auth/callback</code>
+                {" "}וגם{" "}
+                <code className="mono text-xs">http://localhost:3000/auth/callback</code>
+              </li>
+            </ol>
+          </details>
+          <p className="hint">
+            יש להשתמש באותו מייל שמולא בטופס הדוק. אם המייל לא נמצא במאגר — פנו
+            למפקד.
+          </p>
+          <Link href="/" className="text-sm text-ink2 hover:text-brick">
+            ← חזרה לדף הבית
+          </Link>
+        </div>
+      </main>
+    </AppShell>
   );
 }

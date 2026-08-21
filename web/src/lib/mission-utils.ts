@@ -258,11 +258,6 @@ export function newPosition(
   };
 }
 
-export { buildGuardDayPositions, defaultGuardDayPositions } from "@/lib/guard-day-template";
-export { standardGuardDayPositions, STANDARD_GUARD_DAY_SUMMARY } from "@/lib/guard-day-catalog";
-export { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
-export { defaultBaseWorkPositions } from "@/lib/base-work-template";
-
 export function emptyAssignments(positions: MissionPosition[]): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const pos of positions) {

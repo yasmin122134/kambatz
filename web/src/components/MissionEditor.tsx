@@ -268,12 +268,14 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
     await load();
-    const warnCount = (data.warnings || []).length;
-    setMsg(
-      warnCount
-        ? `שובצו ${data.filled} משבצות. ${warnCount} לא מולאו.`
-        : `שובצו ${data.filled} משבצות.`,
-    );
+    const warnings: string[] = data.warnings || [];
+    if (warnings.length) {
+      const preview = warnings.slice(0, 6).join(" · ");
+      const more = warnings.length > 6 ? ` · …ועוד ${warnings.length - 6}` : "";
+      setMsg(`שובצו ${data.filled} משבצות. ${preview}${more}`);
+    } else {
+      setMsg(`שובצו ${data.filled} משבצות.`);
+    }
   }
 
   function updateSlot(posId: string, slotId: string, patch: Partial<MissionSlot>) {

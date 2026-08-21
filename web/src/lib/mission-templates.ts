@@ -4,13 +4,12 @@ import {
   footPatrolSlotsValid,
   guardPositionHint,
   guardShiftWindowsAligned,
-  normalizeRearVehicleSlots,
   officerDutySlotsValid,
   rearVehicleSlotsValid,
   summarizeGuardSlots,
   syncGuardShiftSlots,
 } from "@/lib/guard-day-template";
-export { guardPositionHint, normalizeRearVehicleSlots, summarizeGuardSlots, syncGuardShiftSlots };
+export { guardPositionHint, summarizeGuardSlots, syncGuardShiftSlots };
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import type { MissionPosition, MissionSchedulingRules, MissionType } from "@/lib/types";
 import {
@@ -247,19 +246,3 @@ export const STANDARD_BASE_WORK_SUMMARY = [
   "בוקר 08:30–11:30 · צהריים 13:30–17:30 · ערב 18:30–20:00",
   "13–15 צוערים בחלון · עדיפות צוות שלם",
 ] as const;
-
-/** @deprecated */
-export function standardGuardDayPositions(input: {
-  scheduling: MissionSchedulingRules;
-  startsAt?: string;
-  endsAt?: string;
-  season?: "summer" | "winter";
-}): MissionPosition[] {
-  return standardMissionPositions({
-    missionType: "guards",
-    startsAt: input.startsAt ?? new Date().toISOString(),
-    endsAt: input.endsAt ?? new Date().toISOString(),
-    scheduling: input.scheduling,
-    season: input.season,
-  });
-}

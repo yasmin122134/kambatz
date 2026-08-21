@@ -1,7 +1,19 @@
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
 import { guardSlotDifficultyRank, calculatePersonBurden } from "@/lib/guard-burden";
-import { syncGuardShiftSlots } from "@/lib/guard-day-template";
+import {
+  assignBaseWorkShift,
+  assignKitchenShift,
+  assignStandbyRoom,
+  buildTrackerFromMissions,
+  findAssignmentConflicts,
+  fitsPerson,
+  forceFillEmptySeats,
+  pickBestCandidate,
+  placePerson,
+  repairGuardAssignmentGaps,
+  slotRank,
+} from "@/lib/scheduling-engine";
 import {
   flattenMissionSlots,
   isGuardKind,
@@ -11,21 +23,7 @@ import {
   syncAssignmentSeats,
 } from "@/lib/mission-utils";
 import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
-import {
-  fetchActivePeople,
-} from "@/lib/people";
-import {
-  assignBaseWorkShift,
-  assignKitchenShift,
-  assignStandbyRoom,
-  buildTrackerFromMissions,
-  findAssignmentConflicts,
-  fitsPerson,
-  pickBestCandidate,
-  placePerson,
-  repairGuardAssignmentGaps,
-  slotRank,
-} from "@/lib/scheduling-engine";
+import { fetchActivePeople } from "@/lib/people";
 import type { Issue, MissionDay, Person } from "@/lib/types";
 
 export type AutoAssignResult = {
@@ -38,6 +36,25 @@ export type AutoAssignResult = {
 async function loadPeople(): Promise<Person[]> {
   const supabase = await createClient();
   return fetchActivePeople(supabase);
+}
+
+async function finalizeAutoAssign(
+  mission: MissionDay,
+  assignments: Record<string, string[]>,
+  warnings: string[],
+  peopleByName: Record<string, Person>,
+  filled: number,
+  skipped: number,
+): Promise<AutoAssignResult> {
+  const draft: MissionDay = { ...mission, assignments };
+  for (const msg of findAssignmentConflicts(draft, peopleByName)) {
+    if (!warnings.includes(msg)) warnings.push(msg);
+  }
+  const saved = await saveMissionDay(
+    { ...mission, assignments },
+    { validateAssignments: false },
+  );
+  return { mission: saved, filled, skipped, warnings };
 }
 
 async function loadApprovedIssues(): Promise<Issue[]> {
@@ -326,13 +343,24 @@ export async function autoAssignMission(
       meanPrior,
       keepExisting,
     );
-    const saved = await saveMissionDay({ ...mission, assignments: result.assignments });
-    return {
-      mission: saved,
-      filled: result.filled,
-      skipped: result.skipped,
-      warnings: result.warnings,
-    };
+    const forced = forceFillEmptySeats({
+      mission,
+      assignments: result.assignments,
+      people,
+      tracker,
+      issues,
+      scheduling,
+      rules,
+      meanPrior,
+    });
+    return finalizeAutoAssign(
+      mission,
+      forced.assignments,
+      [...result.warnings, ...forced.warnings],
+      peopleByName,
+      result.filled + forced.filled,
+      result.skipped,
+    );
   }
 
   if (mission.mission_type === "base_work") {
@@ -346,29 +374,31 @@ export async function autoAssignMission(
       meanPrior,
       keepExisting,
     );
-    const saved = await saveMissionDay({ ...mission, assignments: result.assignments });
-    return {
-      mission: saved,
-      filled: result.filled,
-      skipped: result.skipped,
-      warnings: result.warnings,
-    };
+    const forced = forceFillEmptySeats({
+      mission,
+      assignments: result.assignments,
+      people,
+      tracker,
+      issues,
+      scheduling,
+      rules,
+      meanPrior,
+    });
+    return finalizeAutoAssign(
+      mission,
+      forced.assignments,
+      [...result.warnings, ...forced.warnings],
+      peopleByName,
+      result.filled + forced.filled,
+      result.skipped,
+    );
   }
 
-  let guardMission = mission;
+  const guardMission = mission;
   const assignments = syncAssignmentSeats(guardMission.positions, { ...guardMission.assignments });
   const warnings: string[] = [];
   let filled = 0;
   let skipped = 0;
-
-  const syncedPositions = syncGuardShiftSlots(guardMission.positions, {
-    shiftHours: scheduling.shift_hours,
-    boardStart: scheduling.board_start,
-    missionStartsAt: guardMission.starts_at,
-    missionEndsAt: guardMission.ends_at,
-  });
-  guardMission = { ...guardMission, positions: syncedPositions };
-  Object.assign(assignments, syncAssignmentSeats(syncedPositions, assignments));
 
   const slots = flattenMissionSlots(guardMission).sort((a, b) => {
     const countEligible = (slot: (typeof a)) => {
@@ -535,13 +565,28 @@ export async function autoAssignMission(
     Object.assign(assignments, repaired.assignments);
   }
 
-  const draftMission: MissionDay = { ...guardMission, assignments };
-  for (const msg of findAssignmentConflicts(draftMission)) {
-    warnings.push(msg);
-  }
+  const forced = forceFillEmptySeats({
+    mission: guardMission,
+    assignments,
+    people,
+    tracker,
+    issues,
+    scheduling,
+    rules,
+    meanPrior,
+  });
+  filled += forced.filled;
+  warnings.push(...forced.warnings);
+  Object.assign(assignments, forced.assignments);
 
-  const saved = await saveMissionDay({ ...guardMission, assignments });
-  return { mission: saved, filled, skipped, warnings };
+  return finalizeAutoAssign(
+    guardMission,
+    assignments,
+    warnings,
+    peopleByName,
+    filled,
+    skipped,
+  );
 }
 
 export async function autoAssignDate(

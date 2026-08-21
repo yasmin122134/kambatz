@@ -621,6 +621,252 @@ export function repairGuardAssignmentGaps(input: {
   return { assignments, filled };
 }
 
+/** אזהרות על הפרות כללים — לשיבוץ כפוי עם הודעות */
+export function describeAssignmentWarnings(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+): string[] {
+  const msgs: string[] = [];
+  if (!canAssignKind(person, slot.positionKind)) {
+    if (slot.positionKind === "officer_duty") {
+      msgs.push(`${person.name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`);
+    } else {
+      msgs.push(`${person.name}: לא זכאי ל«${slot.positionName}»`);
+    }
+  }
+  if (blockedByIssue(person.name, slot, issues)) {
+    msgs.push(`${person.name}: חסום בגלל אילוץ מאושר ב${slot.timeLabel}`);
+  }
+  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) {
+    msgs.push(
+      `${person.name}: לא נח מספיק לפני ${slot.positionName} (${slot.timeLabel})`,
+    );
+  }
+  if (
+    isGuardKind(slot.positionKind) &&
+    !guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+  ) {
+    msgs.push(`${person.name}: יחס שמירות (${scheduling.guard_ratio}:1) לא מתקיים`);
+  }
+  const overlapMsg = overlapAssignmentWarning(
+    person.name,
+    slot,
+    tracker,
+    scheduling,
+  );
+  if (overlapMsg) msgs.push(overlapMsg);
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) {
+    msgs.push(`${person.name}: לא אותו חדר כמו שאר המשמרת`);
+  }
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) {
+    msgs.push(`${person.name}: לא אותו מגדר כמו שאר המשמרת`);
+  }
+  return msgs;
+}
+
+function overlapAssignmentWarning(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  scheduling: MissionSchedulingRules,
+): string | null {
+  const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+
+  for (const b of tracker.busy[personName] || []) {
+    if (b.slotId === slot.slotId) continue;
+    if (
+      missionsOverlapCompatible(
+        slot.positionKind,
+        slot.missionType,
+        b.positionKind,
+        b.missionType,
+      )
+    ) {
+      continue;
+    }
+
+    const crossType =
+      slot.missionType !== b.missionType &&
+      slot.calendarDayOffset === b.calendarDayOffset;
+    const dutyGuardGap = needsDutyGuardGap(
+      slot.positionKind,
+      slot.missionType,
+      b.positionKind,
+      b.missionType,
+    );
+
+    if (crossType) {
+      const segsA = wallSegments(slot.wallStartMin, slot.durationMinutes);
+      const segsB = wallSegments(b.wallStartMin, b.durationMinutes);
+      const extraGap = dutyGuardGap ? gapMin : 0;
+      if (segmentsConflictWithGap(segsA, segsB, extraGap)) {
+        if (dutyGuardGap) {
+          const guardFirst =
+            (slot.missionType === "guards" && isGuardKind(slot.positionKind)) ||
+            (b.missionType === "base_work");
+          return guardFirst
+            ? `${personName}: לא נח מספיק בין שמירה לעב״ס`
+            : `${personName}: לא נח מספיק בין עב״ס לשמירה`;
+        }
+        return `${personName}: חפיפה עם ${blockLabel(b)} (${slot.timeLabel})`;
+      }
+      continue;
+    }
+
+    if (
+      cyclicOverlap(b.cyclicStart, b.durationMinutes, slot.cyclicStart, slot.durationMinutes)
+    ) {
+      return `${personName}: חפיפה עם ${blockLabel(b)} (${slot.timeLabel})`;
+    }
+  }
+  return null;
+}
+
+/** מועמדים כשאין מי שעומד בכל הכללים — עדיין בודק זכאות בסיסית וכוננות (חדר/מגדר) */
+export function pickRelaxedCandidate(
+  people: Person[],
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
+  exclude: Set<string>,
+): Person | null {
+  const candidates = people.filter((p) => {
+    if (exclude.has(p.name) || mates.includes(p.name)) return false;
+    if (!canAssignKind(p, slot.positionKind)) return false;
+    if (blockedByIssue(p.name, slot, issues)) return false;
+    if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
+    if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
+    return true;
+  });
+  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
+    scheduling,
+  });
+}
+
+/** ממלא משבצות ריקות — גם בהפרת מנוחה/חפיפה, עם אזהרות */
+export function forceFillEmptySeats(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+  people: Person[];
+  tracker: ScheduleTracker;
+  issues: Issue[];
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+  meanPrior: number;
+}): { assignments: Record<string, string[]>; filled: number; warnings: string[] } {
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const warnings: string[] = [];
+  let filled = 0;
+
+  for (const slot of flattenMissionSlots(input.mission)) {
+    if (slot.seatCount <= 0) continue;
+    const seats = assignments[slot.slotId] || [];
+    const inSlot = new Set(seats.filter(Boolean));
+
+    for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+      if (seats[seatIndex]) continue;
+
+      const mates = seats.filter((n, idx) => n && idx !== seatIndex);
+      const strict = input.people.filter(
+        (p) =>
+          !inSlot.has(p.name) &&
+          fitsPerson(
+            p,
+            slot,
+            input.tracker,
+            input.issues,
+            input.scheduling,
+            mates,
+            peopleByName,
+          ),
+      );
+      let chosen =
+        pickBestCandidate(
+          strict,
+          slot,
+          input.tracker,
+          input.rules,
+          input.meanPrior,
+          { scheduling: input.scheduling },
+        ) ??
+        pickRelaxedCandidate(
+          input.people,
+          slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          mates,
+          peopleByName,
+          input.rules,
+          input.meanPrior,
+          inSlot,
+        );
+      if (!chosen) {
+        warnings.push(
+          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי`,
+        );
+        continue;
+      }
+
+      if (
+        !fitsPerson(
+          chosen,
+          slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          mates,
+          peopleByName,
+        )
+      ) {
+        for (const msg of describeAssignmentWarnings(
+          chosen,
+          slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          mates,
+          peopleByName,
+        )) {
+          if (!warnings.includes(msg)) warnings.push(msg);
+        }
+      }
+
+      seats[seatIndex] = chosen.name;
+      inSlot.add(chosen.name);
+      placePerson(
+        chosen.name,
+        slot,
+        input.mission.id,
+        input.tracker,
+        input.rules,
+        input.scheduling,
+        slot.seatCount,
+        input.mission.mission_type,
+      );
+      filled += 1;
+    }
+
+    assignments[slot.slotId] = seats;
+  }
+
+  return { assignments, filled, warnings };
+}
+
 export function buildTrackerFromMissions(
   missions: MissionDay[],
   rules: FairnessRules,

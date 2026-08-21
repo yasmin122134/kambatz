@@ -100,7 +100,7 @@ export default function FairnessPage() {
                 {BUCKETS.map((bucket) => (
                   <tr key={bucket}>
                     <td className="font-medium">{FAIRNESS_BUCKET_LABELS[bucket]}</td>
-                    <td className="mono font-bold text-olive">{rules[bucket]}</td>
+                    <td className="mono font-bold text-accent">{rules[bucket]}</td>
                     <td className="text-ink2 text-xs">{FAIRNESS_BUCKET_HELP[bucket]}</td>
                   </tr>
                 ))}
