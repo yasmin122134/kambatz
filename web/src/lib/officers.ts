@@ -11,7 +11,8 @@ export const DUTY_OFFICER_EMAILS = [
 export function personIsDutyOfficer(
   person: Pick<Person, "is_officer" | "name"> | null | undefined,
 ): boolean {
-  return !!person?.is_officer;
+  if (!person) return false;
+  return !!person.is_officer || isDutyOfficerName(person.name);
 }
 
 /** הרשאות מנהל — זהה לקצין תורן */

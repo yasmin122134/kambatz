@@ -52,6 +52,7 @@ export async function POST() {
 
   for (const entry of roster as RosterEntry[]) {
     const email = entry.email.trim().toLowerCase();
+    const isDutyOfficer = (DUTY_OFFICER_EMAILS as readonly string[]).includes(email);
     let row =
       byEmail.get(email) ||
       (entry.db_name ? byName.get(entry.db_name) : undefined) ||
@@ -60,9 +61,7 @@ export async function POST() {
     if (row) {
       const patch: Record<string, string | boolean> = { email };
       if (row.name !== entry.name) patch.name = entry.name;
-      if (
-        (DUTY_OFFICER_EMAILS as readonly string[]).includes(email)
-      ) {
+      if (isDutyOfficer) {
         patch.is_admin = true;
         patch.is_officer = true;
       }
@@ -82,9 +81,19 @@ export async function POST() {
       continue;
     }
 
+    const insertRow: Record<string, string | boolean> = {
+      name: entry.name,
+      email,
+      active: true,
+    };
+    if (isDutyOfficer) {
+      insertRow.is_admin = true;
+      insertRow.is_officer = true;
+    }
+
     const { data, error } = await supabase
       .from("people")
-      .insert({ name: entry.name, email, active: true })
+      .insert(insertRow)
       .select("id,name,email")
       .single();
     if (error) {

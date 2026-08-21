@@ -3,6 +3,7 @@ import {
   buildTrackerFromMissions,
   fitsPerson,
   placePerson,
+  siblingDutyOfficerAssignee,
   unplacePerson,
   workScore,
   type ScheduleTracker,
@@ -307,8 +308,11 @@ function listSeatCandidates(
   units: AssignmentUnit[],
 ): Person[] {
   const scheduling = schedulingFor(unit.mission);
-  const seats = state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
+  const missionAssignments = state.assignmentsByMission.get(unit.mission.id) || {};
+  const seats = missionAssignments[unit.slot.slotId] || [];
   const mates = matesForSeat(seats, unit.seatIndex);
+  const siblingOfficer =
+    siblingDutyOfficerAssignee(unit.mission, unit.slot, missionAssignments) ?? undefined;
   const pool = people.filter(
     (p) =>
       !mates.includes(p.name) &&
@@ -316,6 +320,10 @@ function listSeatCandidates(
   );
 
   return pool.sort((a, b) => {
+    if (unit.slot.positionKind === "officer_duty" && siblingOfficer) {
+      if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
+      if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
+    }
     const eligibleA = countPersonScarcity(a, units, issues, state, peopleByName);
     const eligibleB = countPersonScarcity(b, units, issues, state, peopleByName);
     if (eligibleA !== eligibleB) return eligibleA - eligibleB;

@@ -19,6 +19,7 @@ import {
   resolvePositionKind,
   slotDurationMinutes,
 } from "@/lib/mission-utils";
+import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
   intervalsConflictWithGap,
@@ -150,11 +151,27 @@ export function canGuardPerson(person: Person): boolean {
 
 export function canAssignKind(person: Person, kind: MissionPositionKind): boolean {
   if (kind === "officer_duty") {
-    return !person.no_guard && !!person.is_officer;
+    return personIsDutyOfficer(person);
   }
   if (isGuardKind(kind)) return canGuardPerson(person);
   if (person.no_guard) return false;
   return true;
+}
+
+/** קצין תורן שכבר משובץ במשמרת האחות (חצי יום שני) */
+export function siblingDutyOfficerAssignee(
+  mission: MissionDay,
+  slot: FlatSlot,
+  assignments: Record<string, string[]>,
+): string | null {
+  if (slot.positionKind !== "officer_duty") return null;
+  for (const s of flattenMissionSlots(mission)) {
+    if (s.positionId !== slot.positionId || s.slotId === slot.slotId) continue;
+    for (const name of assignments[s.slotId] || []) {
+      if (name && isDutyOfficerName(name)) return name;
+    }
+  }
+  return null;
 }
 
 function workedRestMinutes(blocks: BusyBlock[]): number {
@@ -520,7 +537,14 @@ export function repairGuardAssignmentGaps(input: {
           input.tracker,
           input.rules,
           input.meanPrior,
-          { scheduling: input.scheduling },
+          {
+            scheduling: input.scheduling,
+            dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+              input.mission,
+              slot,
+              assignments,
+            ) ?? undefined,
+          },
         );
         if (chosen) {
           seats[seatIndex] = chosen.name;
@@ -754,6 +778,7 @@ export function pickRelaxedCandidate(
   rules: FairnessRules,
   meanPrior: number,
   exclude: Set<string>,
+  pickOptions?: { dutyOfficerAlreadyAssigned?: string },
 ): Person | null {
   const candidates = people.filter((p) => {
     if (exclude.has(p.name) || mates.includes(p.name)) return false;
@@ -766,6 +791,7 @@ export function pickRelaxedCandidate(
   });
   return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
     scheduling,
+    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
   });
 }
 
@@ -817,7 +843,14 @@ export function forceFillEmptySeats(input: {
           input.tracker,
           input.rules,
           input.meanPrior,
-          { scheduling: input.scheduling },
+          {
+            scheduling: input.scheduling,
+            dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+              input.mission,
+              slot,
+              assignments,
+            ) ?? undefined,
+          },
         ) ??
         pickRelaxedCandidate(
           input.people,
@@ -830,6 +863,13 @@ export function forceFillEmptySeats(input: {
           input.rules,
           input.meanPrior,
           inSlot,
+          {
+            dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+              input.mission,
+              slot,
+              assignments,
+            ) ?? undefined,
+          },
         );
       if (!chosen) {
         warnings.push(
@@ -935,7 +975,12 @@ export function pickBestCandidate(
   tracker: ScheduleTracker,
   rules: FairnessRules,
   meanPrior: number,
-  options?: { preferHighLoad?: boolean; scheduling?: MissionSchedulingRules },
+  options?: {
+    preferHighLoad?: boolean;
+    scheduling?: MissionSchedulingRules;
+    /** משמרת קצין תורן אחרת באותו יום — העדפת הקצין השני */
+    dutyOfficerAlreadyAssigned?: string;
+  },
 ): Person | null {
   if (!candidates.length) return null;
   const preferHigh =
@@ -943,8 +988,13 @@ export function pickBestCandidate(
     (isStandbyKind(slot.positionKind) && !slot.sameGender);
   const useGuardBurden = isGuardKind(slot.positionKind);
   const scheduling = options?.scheduling;
+  const siblingOfficer = options?.dutyOfficerAlreadyAssigned;
 
   const sorted = [...candidates].sort((a, b) => {
+    if (slot.positionKind === "officer_duty" && siblingOfficer) {
+      if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
+      if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
+    }
     const wa = useGuardBurden
       ? projectedGuardCandidateScore(a, slot, tracker, rules, meanPrior, scheduling)
       : workScore(a, tracker, rules, meanPrior, scheduling);

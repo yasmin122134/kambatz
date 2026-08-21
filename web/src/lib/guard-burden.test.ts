@@ -251,6 +251,66 @@ describe("hard constraints still gate eligibility", () => {
     expect(canAssignKind(cadet, "officer_duty")).toBe(false);
   });
 
+  it("duty officer with no_guard can still fill officer_duty", () => {
+    const yasmin: Person = {
+      id: "y1",
+      name: "יסמין חדד",
+      email: "yasmin.haddad.yh.47@gmail.com",
+      room: null,
+      gender: null,
+      active: true,
+      is_officer: true,
+      km: false,
+      exam: false,
+      no_weapon: false,
+      no_guard: true,
+      no_mag: false,
+      prior_score: 0,
+      created_at: "",
+    };
+    expect(canAssignKind(yasmin, "officer_duty")).toBe(true);
+    expect(canAssignKind(yasmin, "guard")).toBe(false);
+  });
+
+  it("prefers the other duty officer for the second half-day shift", () => {
+    const rani: Person = {
+      id: "r1",
+      name: "רני פלג",
+      email: null,
+      room: null,
+      gender: null,
+      active: true,
+      is_officer: true,
+      km: false,
+      exam: false,
+      no_weapon: false,
+      no_guard: false,
+      no_mag: false,
+      prior_score: 0,
+      created_at: "",
+    };
+    const yasmin: Person = {
+      ...rani,
+      id: "y1",
+      name: "יסמין חדד",
+      no_guard: true,
+    };
+    const officerSlot: FlatSlot = {
+      ...flatSlot("12:00", "00:00", 1),
+      positionKind: "officer_duty",
+      positionName: "קצין תורן",
+    };
+    const chosen = pickBestCandidate(
+      [rani, yasmin],
+      officerSlot,
+      emptyTracker,
+      DEFAULT_FAIRNESS_RULES,
+      0,
+      { dutyOfficerAlreadyAssigned: "רני פלג" },
+    );
+    expect(chosen?.name).toBe("יסמין חדד");
+  });
+
   it("no_guard cannot be assigned", () => {
     const p: Person = {
       id: "1",
