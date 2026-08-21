@@ -198,12 +198,42 @@ describe("multi-day mission (>24h)", () => {
 });
 
 describe("partitionInterval", () => {
-  it("keeps a 5-hour block as one shift", () => {
+  it("splits a 5-hour block into two shifts (max 4h)", () => {
     const start = parseIsoMs("2026-08-21T17:00:00")!;
     const end = start + 5 * 3_600_000;
     const parts = partitionInterval(start, end, 240);
-    expect(parts).toHaveLength(1);
-    expect(parts[0].endMs - parts[0].startMs).toBe(5 * 3_600_000);
+    expect(parts).toHaveLength(2);
+    for (const p of parts) {
+      expect(p.endMs - p.startMs).toBeLessThanOrEqual(4 * 3_600_000);
+    }
+  });
+
+  it("splits a 9-hour block into three 3-hour shifts", () => {
+    const start = parseIsoMs("2026-08-21T09:00:00")!;
+    const end = start + 9 * 3_600_000;
+    const parts = partitionInterval(start, end, 240);
+    expect(parts).toHaveLength(3);
+    expect(parts.map((p) => (p.endMs - p.startMs) / 3_600_000)).toEqual([3, 3, 3]);
+  });
+});
+
+describe("rear gate 09:00 mission — daytime block", () => {
+  it("uses three 3-hour shifts for 09:00–18:00 (1 seat)", () => {
+    const start = parseIsoMs("2026-08-21T09:00:00")!;
+    const end = parseIsoMs("2026-08-21T18:00:00")!;
+    const slots = generatePositionSlots({
+      missionStartMs: start,
+      missionEndMs: end,
+      nominalShiftDurationMin: 240,
+      staffingProfile: REAR_GATE_STAFFING_SUMMER,
+    });
+    const daytime = slots.filter((s) => s.requiredSeats === 1);
+    expect(daytime).toHaveLength(3);
+    expect(daytime.map((s) => `${fmtTimeLabel(s.startMs)}–${fmtTimeLabel(s.endMs)}`)).toEqual([
+      "09:00–12:00",
+      "12:00–15:00",
+      "15:00–18:00",
+    ]);
   });
 });
 

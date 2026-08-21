@@ -33,48 +33,64 @@ function segmentDurationMin(startMs: number, endMs: number): number {
   return Math.round((endMs - startMs) / 60_000);
 }
 
-function partitionScore(parts: number[], nominalMin: number, minShiftMin: number): number {
+function partitionScore(parts: number[], nominalMin: number, minShiftMin: number, maxShiftMin: number): number {
   let score = 0;
   for (const dur of parts) {
     score += Math.abs(dur - nominalMin);
     if (dur < minShiftMin) score += (minShiftMin - dur) * 3;
-    if (dur > nominalMin * 2) score += (dur - nominalMin * 2) * 2;
+    if (dur > maxShiftMin) score += (dur - maxShiftMin) * 1000;
   }
   return score;
 }
 
-/** Deterministic interval partition — prefer durations close to nominal shift length. */
+/** Deterministic interval partition — prefer durations close to nominal, never exceed maxShiftMin. */
 export function partitionInterval(
   startMs: number,
   endMs: number,
   nominalMin: number,
   minShiftMin = DEFAULT_MIN_SHIFT_MIN,
+  maxShiftMin = nominalMin,
 ): TimeInterval[] {
   const totalMin = segmentDurationMin(startMs, endMs);
   if (totalMin <= 0) return [];
-  if (totalMin <= nominalMin * 1.25) {
+  if (totalMin <= maxShiftMin) {
     return [{ startMs, endMs }];
   }
 
-  const maxParts = Math.max(1, Math.ceil(totalMin / minShiftMin));
-  let bestParts: number[] = [totalMin];
-  let bestScore = partitionScore(bestParts, nominalMin, minShiftMin);
+  const minParts = Math.max(2, Math.ceil(totalMin / maxShiftMin));
+  const maxParts = Math.max(minParts, Math.ceil(totalMin / minShiftMin));
 
-  for (let k = 2; k <= maxParts; k++) {
+  let bestParts: number[] | null = null;
+  let bestScore = Infinity;
+
+  for (let k = minParts; k <= maxParts; k++) {
     const base = Math.floor(totalMin / k);
     const rem = totalMin - base * k;
     const parts = Array.from({ length: k }, (_, i) => base + (i < rem ? 1 : 0));
-    if (parts.some((p) => p <= 0)) continue;
-    const score = partitionScore(parts, nominalMin, minShiftMin);
+    if (parts.some((p) => p <= 0 || p > maxShiftMin || p < minShiftMin)) continue;
+    const score = partitionScore(parts, nominalMin, minShiftMin, maxShiftMin);
     if (score < bestScore) {
       bestScore = score;
       bestParts = parts;
     }
   }
 
+  const parts =
+    bestParts ??
+    (() => {
+      const fallback: number[] = [];
+      let remaining = totalMin;
+      while (remaining > 0) {
+        const chunk = Math.min(maxShiftMin, remaining);
+        fallback.push(chunk);
+        remaining -= chunk;
+      }
+      return fallback;
+    })();
+
   const out: TimeInterval[] = [];
   let cursor = startMs;
-  for (const dur of bestParts) {
+  for (const dur of parts) {
     const next = addWallClockMinutes(cursor, dur);
     out.push({ startMs: cursor, endMs: next });
     cursor = next;
@@ -91,7 +107,7 @@ function mergeAdjacentSegments(
   nominalMin: number,
   minShiftMin: number,
 ): RawSegment[] {
-  const maxSingle = nominalMin * 1.25;
+  const maxSingle = nominalMin;
   let cur = [...segments];
   let changed = true;
   while (changed && cur.length > 1) {
@@ -126,7 +142,7 @@ function slotsForStaffingSegment(
   const totalMin = segmentDurationMin(segStartMs, segEndMs);
   if (totalMin <= 0 || seats <= 0) return [];
 
-  if (totalMin <= nominalMin * 1.25) {
+  if (totalMin <= nominalMin) {
     return [{ startMs: segStartMs, endMs: segEndMs, requiredSeats: seats }];
   }
 
@@ -134,10 +150,17 @@ function slotsForStaffingSegment(
   const points = [segStartMs, ...cuts, segEndMs];
   let raw: RawSegment[] = [];
   for (let i = 0; i < points.length - 1; i++) {
+    const durMin = segmentDurationMin(points[i], points[i + 1]);
+    if (durMin > nominalMin) {
+      return partitionInterval(segStartMs, segEndMs, nominalMin, minShiftMin).map((p) => ({
+        ...p,
+        requiredSeats: seats,
+      }));
+    }
     raw.push({
       startMs: points[i],
       endMs: points[i + 1],
-      durMin: segmentDurationMin(points[i], points[i + 1]),
+      durMin,
     });
   }
 
@@ -257,5 +280,3 @@ export function validateGeneratedSlots(
   }
   return errors;
 }
-
-// Fix validateGeneratedSlots - I used bad require/await. Let me fix in the file.
