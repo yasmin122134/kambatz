@@ -159,6 +159,17 @@ export function resolveMissionPositions(input: {
   });
 }
 
+function guardSlotIdsUnique(positions: MissionPosition[]): boolean {
+  const seen = new Set<string>();
+  for (const pos of positions) {
+    for (const slot of pos.slots) {
+      if (seen.has(slot.id)) return false;
+      seen.add(slot.id);
+    }
+  }
+  return true;
+}
+
 export function missionTemplateComplete(
   missionType: MissionType,
   positions: MissionPosition[],
@@ -186,6 +197,7 @@ export function missionTemplateComplete(
     return (
       positions.length >= 12 &&
       required.every((n) => names.has(n)) &&
+      guardSlotIdsUnique(positions) &&
       (!rear || rearVehicleSlotsValid(rear.slots)) &&
       (!foot || footPatrolSlotsValid(foot.slots)) &&
       (!officer || officerDutySlotsValid(officer.slots)) &&

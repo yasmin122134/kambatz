@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { findAssignmentConflicts } from "@/lib/scheduling-engine";
 import type { MissionDay } from "@/lib/types";
 import {
   defaultGuardDayPositions,
@@ -90,6 +91,30 @@ export async function saveMissionDay(
   const supabase = await createClient();
   const positions = payload.positions || [];
   const assignments = syncAssignmentSeats(positions, payload.assignments || {});
+
+  if (payload.mission_type === "guards") {
+    const draft: MissionDay = {
+      id: payload.id || "draft",
+      title: payload.title,
+      mission_type: payload.mission_type,
+      mission_date: payload.mission_date,
+      starts_at: payload.starts_at,
+      ends_at: payload.ends_at,
+      status: payload.status,
+      positions,
+      assignments,
+      scheduling_rules: normalizeSchedulingRules(
+        payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+      ),
+      notes: payload.notes ?? null,
+      created_at: "",
+      updated_at: "",
+    };
+    const conflicts = findAssignmentConflicts(draft);
+    if (conflicts.length) {
+      throw new Error(`שיבוץ לא תקין:\n${conflicts.join("\n")}`);
+    }
+  }
 
   const row = {
     title: payload.title.trim(),

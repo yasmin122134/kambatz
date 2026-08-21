@@ -18,6 +18,7 @@ import {
   assignKitchenShift,
   assignStandbyRoom,
   buildTrackerFromMissions,
+  findAssignmentConflicts,
   fitsPerson,
   pickBestCandidate,
   placePerson,
@@ -500,6 +501,11 @@ export async function autoAssignMission(
     }
 
     assignments[slot.slotId] = seats;
+  }
+
+  const draftMission: MissionDay = { ...mission, assignments };
+  for (const msg of findAssignmentConflicts(draftMission)) {
+    warnings.push(msg);
   }
 
   const saved = await saveMissionDay({ ...mission, assignments });

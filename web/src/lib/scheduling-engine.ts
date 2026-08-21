@@ -183,6 +183,8 @@ function overlapsSlot(
 
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
+    // כמה מאיישים באותה משמרת — לא נחשב חפיפה
+    if (b.slotId === slot.slotId) continue;
     if (
       missionsOverlapCompatible(
         slot.positionKind,
@@ -877,6 +879,92 @@ export function findReplacements(input: {
 
   options.sort((a, b) => a.cost - b.cost);
   return options.slice(0, 8);
+}
+
+function blockLabel(block: BusyBlock): string {
+  return block.positionKind === "standby_carmel_a"
+    ? "כרמל א׳"
+    : block.positionKind === "standby_carmel_b"
+      ? "כרמל ב׳"
+      : block.positionKind;
+}
+
+/** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים) */
+export function findAssignmentConflicts(mission: MissionDay): string[] {
+  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+  const slots = flattenMissionSlots(mission);
+  const messages: string[] = [];
+
+  const namesBySlotId = new Map<string, string[]>();
+  for (const slot of slots) {
+    const names = namesBySlotId.get(slot.slotId) || [];
+    names.push(slot.positionName);
+    namesBySlotId.set(slot.slotId, names);
+  }
+  for (const [, names] of namesBySlotId) {
+    if (names.length > 1) {
+      messages.push(`מזהה משמרת משותף בין עמדות: ${names.join(" · ")}`);
+    }
+  }
+
+  const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a");
+  const carmelB = slots.find((s) => s.positionKind === "standby_carmel_b");
+  if (carmelA && carmelB) {
+    const setA = new Set((mission.assignments[carmelA.slotId] || []).filter(Boolean));
+    const shared = (mission.assignments[carmelB.slotId] || []).filter(
+      (n) => n && setA.has(n),
+    );
+    if (shared.length) {
+      messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${shared.join(", ")}`);
+    }
+  }
+
+  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const rules: FairnessRules = {
+    solo: 1,
+    pair: 1,
+    standby: 1,
+    standby_a: 1,
+    standby_b: 1,
+    duty: 1,
+    kitchen: 1,
+    hist: 0,
+  };
+
+  for (const slot of slots) {
+    const seats = mission.assignments[slot.slotId] || [];
+    for (const name of seats) {
+      if (!name) continue;
+      if (overlapsSlot(name, slot, tracker, scheduling)) {
+        const blocker = (tracker.busy[name] || []).find(
+          (b) =>
+            b.slotId !== slot.slotId &&
+            !missionsOverlapCompatible(
+              slot.positionKind,
+              slot.missionType,
+              b.positionKind,
+              b.missionType,
+            ),
+        );
+        messages.push(
+          `${name}: חפיפה — ${slot.positionName} ${slot.timeLabel}` +
+            (blocker ? ` ↔ ${blockLabel(blocker)}` : ""),
+        );
+      }
+      placePerson(
+        name,
+        slot,
+        mission.id,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+        mission.mission_type,
+      );
+    }
+  }
+
+  return [...new Set(messages)];
 }
 
 export { getFairnessRules };

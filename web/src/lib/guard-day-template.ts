@@ -587,6 +587,23 @@ function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): Miss
   });
 }
 
+/** כל משמרת חייבת מזהה ייחודי — כרמל א׳/ב׳ לא יכולים לשתף slot.id */
+function ensureUniqueSlotIds(positions: MissionPosition[]): MissionPosition[] {
+  const used = new Set<string>();
+  return positions.map((pos) => ({
+    ...pos,
+    slots: pos.slots.map((slot) => {
+      if (!used.has(slot.id)) {
+        used.add(slot.id);
+        return slot;
+      }
+      const fresh = { ...slot, id: uid() };
+      used.add(fresh.id);
+      return fresh;
+    }),
+  }));
+}
+
 function guardSlotsForPosition(
   pos: MissionPosition,
   windows: GuardShiftWindow[],
@@ -634,21 +651,23 @@ export function syncGuardShiftSlots(
   const ctx = resolveGuardDayContext(options);
   const windows = buildGuardDayWindows(ctx);
 
-  return positions.map((pos) => {
-    if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
-      const carmel = carmelSlotFromMission(
-        ctx.missionStartsAt,
-        ctx.missionEndsAt,
-        ctx.board,
-        ctx.carmelSeats,
-      );
-      return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
-    }
+  return ensureUniqueSlotIds(
+    positions.map((pos) => {
+      if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
+        const carmel = carmelSlotFromMission(
+          ctx.missionStartsAt,
+          ctx.missionEndsAt,
+          ctx.board,
+          ctx.carmelSeats,
+        );
+        return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
+      }
 
-    const next = guardSlotsForPosition(pos, windows, ctx);
-    if (!next) return pos;
-    return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
-  });
+      const next = guardSlotsForPosition(pos, windows, ctx);
+      if (!next) return pos;
+      return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
+    }),
+  );
 }
 
 /** מערך שמירות סטנדרטי — כל העמדות לפי הפקודה */
@@ -657,22 +676,39 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
   const windows = buildGuardDayWindows(ctx);
   const fixedSeats = (seats: number) => slotsFromWindows(windows, () => seats, true);
 
-  const carmelSlot = carmelSlotFromMission(
-    ctx.missionStartsAt,
-    ctx.missionEndsAt,
-    ctx.board,
-    ctx.carmelSeats,
-  );
-
   const positions = [
-    guardPosition("כרמל א׳ (כוננות)", [carmelSlot], "standby_carmel_a", {
-      same_room: true,
-      same_gender: true,
-    }),
-    guardPosition("כרמל ב׳ (כוננות)", [carmelSlot], "standby_carmel_b", {
-      same_room: true,
-      same_gender: true,
-    }),
+    guardPosition(
+      "כרמל א׳ (כוננות)",
+      [
+        carmelSlotFromMission(
+          ctx.missionStartsAt,
+          ctx.missionEndsAt,
+          ctx.board,
+          ctx.carmelSeats,
+        ),
+      ],
+      "standby_carmel_a",
+      {
+        same_room: true,
+        same_gender: true,
+      },
+    ),
+    guardPosition(
+      "כרמל ב׳ (כוננות)",
+      [
+        carmelSlotFromMission(
+          ctx.missionStartsAt,
+          ctx.missionEndsAt,
+          ctx.board,
+          ctx.carmelSeats,
+        ),
+      ],
+      "standby_carmel_b",
+      {
+        same_room: true,
+        same_gender: true,
+      },
+    ),
     guardPosition(
       "ש״ג רכב אחורי",
       rearVehicleSlotsFromWindows(windows, ctx.day[0], ctx.day[1]),
