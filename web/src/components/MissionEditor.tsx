@@ -106,7 +106,15 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     window: { startsAt: string; endsAt: string; missionDate: string },
     rules?: MissionSchedulingRules,
   ) {
-    const scheduling = rules ?? defaultSchedulingForType(type, window.startsAt);
+    const isoStart = new Date(window.startsAt).toISOString();
+    const isoEnd = new Date(window.endsAt).toISOString();
+    let scheduling = rules ?? defaultSchedulingForType(type, isoStart);
+    if (type === "guards") {
+      scheduling = {
+        ...scheduling,
+        board_start: boardStartFromMissionStart(isoStart),
+      };
+    }
     setMissionType(type);
     setMissionDate(window.missionDate);
     setStartsAt(window.startsAt);
@@ -115,8 +123,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setPositions(
       standardMissionPositions({
         missionType: type,
-        startsAt: new Date(window.startsAt).toISOString(),
-        endsAt: new Date(window.endsAt).toISOString(),
+        startsAt: isoStart,
+        endsAt: isoEnd,
         scheduling,
       }),
     );
@@ -415,7 +423,18 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               type="datetime-local"
               required
               value={startsAt}
-              onChange={(e) => setStartsAt(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setStartsAt(value);
+                if (missionType === "guards" && value) {
+                  setSchedulingRules((r) => ({
+                    ...r,
+                    board_start: boardStartFromMissionStart(
+                      new Date(value).toISOString(),
+                    ),
+                  }));
+                }
+              }}
             />
           </div>
           <div className="field">
@@ -550,20 +569,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 ) {
                   return;
                 }
-                applyStandardTemplate(
-                  "guards",
-                  {
-                    missionDate: missionDate,
-                    startsAt,
-                    endsAt,
-                  },
-                  {
-                    ...schedulingRules,
-                    board_start: boardStartFromMissionStart(
-                      new Date(startsAt).toISOString(),
-                    ),
-                  },
-                );
+                applyStandardTemplate("guards", {
+                  missionDate: missionDate,
+                  startsAt,
+                  endsAt,
+                });
               }}
             >
               טען יום שמירות סטנדרטי (כל העמדות)

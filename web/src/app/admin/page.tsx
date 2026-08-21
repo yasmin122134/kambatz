@@ -177,20 +177,12 @@ export default function AdminPage() {
   }
 
   if (!authed) {
-    const needsScheduler =
-      typeof window !== "undefined" &&
-      new URLSearchParams(window.location.search).get("next") === "/scheduler.html";
-
     return (
       <AppShell title="כניסת מפקד">
         <main className="mx-auto max-w-sm px-5 py-8">
           <div className="card mb-4">
             <h2 className="font-display text-xl">כניסת מפקד</h2>
-            <p className="lede">
-              {needsScheduler
-                ? "יש להתחבר כדי לפתוח את המחולל."
-                : "הזינו סיסמה או התחברו עם Google."}
-            </p>
+            <p className="lede">הזינו סיסמה או התחברו עם Google.</p>
           </div>
         <form onSubmit={login} className="card space-y-4">
           <div className="field">
@@ -241,9 +233,6 @@ export default function AdminPage() {
             </Link>
             <Link href="/board" className="btn">
               רשימה מלאה + אילוצים
-            </Link>
-            <Link href="/scheduler.html" className="btn-sm">
-              מחולל ישן
             </Link>
             <button type="button" className="btn-sm" onClick={logout}>
               יציאה

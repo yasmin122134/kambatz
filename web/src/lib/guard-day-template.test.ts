@@ -49,6 +49,19 @@ describe("merge adjacent guard slots", () => {
 });
 
 describe("pure 4-hour guard grid", () => {
+  it("orders patrol slots from board_start, not midnight", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "20:00",
+      shiftHours: 4,
+      season: "summer",
+      missionStartsAt: "2026-01-15T20:00:00",
+      missionEndsAt: "2026-01-16T20:00:00",
+    });
+    const patrol = positions.find((p) => p.name === "פטל");
+    expect(patrol?.slots[0]?.start_time).toBe("20:00");
+    expect(patrol?.slots[0]?.end_time).toBe("00:00");
+  });
+
   it("does not split 16:00–20:00 into 1-hour segments", () => {
     const windows = buildPureFourHourShiftWindows("08:00", 1440, 4);
     const evening = windows.find(

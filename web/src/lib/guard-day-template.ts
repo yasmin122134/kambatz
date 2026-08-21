@@ -237,18 +237,40 @@ function wallMin(absMin: number): number {
   return ((absMin % 1440) + 1440) % 1440;
 }
 
+/** דקות מעוגנות ל-board_start — 0 = תחילת יום השמירות */
+function cyclicMinutesFromBoard(startTime: string, boardStart: string): number {
+  const start = parseTimeMinutes(startTime) ?? 0;
+  const board = parseTimeMinutes(boardStart) ?? 0;
+  return (start - board + 1440) % 1440;
+}
+
+/** מיון משמרות לפי סדר יום השמירות (מתחילת board_start), לא מחצות */
+export function sortSlotsByBoardCycle(
+  slots: MissionSlot[],
+  boardStart: string,
+): MissionSlot[] {
+  return [...slots].sort((a, b) => {
+    const ca = cyclicMinutesFromBoard(a.start_time, boardStart);
+    const cb = cyclicMinutesFromBoard(b.start_time, boardStart);
+    return ca - cb || a.end_time.localeCompare(b.end_time);
+  });
+}
+
 function slotsFromWindows(
   windows: GuardShiftWindow[],
   seatsFor: (w: GuardShiftWindow) => number,
   keepZeroSeats = false,
   maxSlotMinutes?: number,
+  boardStart?: string,
 ): MissionSlot[] {
   const raw = windows
     .map((w) => ({ w, seats: seatsFor(w) }))
     .filter((x) => keepZeroSeats || x.seats > 0)
     .map(({ w, seats }) => newSlot(fmtTime(w.startMin), fmtTime(w.endMin), seats));
-  if (!maxSlotMinutes) return raw;
-  return mergeAdjacentGuardSlots(raw, maxSlotMinutes);
+  if (!maxSlotMinutes) {
+    return boardStart ? sortSlotsByBoardCycle(raw, boardStart) : raw;
+  }
+  return mergeAdjacentGuardSlots(raw, maxSlotMinutes, boardStart);
 }
 
 /**
@@ -258,14 +280,17 @@ function slotsFromWindows(
 export function mergeAdjacentGuardSlots(
   slots: MissionSlot[],
   maxSlotMinutes: number,
+  boardStart?: string,
 ): MissionSlot[] {
   if (slots.length < 2) return slots;
 
-  const sorted = [...slots].sort((a, b) => {
-    const sa = parseTimeMinutes(a.start_time) ?? 0;
-    const sb = parseTimeMinutes(b.start_time) ?? 0;
-    return sa - sb || a.end_time.localeCompare(b.end_time);
-  });
+  const sorted = boardStart
+    ? sortSlotsByBoardCycle(slots, boardStart)
+    : [...slots].sort((a, b) => {
+        const sa = parseTimeMinutes(a.start_time) ?? 0;
+        const sb = parseTimeMinutes(b.start_time) ?? 0;
+        return sa - sb || a.end_time.localeCompare(b.end_time);
+      });
 
   const out: MissionSlot[] = [];
   let cur: MissionSlot = { ...sorted[0] };
@@ -348,6 +373,7 @@ function rearVehicleSlotsFromWindows(
   dayStart: string,
   dayEnd: string,
   maxSlotMinutes?: number,
+  boardStart?: string,
 ): MissionSlot[] {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
@@ -357,6 +383,7 @@ function rearVehicleSlotsFromWindows(
     (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
     true,
     maxSlotMinutes,
+    boardStart,
   );
 }
 
@@ -365,6 +392,7 @@ function footPatrolSlotsFromWindows(
   dayStart: string,
   dayEnd: string,
   maxSlotMinutes?: number,
+  boardStart?: string,
 ): MissionSlot[] {
   const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
   const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
@@ -374,6 +402,7 @@ function footPatrolSlotsFromWindows(
     (w) => footSeatsForWindow(w, dayStartMin, dayEndMin),
     true,
     maxSlotMinutes,
+    boardStart,
   );
 }
 
@@ -688,6 +717,7 @@ function guardSlotsForPosition(
       (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
       true,
       maxMin,
+      ctx.board,
     );
   }
   if (pos.name.includes("רגלי")) {
@@ -697,15 +727,16 @@ function guardSlotsForPosition(
       (w) => footSeatsForWindow(w, footStartMin, footEndMin),
       true,
       maxMin,
+      ctx.board,
     );
   }
   if (pos.name.includes("רכב קדמי")) {
-    return slotsFromWindows(windows, () => 2, true, maxMin);
+    return slotsFromWindows(windows, () => 2, true, maxMin, ctx.board);
   }
   if (pos.kind === "duty") {
-    return slotsFromWindows(windows, () => 3, true, maxMin);
+    return slotsFromWindows(windows, () => 3, true, maxMin, ctx.board);
   }
-  return slotsFromWindows(windows, () => 1, true, maxMin);
+  return slotsFromWindows(windows, () => 1, true, maxMin, ctx.board);
 }
 
 /** מסנכרן חלונות משמרת לכל העמדות — רשת 4 שעות; פיצול יום/לילה רק לש״ג אחורי/רגלי. */
@@ -738,7 +769,7 @@ export function syncGuardShiftSlots(
       const next = guardSlotsForPosition(pos, windows, ctx);
       if (!next) return pos;
       const synced = mergeSlotsPreservingIds(pos.slots, next);
-      return { ...pos, slots: mergeAdjacentGuardSlots(synced, maxMin) };
+      return { ...pos, slots: mergeAdjacentGuardSlots(synced, maxMin, ctx.board) };
     }),
   );
 }
@@ -749,7 +780,7 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
   const windows = buildGuardDayWindows(ctx);
   const maxMin = Math.round(ctx.shift * 60);
   const fixedSeats = (seats: number) =>
-    slotsFromWindows(windows, () => seats, true, maxMin);
+    slotsFromWindows(windows, () => seats, true, maxMin, ctx.board);
 
   const positions = [
     guardPosition(
@@ -786,14 +817,14 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     ),
     guardPosition(
       "ש״ג רכב אחורי",
-      rearVehicleSlotsFromWindows(windows, ctx.day[0], ctx.day[1], maxMin),
+      rearVehicleSlotsFromWindows(windows, ctx.day[0], ctx.day[1], maxMin, ctx.board),
     ),
     guardPosition("ש״ג רכב קדמי", fixedSeats(2)),
     guardPosition("פטל", fixedSeats(1)),
     guardPosition("תצפיתן", fixedSeats(1)),
     guardPosition(
       "ש״ג רגלי",
-      footPatrolSlotsFromWindows(windows, ctx.footDay[0], ctx.footDay[1], maxMin),
+      footPatrolSlotsFromWindows(windows, ctx.footDay[0], ctx.footDay[1], maxMin, ctx.board),
     ),
     guardPosition("ימ״ח", fixedSeats(1)),
     guardPosition("נשקייה", fixedSeats(1)),
