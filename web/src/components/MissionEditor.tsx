@@ -82,6 +82,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     initialTypeParam === "base_work"
       ? initialTypeParam
       : null;
+  const standaloneGuards = searchParams.get("standalone") === "1";
   const createInitDone = useRef(false);
   const templateFixDone = useRef(false);
   const [loading, setLoading] = useState(!!missionId);
@@ -101,6 +102,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     DEFAULT_MISSION_SCHEDULING_RULES,
   );
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [linkingBaseWork, setLinkingBaseWork] = useState(false);
 
   function applyStandardTemplate(
     type: MissionType,
@@ -227,6 +229,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       scheduling_rules: schedulingRules,
       notes: notes || null,
       regenerate_structure: false,
+      standalone: missionType === "guards" && standaloneGuards,
     };
 
     const res = await fetch(missionId ? `/api/missions/${missionId}` : "/api/missions", {
@@ -246,10 +249,29 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       setPositions(data.positions ?? positions);
     }
 
-    setMsg("נשמר");
+    setMsg(
+      data.linked_base_work_id
+        ? "נשמר — נוצר גם יום עב״ס מקושר (מופיע בלוח תחת «עבודות בסיס»)"
+        : "נשמר",
+    );
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }
+  }
+
+  async function createLinkedBaseWork() {
+    if (!missionId || missionType !== "guards") return;
+    setLinkingBaseWork(true);
+    setErr("");
+    const res = await fetch(`/api/missions/${missionId}/link-base-work`, { method: "POST" });
+    const data = await res.json();
+    setLinkingBaseWork(false);
+    if (!res.ok) {
+      setErr(data.error || "שגיאה ביצירת עב״ס");
+      return;
+    }
+    await load();
+    setMsg("נוצר יום עב״ס מקושר — ערכו אותו מהקישור למטה או מהלוח");
   }
 
   async function runAutoAssign() {
@@ -485,6 +507,25 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             </Link>
           </p>
         )}
+        {missionType === "guards" &&
+          missionId &&
+          !schedulingRules.linked_mission_id &&
+          !schedulingRules.guard_day_bundle_id && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+              <p className="mb-2">
+                ליום זה אין עב״ס מקושר. עב״ס נוצר אוטומטית עם שמירות חדשות — ליום קיים
+                אפשר ליצור אותו כאן.
+              </p>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={linkingBaseWork}
+                onClick={createLinkedBaseWork}
+              >
+                {linkingBaseWork ? "יוצר…" : "+ צור עב״ס ליום זה"}
+              </button>
+            </div>
+          )}
         <div className="rowf">
           <div className="field">
             <label>מנוחה מינימלית (שעות)</label>
@@ -552,7 +593,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 min={0}
                 max={120}
                 step={5}
-                value={schedulingRules.duty_guard_gap_minutes ?? 30}
+                value={schedulingRules.duty_guard_gap_minutes ?? DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes}
                 onChange={(e) =>
                   setSchedulingRules((r) => ({
                     ...r,

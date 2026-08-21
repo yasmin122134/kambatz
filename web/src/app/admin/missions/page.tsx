@@ -78,7 +78,7 @@ export default function AdminMissionsPage() {
             >
               {creatingBundle ? "יוצר…" : "+ יום שמירות+עב״ס"}
             </button>
-            <Link href="/admin/missions/new?type=guards" className="btn-sm">
+            <Link href="/admin/missions/new?type=guards&standalone=1" className="btn-sm">
               שמירות בלבד
             </Link>
             <Link href="/admin/missions/new?type=kitchen" className="btn-sm">
@@ -91,10 +91,10 @@ export default function AdminMissionsPage() {
           <p className="hint">טוען…</p>
         ) : missions.length === 0 ? (
           <div className="card">
-            <p className="hint mb-3">אין ימי משימה. צרו את הראשון.</p>
-            <Link href="/admin/missions/new?type=guards" className="btn-pri btn-sm">
-              הוסף יום שמירה
-            </Link>
+            <p className="hint mb-3">אין ימי משימה. צרו יום שמירות+עב״ס.</p>
+            <button type="button" className="btn-pri btn-sm" onClick={createGuardDayBundle}>
+              + יום שמירות+עב״ס
+            </button>
           </div>
         ) : (
           <ul className="space-y-3">

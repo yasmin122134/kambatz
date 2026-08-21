@@ -4,11 +4,11 @@ import {
   defaultSchedulingForType,
   standardMissionPositions,
 } from "@/lib/mission-templates";
-import { emptyAssignments, saveMissionDay } from "@/lib/missions";
+import { emptyAssignments, getMissionDay, saveMissionDay } from "@/lib/missions";
 import type { MissionDay, MissionSchedulingRules } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
-export const DEFAULT_DUTY_GUARD_GAP_MINUTES = 30;
+export const DEFAULT_DUTY_GUARD_GAP_MINUTES = 90;
 
 export type GuardDayBundleInput = {
   mission_date: string;
@@ -108,6 +108,59 @@ export async function createGuardDayBundle(
   });
 
   return { guards: guardsLinked, baseWork, bundleId };
+}
+
+/** מוסיף משימת עב״ס מקושרת ליום שמירות קיים (אם עדיין אין). */
+export async function ensureLinkedBaseWork(
+  guards: MissionDay,
+): Promise<{ guards: MissionDay; baseWork: MissionDay } | null> {
+  if (guards.mission_type !== "guards") return null;
+  if (guards.scheduling_rules?.linked_mission_id) {
+    const existing = await getMissionDay(guards.scheduling_rules.linked_mission_id);
+    if (existing) return { guards, baseWork: existing };
+  }
+
+  const bundleId = guards.scheduling_rules?.guard_day_bundle_id ?? crypto.randomUUID();
+  const scheduling = sharedScheduling(
+    guards.starts_at,
+    bundleId,
+    guards.scheduling_rules,
+  );
+  const baseWindow = defaultMissionWindow("base_work", guards.mission_date);
+  const basePositions = standardMissionPositions({
+    missionType: "base_work",
+    startsAt: baseWindow.startsAt,
+    endsAt: baseWindow.endsAt,
+    scheduling,
+  });
+
+  const baseWork = await saveMissionDay({
+    title: `${guards.mission_date} · עב״ס`,
+    mission_type: "base_work",
+    mission_date: guards.mission_date,
+    starts_at: baseWindow.startsAt,
+    ends_at: baseWindow.endsAt,
+    status: guards.status,
+    positions: basePositions,
+    assignments: emptyAssignments(basePositions),
+    scheduling_rules: {
+      ...scheduling,
+      linked_mission_id: guards.id,
+      guard_day_bundle_id: bundleId,
+    },
+    notes: "חלק מיום שמירות+עב״ס מאוחד — לא לשבץ חופף לשמירות (מלבד כרמל ב׳)",
+  });
+
+  const guardsLinked = await saveMissionDay({
+    ...guards,
+    scheduling_rules: {
+      ...scheduling,
+      linked_mission_id: baseWork.id,
+      guard_day_bundle_id: bundleId,
+    },
+  });
+
+  return { guards: guardsLinked, baseWork };
 }
 
 export function missionsInBundle(

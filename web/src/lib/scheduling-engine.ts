@@ -27,14 +27,15 @@ import {
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
-import type {
-  FairnessRules,
-  Issue,
-  MissionDay,
-  MissionPositionKind,
-  MissionSchedulingRules,
-  MissionType,
-  Person,
+import {
+  DEFAULT_MISSION_SCHEDULING_RULES,
+  type FairnessRules,
+  type Issue,
+  type MissionDay,
+  type MissionPositionKind,
+  type MissionSchedulingRules,
+  type MissionType,
+  type Person,
 } from "@/lib/types";
 
 type BusyBlock = BurdenTimelineBlock & {
@@ -307,7 +308,7 @@ function overlapsSlot(
   scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
 ): boolean {
-  const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+  const gapMin = scheduling.duty_guard_gap_minutes ?? DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
@@ -797,7 +798,7 @@ function overlapAssignmentWarning(
   tracker: ScheduleTracker,
   scheduling: MissionSchedulingRules,
 ): string | null {
-  const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+  const gapMin = scheduling.duty_guard_gap_minutes ?? DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
