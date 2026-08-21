@@ -845,7 +845,13 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   <input
                     type="number"
                     min={allowZeroSeats ? 0 : 1}
-                    max={missionType === "kitchen" ? 60 : 10}
+                    max={
+                      missionType === "kitchen"
+                        ? 60
+                        : missionType === "base_work"
+                          ? 15
+                          : 10
+                    }
                     value={slot.seat_count}
                     onChange={(e) =>
                       updateSlot(pos.id, slot.id, {

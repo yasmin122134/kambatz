@@ -115,14 +115,42 @@ export function resolveSlotAbsoluteInterval(
   startTime: string,
   endTime: string,
 ): TimeInterval | null {
-  const missionStartMs = parseIsoMs(missionStartsAt);
-  const missionEndMs = parseIsoMs(missionEndsAt);
-  if (missionStartMs === null || missionEndMs === null) return null;
+  const missionIv = missionInterval(missionStartsAt, missionEndsAt);
+  if (!missionIv) return null;
+  const { startMs: missionStartMs, endMs: missionEndMs } = missionIv;
 
   const startMin = parseTimeMinutes(startTime);
   if (startMin === null) return null;
+
+  // Carmel / full-mission convention: identical labels mean the entire mission window.
+  if (startTime === endTime) {
+    return { startMs: missionStartMs, endMs: missionEndMs };
+  }
+
+  const endMin = parseTimeMinutes(endTime);
   const durMin = slotDurationMinutes(startTime, endTime);
-  if (durMin <= 0) return null;
+  if (durMin <= 0 || endMin === null) return null;
+
+  const missionStartLabel = fmtTimeLabel(missionStartMs);
+  const missionEndLabel = fmtTimeLabel(missionEndMs);
+
+  // Full mission span when wall labels match mission boundaries (e.g. 09:00→09:00 next day).
+  if (
+    startTime === missionStartLabel &&
+    endTime === missionEndLabel &&
+    Math.abs(durMin - (missionEndMs - missionStartMs) / 60_000) <= 1
+  ) {
+    return { startMs: missionStartMs, endMs: missionEndMs };
+  }
+
+  // Overnight slot ending at mission end (e.g. officer duty 21:00–09:00 on a 09:00→09:00 mission).
+  if (endTime === missionEndLabel && endMin <= startMin) {
+    const candidateEnd = missionEndMs;
+    const candidateStart = candidateEnd - durMin * 60_000;
+    if (candidateStart >= missionStartMs) {
+      return { startMs: candidateStart, endMs: candidateEnd };
+    }
+  }
 
   const baseDate = new Date(missionStartsAt);
   baseDate.setHours(0, 0, 0, 0);

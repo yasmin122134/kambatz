@@ -72,9 +72,14 @@ export function carmelSlotFromMission(
   const end = isoToTimeLabel(missionEndsAt) ?? start;
   const slot: MissionSlot = { id: uid(), start_time: start, end_time: end, seat_count: seats };
   if (missionStartsAt && missionEndsAt) {
-    const abs = resolveSlotAbsoluteInterval(missionStartsAt, missionEndsAt, start, end);
-    if (abs) {
-      Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
+    const missionIv = missionInterval(missionStartsAt, missionEndsAt);
+    if (missionIv && (start === end || (start === isoToTimeLabel(missionStartsAt) && end === isoToTimeLabel(missionEndsAt)))) {
+      Object.assign(slot, materializeSlotAbsoluteBounds(slot, missionIv));
+    } else {
+      const abs = resolveSlotAbsoluteInterval(missionStartsAt, missionEndsAt, start, end);
+      if (abs) {
+        Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
+      }
     }
   }
   return slot;
