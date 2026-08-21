@@ -3,6 +3,7 @@ import { validateMissionStructureForAssignment } from "@/lib/mission-slot-struct
 import { carmelSlotFromMission } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
 import type { MissionDay } from "@/lib/types";
+import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
   const startsAt = "2026-08-21T09:00:00+03:00";
@@ -85,7 +86,7 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
         },
       ],
       assignments: {},
-      scheduling_rules: {},
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
       notes: null,
       created_at: "",
       updated_at: "",
@@ -129,7 +130,7 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
         },
       ],
       assignments: {},
-      scheduling_rules: {},
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
       notes: null,
       created_at: "",
       updated_at: "",
