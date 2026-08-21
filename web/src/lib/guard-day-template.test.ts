@@ -2,8 +2,36 @@ import { describe, expect, it } from "vitest";
 import {
   buildGuardDayPositions,
   buildPureFourHourShiftWindows,
+  mergeAdjacentGuardSlots,
   syncGuardShiftSlots,
 } from "@/lib/guard-day-template";
+
+describe("merge adjacent guard slots", () => {
+  it("merges 06:00–08:00 + 08:00–09:00 when same seats and total ≤ 4h", () => {
+    const merged = mergeAdjacentGuardSlots(
+      [
+        { id: "a", start_time: "06:00", end_time: "08:00", seat_count: 1 },
+        { id: "b", start_time: "08:00", end_time: "09:00", seat_count: 1 },
+      ],
+      240,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].start_time).toBe("06:00");
+    expect(merged[0].end_time).toBe("09:00");
+    expect(merged[0].seat_count).toBe(1);
+  });
+
+  it("does not merge when seat counts differ", () => {
+    const merged = mergeAdjacentGuardSlots(
+      [
+        { id: "a", start_time: "16:00", end_time: "18:00", seat_count: 1 },
+        { id: "b", start_time: "18:00", end_time: "20:00", seat_count: 2 },
+      ],
+      240,
+    );
+    expect(merged).toHaveLength(2);
+  });
+});
 
 describe("pure 4-hour guard grid", () => {
   it("does not split 16:00–20:00 into 1-hour segments", () => {
@@ -43,5 +71,20 @@ describe("pure 4-hour guard grid", () => {
 
     const observerKeys = observer!.slots.map((s) => `${s.start_time}-${s.end_time}`);
     expect(observerKeys).toEqual(patrolKeys);
+  });
+
+  it("merges short morning segments at grid boundary", () => {
+    const windows = buildPureFourHourShiftWindows("06:00", 180, 4);
+    const positions = buildGuardDayPositions({
+      boardStart: "06:00",
+      shiftHours: 4,
+      missionStartsAt: "2026-01-01T06:00:00",
+      missionEndsAt: "2026-01-01T09:00:00",
+    });
+    const patrol = positions.find((p) => p.name === "פטל");
+    expect(patrol?.slots.some((s) => s.start_time === "06:00" && s.end_time === "09:00")).toBe(
+      true,
+    );
+    expect(windows.map((w) => `${w.startMin}-${w.endMin}`)).toContain(`${6 * 60}-${8 * 60}`);
   });
 });
