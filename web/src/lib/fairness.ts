@@ -1,10 +1,16 @@
 import { createClient } from "@/lib/supabase/server";
-import { flattenMissionSlots, normalizeSchedulingRules } from "@/lib/mission-utils";
+import {
+  calculatePersonBurden,
+  type BurdenTimelineBlock,
+  type PersonBurdenBreakdown,
+} from "@/lib/guard-burden";
+import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules } from "@/lib/mission-utils";
 import { listMissionDays } from "@/lib/missions";
 import type {
   FairnessBucket,
   FairnessRules,
   FairnessRuleRequest,
+  MissionDay,
   MissionPositionKind,
   MissionType,
   PersonFairnessStats,
@@ -13,20 +19,7 @@ import type {
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
 import { isStandbyKind } from "@/lib/mission-utils";
 
-function parseTime(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
-  if (!m) return null;
-  return +m[1] * 60 + +m[2];
-}
-
-export function slotDurationHours(start: string, end: string): number {
-  const s = parseTime(start);
-  const e = parseTime(end);
-  if (s === null || e === null) return 0;
-  let dur = e - s;
-  if (dur <= 0) dur += 1440;
-  return Math.round((dur / 60) * 100) / 100;
-}
+import { slotDurationHours, pointsForHours } from "@/lib/fairness-math";
 
 export function bucketForAssignment(
   missionType: MissionType,
@@ -53,16 +46,74 @@ export function normalizeFairnessRules(raw: unknown): FairnessRules {
   return out;
 }
 
-export function pointsForHours(
-  hours: number,
-  bucket: FairnessBucket,
-  rules: FairnessRules,
-  options?: { perShift?: boolean },
-) {
-  if (options?.perShift) {
-    return Math.round(rules[bucket] * 100) / 100;
+export { slotDurationHours, pointsForHours } from "@/lib/fairness-math";
+
+function collectPersonBlocks(
+  personName: string,
+  missions: MissionDay[],
+): BurdenTimelineBlock[] {
+  const blocks: BurdenTimelineBlock[] = [];
+  for (const mission of missions) {
+    for (const slot of flattenMissionSlots(mission)) {
+      if (!slot.assignees.includes(personName)) continue;
+      blocks.push({
+        wallStartMin: slot.wallStartMin,
+        calendarDayOffset: slot.calendarDayOffset,
+        durationMinutes: slot.durationMinutes,
+        eatsRest:
+          slot.positionKind !== "standby_carmel_a" &&
+          slot.positionKind !== "standby_carmel_b",
+        positionKind: slot.positionKind,
+        missionType: mission.mission_type,
+        seatCount: slot.seatCount,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+        slotId: slot.slotId,
+      });
+    }
   }
-  return Math.round(hours * rules[bucket] * 100) / 100;
+  return blocks;
+}
+
+export function computePersonBurdenFromMissions(
+  personName: string,
+  missions: MissionDay[],
+  rules: FairnessRules,
+): PersonBurdenBreakdown {
+  const blocks = collectPersonBlocks(personName, missions);
+  const scheduling = missions[0]
+    ? normalizeSchedulingRules(missions[0].scheduling_rules)
+    : undefined;
+  return calculatePersonBurden(blocks, rules, scheduling);
+}
+
+export type RosterBurdenEntry = PersonBurdenBreakdown & {
+  personName: string;
+  priorScore: number;
+  historicalAdjustment: number;
+  totalWithHistory: number;
+};
+
+export function computeRosterBurdenSummary(
+  people: { name: string; prior_score?: number }[],
+  missions: MissionDay[],
+  rules: FairnessRules,
+): RosterBurdenEntry[] {
+  const meanPrior =
+    people.reduce((s, p) => s + (p.prior_score || 0), 0) / (people.length || 1);
+  return people.map((p) => {
+    const breakdown = computePersonBurdenFromMissions(p.name, missions, rules);
+    const historicalAdjustment = Math.round(
+      ((p.prior_score || 0) - meanPrior) * rules.hist * 100,
+    ) / 100;
+    return {
+      personName: p.name,
+      priorScore: p.prior_score || 0,
+      historicalAdjustment,
+      totalWithHistory: Math.round((breakdown.totalBurden + historicalAdjustment) * 100) / 100,
+      ...breakdown,
+    };
+  });
 }
 
 export async function getFairnessRules(): Promise<FairnessRules> {
@@ -102,7 +153,12 @@ export async function getPersonFairnessStats(
     listMissionDays(true),
   ]);
 
+  const blocks = collectPersonBlocks(personName, missions);
+  const breakdown = calculatePersonBurden(blocks, rules);
   const history: PersonMissionHistoryItem[] = [];
+  const guardDetailBySlot = new Map(
+    breakdown.guardDetails.map((d) => [d.slotId || "", d]),
+  );
 
   for (const mission of missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
@@ -114,6 +170,27 @@ export async function getPersonFairnessStats(
         slot.seatCount,
         slot.positionKind,
       );
+
+      if (isGuardKind(slot.positionKind)) {
+        const detail = guardDetailBySlot.get(slot.slotId);
+        history.push({
+          id: `${mission.id}:${slot.slotId}:${personName}`,
+          missionId: mission.id,
+          missionTitle: mission.title,
+          missionDate: mission.mission_date,
+          missionType: mission.mission_type,
+          positionName: slot.positionName,
+          timeLabel: slot.timeLabel,
+          hours,
+          bucket,
+          points: detail?.totalContribution ?? 0,
+          burdenBase: detail?.baseBurden,
+          burdenRest: detail?.restPenaltyBefore,
+          burdenIsSolo: detail?.isSolo,
+        });
+        continue;
+      }
+
       const kitchenPerShift =
         mission.mission_type === "kitchen" &&
         scheduling.kitchen?.points_per_shift !== false;
@@ -140,8 +217,7 @@ export async function getPersonFairnessStats(
       b.missionDate.localeCompare(a.missionDate) || b.timeLabel.localeCompare(a.timeLabel),
   );
 
-  const periodPoints =
-    Math.round(history.reduce((sum, h) => sum + h.points, 0) * 100) / 100;
+  const periodPoints = breakdown.totalBurden;
   const totalPoints = Math.round((priorScore + periodPoints) * 100) / 100;
 
   return {
@@ -150,6 +226,7 @@ export async function getPersonFairnessStats(
     periodPoints,
     totalPoints,
     history,
+    burden: breakdown,
   };
 }
 

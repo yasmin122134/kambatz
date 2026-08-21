@@ -14,7 +14,8 @@ import {
   FAIRNESS_BUCKET_LABELS,
   DEFAULT_FAIRNESS_RULES,
 } from "@/lib/types";
-import { flattenMissionSlots } from "@/lib/mission-utils";
+import { getGuardBaseBurden } from "@/lib/guard-burden";
+import { flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 
 type Props = {
   personName: string;
@@ -48,6 +49,19 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   const [swapMode, setSwapMode] = useState<SwapMode>(null);
   const [msg, setMsg] = useState("");
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [showBurden, setShowBurden] = useState(false);
+  const [burdenRoster, setBurdenRoster] = useState<
+    Array<{
+      personName: string;
+      totalBurden: number;
+      guardAssignmentCount: number;
+      guardBaseBurden: number;
+      restPenalties: number;
+      otherMissionPoints: number;
+      historicalAdjustment: number;
+      totalWithHistory: number;
+    }>
+  >([]);
 
   const dayMissions = useMemo(
     () => missions.filter((m) => m.mission_date === activeDate),
@@ -105,6 +119,19 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   useEffect(() => {
     loadAdminData();
   }, [loadAdminData, isAdminUser]);
+
+  const loadBurden = useCallback(async () => {
+    if (!isAdminUser || !activeDate) return;
+    const res = await fetch(`/api/missions/burden?mission_date=${activeDate}`);
+    if (res.ok) {
+      const data = await res.json();
+      setBurdenRoster(data.roster || []);
+    }
+  }, [activeDate, isAdminUser]);
+
+  useEffect(() => {
+    if (showBurden) loadBurden();
+  }, [showBurden, loadBurden]);
 
   async function patchAssignment(
     missionId: string,
@@ -289,6 +316,13 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
               </button>
               <button
                 type="button"
+                className={`btn-sm ${showBurden ? "on" : ""}`}
+                onClick={() => setShowBurden((v) => !v)}
+              >
+                עומס שיבוץ
+              </button>
+              <button
+                type="button"
                 className={`btn-sm ${showConstraints ? "on" : ""}`}
                 onClick={() => setShowConstraints((v) => !v)}
               >
@@ -319,6 +353,10 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
           onFairness={setFairnessStatus}
           formatFairnessDiff={formatFairnessDiff}
         />
+      )}
+
+      {showBurden && isAdminUser && (
+        <BurdenSummaryPanel roster={burdenRoster} onRefresh={loadBurden} />
       )}
 
       <div className="day-tabs mb-6">
@@ -829,6 +867,11 @@ function SlotCard({
   return (
     <div className={`slot-card ${isMine ? "mine" : ""}`}>
       <div className="mono text-sm font-medium">{slot.timeLabel}</div>
+      {isGuardKind(slot.positionKind) && (
+        <div className="text-xs text-ink3 mt-0.5" title={guardSlotBurdenTitle(slot)}>
+          {guardSlotBurdenLabel(slot)}
+        </div>
+      )}
       {missionId && slot.positionName && (
         <div className="text-xs text-ink2">{slot.positionName}</div>
       )}
@@ -976,5 +1019,93 @@ function SwapButtons({
     >
       החלפה
     </button>
+  );
+}
+
+function guardSlotBurdenLabel(slot: ReturnType<typeof flattenMissionSlots>[0]): string {
+  const solo = slot.seatCount <= 1;
+  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount);
+  return `עומס בסיס: ${base} (${solo ? "סולו" : "זוג"})`;
+}
+
+function guardSlotBurdenTitle(slot: ReturnType<typeof flattenMissionSlots>[0]): string {
+  const solo = slot.seatCount <= 1;
+  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount);
+  return `${slot.timeLabel} — ${solo ? "סולו" : "זוג"}\nעומס בסיס: ${base}\n(עונש מנוחה מחושב לפי משימות קודמות/הבאות)`;
+}
+
+function BurdenSummaryPanel({
+  roster,
+  onRefresh,
+}: {
+  roster: Array<{
+    personName: string;
+    totalBurden: number;
+    guardAssignmentCount: number;
+    guardBaseBurden: number;
+    restPenalties: number;
+    otherMissionPoints: number;
+    historicalAdjustment: number;
+    totalWithHistory: number;
+  }>;
+  onRefresh: () => void;
+}) {
+  if (!roster.length) {
+    return (
+      <section className="card mb-6">
+        <div className="bar spread mb-2">
+          <h3 className="font-display text-base">עומס שיבוץ — יום נבחר</h3>
+          <button type="button" className="btn-sm" onClick={onRefresh}>
+            רענון
+          </button>
+        </div>
+        <p className="hint">אין נתוני שיבוץ ליום זה.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="card mb-6">
+      <div className="bar spread mb-3 flex-wrap gap-2">
+        <h3 className="font-display text-base">עומס שיבוץ — יום נבחר</h3>
+        <button type="button" className="btn-sm" onClick={onRefresh}>
+          רענון
+        </button>
+      </div>
+      <p className="text-xs text-ink3 mb-3">
+        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח/כוננות/עב״ס לפי טבלת הצדק.
+      </p>
+      <div className="schedule-table-wrap overflow-x-auto max-h-64 overflow-y-auto">
+        <table className="schedule-table w-full text-sm">
+          <thead>
+            <tr>
+              <th>צוער</th>
+              <th>עומס</th>
+              <th>שמירות</th>
+              <th title="עומס בסיס שמירות">בסיס</th>
+              <th title="עונש מנוחה">מנוחה</th>
+              <th title="מטבח/עב״ס/כוננות">אחר</th>
+              <th title="היסטוריה">היסט׳</th>
+            </tr>
+          </thead>
+          <tbody>
+            {roster.map((row) => (
+              <tr key={row.personName} title={`סה״כ עם היסטוריה: ${row.totalWithHistory}`}>
+                <td>{row.personName}</td>
+                <td className="mono">{row.totalBurden.toFixed(1)}</td>
+                <td className="mono">{row.guardAssignmentCount}</td>
+                <td className="mono text-ink2">{row.guardBaseBurden.toFixed(1)}</td>
+                <td className="mono text-ink2">{row.restPenalties.toFixed(1)}</td>
+                <td className="mono text-ink2">{row.otherMissionPoints.toFixed(1)}</td>
+                <td className="mono text-ink2">
+                  {row.historicalAdjustment >= 0 ? "+" : ""}
+                  {row.historicalAdjustment.toFixed(1)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }

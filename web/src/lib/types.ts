@@ -261,6 +261,11 @@ export type PersonMissionHistoryItem = {
   hours: number;
   bucket: FairnessBucket;
   points: number;
+  /** Guard burden model — base time-of-day score */
+  burdenBase?: number;
+  /** Guard burden model — rest penalty before this shift */
+  burdenRest?: number;
+  burdenIsSolo?: boolean;
 };
 
 export type PersonFairnessStats = {
@@ -269,13 +274,19 @@ export type PersonFairnessStats = {
   periodPoints: number;
   totalPoints: number;
   history: PersonMissionHistoryItem[];
+  burden?: {
+    guardBaseBurden: number;
+    restPenalties: number;
+    otherMissionPoints: number;
+    guardAssignmentCount: number;
+    totalBurden: number;
+  };
 };
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
-  "המחולל לא מחלק לפי שעות גולמיות — אלא לפי נקודות צדק.",
-  "לכל משמרת שמירה/עב״ס: שעות × משקל מטבלת הצדק (למשל שמירה לבד = 1.5 נק׳/שעה).",
-  "מטבח — נקודה קבועה לכל משמרת (35 צוערים), לא לפי שעות.",
-  "כרמל א׳ וכרמל ב׳ — שורות נפרדות בטבלה; א׳ משמעותית קשה יותר.",
-  "עמדה שדורשת מאייש אחד 24 שעות = משמרות מסתובבות (למשל 4 שעות), לא אותו אדם כל היום.",
+  "שמירות — ניקוד עומס לפי שעה ביום, סולו/זוג, ומנוחה בין משימות.",
+  "משמרת 00:00–04:00 סולו = 10 נק׳ בסיס; זוג = 7. 08:00–12:00 זוג = 1.",
+  "מנוחה קצרה בין משימות מוסיפה עונש (למשל פחות מ-7 שעות = +4).",
+  "מטבח, כוננות, עב״ס — עדיין לפי טבלת הצדק.",
   "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];

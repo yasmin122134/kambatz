@@ -1,4 +1,12 @@
-import { getFairnessRules, pointsForHours, slotDurationHours } from "@/lib/fairness";
+import { getFairnessRules } from "@/lib/fairness";
+import { slotDurationHours } from "@/lib/fairness-math";
+import {
+  calculatePersonBurden,
+  calculateProjectedCandidateBurden,
+  guardSlotDifficultyRank,
+  type BurdenTimelineBlock,
+  type PersonBurdenBreakdown,
+} from "@/lib/guard-burden";
 import {
   type FlatSlot,
   eatsRest,
@@ -22,17 +30,25 @@ import type {
   Person,
 } from "@/lib/types";
 
-type BusyBlock = {
+type BusyBlock = BurdenTimelineBlock & {
   cyclicStart: number;
-  wallStartMin: number;
-  calendarDayOffset: number;
-  durationMinutes: number;
-  eatsRest: boolean;
-  positionKind: MissionPositionKind;
-  missionType: MissionType;
   slotId: string;
   missionId: string;
 };
+
+function busyToBurdenBlocks(blocks: BusyBlock[]): BurdenTimelineBlock[] {
+  return blocks;
+}
+
+function syncPersonPeriodPoints(
+  personName: string,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+) {
+  const blocks = tracker.busy[personName] || [];
+  tracker.periodPoints[personName] = calculatePersonBurden(blocks, rules, scheduling).totalBurden;
+}
 
 export type ScheduleTracker = {
   busy: Record<string, BusyBlock[]>;
@@ -306,9 +322,43 @@ export function workScore(
   tracker: ScheduleTracker,
   rules: FairnessRules,
   meanPrior: number,
+  scheduling?: MissionSchedulingRules,
 ): number {
   const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
-  return (tracker.periodPoints[person.name] || 0) + priorAdj;
+  const burden =
+    tracker.periodPoints[person.name] ??
+    calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling).totalBurden;
+  return burden + priorAdj;
+}
+
+export function personBurdenBreakdown(
+  personName: string,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+): PersonBurdenBreakdown {
+  return calculatePersonBurden(tracker.busy[personName] || [], rules, scheduling);
+}
+
+export function projectedGuardCandidateScore(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+  seatCount?: number,
+): number {
+  const projected = calculateProjectedCandidateBurden(
+    person.name,
+    slot,
+    busyToBurdenBlocks(tracker.busy[person.name] || []),
+    rules,
+    scheduling,
+    seatCount,
+  );
+  const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
+  return projected + priorAdj;
 }
 
 export function fitsPerson(
@@ -351,6 +401,9 @@ export function placePerson(
     eatsRest: eatsRest(slot.positionKind),
     positionKind: slot.positionKind,
     missionType: missionType ?? slot.missionType,
+    seatCount,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
     slotId: slot.slotId,
     missionId,
   };
@@ -361,8 +414,7 @@ export function placePerson(
       { start: slot.cyclicStart, duration: slot.durationMinutes },
     ];
   }
-  const pts = pointsForSlot(slot, seatCount, rules, { missionType, scheduling });
-  tracker.periodPoints[personName] = (tracker.periodPoints[personName] || 0) + pts;
+  syncPersonPeriodPoints(personName, tracker, rules, scheduling);
 }
 
 export function buildTrackerFromMissions(
@@ -398,9 +450,16 @@ export function buildTrackerFromMissions(
   return tracker;
 }
 
-export function slotRank(slot: FlatSlot, rules: FairnessRules) {
+export function slotRank(
+  slot: FlatSlot,
+  rules: FairnessRules,
+  eligibleCount?: number,
+) {
   if (isStandbyKind(slot.positionKind)) return 1e9;
   if (slot.positionKind === "kitchen") return 500;
+  if (isGuardKind(slot.positionKind)) {
+    return guardSlotDifficultyRank(slot, eligibleCount ?? 10);
+  }
   return pointsForSlot(slot, slot.seatCount, rules) * 100;
 }
 
@@ -410,21 +469,33 @@ export function pickBestCandidate(
   tracker: ScheduleTracker,
   rules: FairnessRules,
   meanPrior: number,
-  options?: { preferHighLoad?: boolean },
+  options?: { preferHighLoad?: boolean; scheduling?: MissionSchedulingRules },
 ): Person | null {
   if (!candidates.length) return null;
   const preferHigh =
     options?.preferHighLoad ??
     (isStandbyKind(slot.positionKind) && !slot.sameGender);
+  const useGuardBurden = isGuardKind(slot.positionKind);
+  const scheduling = options?.scheduling;
+
   const sorted = [...candidates].sort((a, b) => {
-    const wa = workScore(a, tracker, rules, meanPrior);
-    const wb = workScore(b, tracker, rules, meanPrior);
+    const wa = useGuardBurden
+      ? projectedGuardCandidateScore(a, slot, tracker, rules, meanPrior, scheduling)
+      : workScore(a, tracker, rules, meanPrior, scheduling);
+    const wb = useGuardBurden
+      ? projectedGuardCandidateScore(b, slot, tracker, rules, meanPrior, scheduling)
+      : workScore(b, tracker, rules, meanPrior, scheduling);
     let sc = preferHigh ? wb - wa : wa - wb;
     if (a.exam !== b.exam) {
       if (isGuardKind(slot.positionKind)) sc += a.exam ? 1000 : -1000;
       else sc += a.exam ? -1000 : 1000;
     }
     if (sc !== 0) return sc;
+    if (useGuardBurden) {
+      const ga = personBurdenBreakdown(a.name, tracker, rules, scheduling).guardAssignmentCount;
+      const gb = personBurdenBreakdown(b.name, tracker, rules, scheduling).guardAssignmentCount;
+      if (ga !== gb) return ga - gb;
+    }
     return a.name.localeCompare(b.name, "he");
   });
   return sorted[0];
@@ -968,3 +1039,4 @@ export function findAssignmentConflicts(mission: MissionDay): string[] {
 }
 
 export { getFairnessRules };
+export { guardSlotDifficultyRank, type PersonBurdenBreakdown } from "@/lib/guard-burden";

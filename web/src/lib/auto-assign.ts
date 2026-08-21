@@ -1,7 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { getFairnessRules } from "@/lib/fairness";
+import { guardSlotDifficultyRank, calculatePersonBurden } from "@/lib/guard-burden";
 import {
   flattenMissionSlots,
+  isGuardKind,
   isStandbyKind,
   normalizeSchedulingRules,
   resolvePositionKind,
@@ -316,9 +318,13 @@ export async function autoAssignMission(
       for (const [name, gs] of Object.entries(t2.guardShifts)) {
         tracker.guardShifts[name] = [...(tracker.guardShifts[name] || []), ...gs];
       }
-      for (const [name, pts] of Object.entries(t2.periodPoints)) {
-        tracker.periodPoints[name] = (tracker.periodPoints[name] || 0) + pts;
-      }
+    }
+    for (const name of Object.keys(tracker.busy)) {
+      tracker.periodPoints[name] = calculatePersonBurden(
+        tracker.busy[name] || [],
+        rules,
+        scheduling,
+      ).totalBurden;
     }
   }
 
@@ -370,11 +376,21 @@ export async function autoAssignMission(
   let filled = 0;
   let skipped = 0;
 
-  const slots = flattenMissionSlots(mission).sort(
-    (a, b) =>
-      slotRank(b, rules) - slotRank(a, rules) ||
-      b.durationMinutes - a.durationMinutes,
-  );
+  const slots = flattenMissionSlots(mission).sort((a, b) => {
+    const countEligible = (slot: (typeof a)) => {
+      if (!isGuardKind(slot.positionKind)) return 10;
+      return people.filter((p) =>
+        fitsPerson(p, slot, tracker, issues, scheduling, [], peopleByName),
+      ).length;
+    };
+    const rankA = isGuardKind(a.positionKind)
+      ? guardSlotDifficultyRank(a, countEligible(a))
+      : slotRank(a, rules);
+    const rankB = isGuardKind(b.positionKind)
+      ? guardSlotDifficultyRank(b, countEligible(b))
+      : slotRank(b, rules);
+    return rankB - rankA || b.durationMinutes - a.durationMinutes;
+  });
 
   const standbyPositions = new Set(
     mission.positions
@@ -476,7 +492,14 @@ export async function autoAssignMission(
           fitsPerson(p, slot, tracker, issues, scheduling, mates, peopleByName),
       );
 
-      const chosen = pickBestCandidate(candidates, slot, tracker, rules, meanPrior);
+      const chosen = pickBestCandidate(
+        candidates,
+        slot,
+        tracker,
+        rules,
+        meanPrior,
+        { scheduling },
+      );
       if (!chosen) {
         warnings.push(
           `${slot.positionName} ${slot.timeLabel} — משבצת ${i + 1}: לא נמצא צוער שעומד בכללים`,
