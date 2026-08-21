@@ -138,14 +138,23 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       m.status === "draft" &&
       !templateFixDone.current &&
       !missionTemplateComplete(m.mission_type, m.positions);
-    const positions = needsTemplateFix
-      ? standardMissionPositions({
-          missionType: m.mission_type,
-          startsAt: m.starts_at,
-          endsAt: m.ends_at,
-          scheduling: rules,
-        })
-      : m.positions;
+    const positions =
+      m.mission_type === "guards"
+        ? resolveMissionPositions({
+            missionType: m.mission_type,
+            startsAt: m.starts_at,
+            endsAt: m.ends_at,
+            scheduling: rules,
+            clientPositions: m.positions,
+          })
+        : needsTemplateFix
+          ? standardMissionPositions({
+              missionType: m.mission_type,
+              startsAt: m.starts_at,
+              endsAt: m.ends_at,
+              scheduling: rules,
+            })
+          : m.positions;
 
     setTitle(m.title);
     setMissionType(m.mission_type);
@@ -159,6 +168,18 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (needsTemplateFix) {
       templateFixDone.current = true;
       setMsg("נטענה תבנית סטנדרטית — לחצו «שמור» כדי לעדכן את יום המשימה");
+    } else if (
+      m.mission_type === "guards" &&
+      positions !== m.positions &&
+      positions.some((pos, i) => {
+        const prev = m.positions[i];
+        if (!prev || prev.name !== pos.name) return true;
+        const prevKeys = prev.slots.map((s) => `${s.start_time}-${s.end_time}-${s.seat_count}`);
+        const nextKeys = pos.slots.map((s) => `${s.start_time}-${s.end_time}-${s.seat_count}`);
+        return prevKeys.join("|") !== nextKeys.join("|");
+      })
+    ) {
+      setMsg("מבנה המשמרות סונכרן לרשת 4 שעות — לחצו «שמור» כדי לעדכן");
     }
     setLoading(false);
   }, [missionId]);

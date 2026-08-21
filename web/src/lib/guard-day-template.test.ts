@@ -31,6 +31,20 @@ describe("merge adjacent guard slots", () => {
     );
     expect(merged).toHaveLength(2);
   });
+
+  it("merges 18:00–19:00 + 19:00–22:00 when both have 2 seats", () => {
+    const merged = mergeAdjacentGuardSlots(
+      [
+        { id: "a", start_time: "18:00", end_time: "19:00", seat_count: 2 },
+        { id: "b", start_time: "19:00", end_time: "22:00", seat_count: 2 },
+      ],
+      240,
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].start_time).toBe("18:00");
+    expect(merged[0].end_time).toBe("22:00");
+    expect(merged[0].seat_count).toBe(2);
+  });
 });
 
 describe("pure 4-hour guard grid", () => {
@@ -86,5 +100,31 @@ describe("pure 4-hour guard grid", () => {
       true,
     );
     expect(windows.map((w) => `${w.startMin}-${w.endMin}`)).toContain(`${6 * 60}-${8 * 60}`);
+  });
+
+  it("sync merges legacy 18–19 + 19–22 splits into one 4h slot", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "18:00",
+      shiftHours: 4,
+      season: "summer",
+      missionStartsAt: "2026-01-01T18:00:00",
+      missionEndsAt: "2026-01-01T22:00:00",
+    });
+    const front = positions.find((p) => p.name.includes("קדמי"))!;
+    front.slots = [
+      { id: "legacy-a", start_time: "18:00", end_time: "19:00", seat_count: 2 },
+      { id: "legacy-b", start_time: "19:00", end_time: "22:00", seat_count: 2 },
+    ];
+    const synced = syncGuardShiftSlots(positions, {
+      boardStart: "18:00",
+      shiftHours: 4,
+      missionStartsAt: "2026-01-01T18:00:00",
+      missionEndsAt: "2026-01-01T22:00:00",
+    });
+    const slots = synced.find((p) => p.name.includes("קדמי"))!.slots;
+    expect(slots).toHaveLength(1);
+    expect(slots[0].start_time).toBe("18:00");
+    expect(slots[0].end_time).toBe("22:00");
+    expect(slots[0].id).toBe("legacy-a");
   });
 });

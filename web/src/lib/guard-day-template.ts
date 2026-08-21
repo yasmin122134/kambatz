@@ -709,10 +709,23 @@ function buildGuardDayWindows(ctx: GuardDayContext): GuardShiftWindow[] {
 }
 
 function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
+  const usedPrevIds = new Set<string>();
   const byKey = new Map(prev.map((s) => [slotWindowKey(s), s]));
+
   return next.map((slot) => {
-    const old = byKey.get(slotWindowKey(slot));
-    return old ? { ...slot, id: old.id } : slot;
+    const exact = byKey.get(slotWindowKey(slot));
+    if (exact && !usedPrevIds.has(exact.id)) {
+      usedPrevIds.add(exact.id);
+      return { ...slot, id: exact.id };
+    }
+    const sameStart = prev.find(
+      (p) => p.start_time === slot.start_time && !usedPrevIds.has(p.id),
+    );
+    if (sameStart) {
+      usedPrevIds.add(sameStart.id);
+      return { ...slot, id: sameStart.id };
+    }
+    return slot;
   });
 }
 
@@ -774,10 +787,7 @@ function guardSlotsForPosition(
   return slotsFromWindows(windows, () => 1, true, maxMin);
 }
 
-/**
- * מסנכרן את חלונות המשמרת לכל העמדות — אותם זמני עלייה/ירידה.
- * אם נוצרה משמרת קצרה (למשל בגלל ש״ג אחורi) — היא מתווספת לכולם.
- */
+/** מסנכרן חלונות משמרת לכל העמדות — רשת 4 שעות; פיצול יום/לילה רק לש״ג אחורי/רגלי. */
 export function syncGuardShiftSlots(
   positions: MissionPosition[],
   options?: BuildGuardDayOptions,
