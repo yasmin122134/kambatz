@@ -1,5 +1,8 @@
 /** Canonical half-open interval utilities — authoritative for overlap and ordering. */
 
+/** Wall-clock labels for missions/slots are always Israel local time. */
+export const MISSION_WALL_TZ = "Asia/Jerusalem";
+
 export type TimeInterval = {
   startMs: number;
   endMs: number;
@@ -9,6 +12,12 @@ export function parseIsoMs(iso: string | undefined): number | null {
   if (!iso) return null;
   const ms = Date.parse(iso);
   return Number.isNaN(ms) ? null : ms;
+}
+
+export function normalizeTimeLabel(s: string): string {
+  const m = parseTimeMinutes(s);
+  if (m === null) return String(s || "").trim();
+  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 }
 
 export function parseTimeMinutes(s: string): number | null {
@@ -25,6 +34,34 @@ export function fmtTimeLabel(ms: number): string {
   const d = new Date(ms);
   const m = d.getHours() * 60 + d.getMinutes();
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+}
+
+export function fmtMissionTimeLabel(ms: number, timeZone = MISSION_WALL_TZ): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(ms));
+  const h = parts.find((p) => p.type === "hour")?.value ?? "00";
+  const min = parts.find((p) => p.type === "minute")?.value ?? "00";
+  return `${h.padStart(2, "0")}:${min.padStart(2, "0")}`;
+}
+
+/** Local calendar midnight for the instant's date in the mission wall timezone. */
+export function localMissionMidnightMs(ms: number, timeZone = MISSION_WALL_TZ): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(ms));
+  const h = +(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const min = +(parts.find((p) => p.type === "minute")?.value ?? 0);
+  const sec = +(parts.find((p) => p.type === "second")?.value ?? 0);
+  const msPart = new Date(ms).getMilliseconds();
+  return ms - ((h * 60 + min) * 60_000 + sec * 1000 + msPart);
 }
 
 export function slotDurationMinutes(start: string, end: string): number {
@@ -77,21 +114,27 @@ export function resolveCanonicalSlotInterval(
   mission: { starts_at: string; ends_at: string },
   slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
 ): TimeInterval | null {
+  const startTime = normalizeTimeLabel(slot.start_time);
+  const endTime = normalizeTimeLabel(slot.end_time);
   const fromWall = resolveSlotAbsoluteInterval(
     mission.starts_at,
     mission.ends_at,
-    slot.start_time,
-    slot.end_time,
+    startTime,
+    endTime,
   );
 
+  const missionIv = missionInterval(mission.starts_at, mission.ends_at);
   const fromStoredStart = parseIsoMs(slot.starts_at);
   const fromStoredEnd = parseIsoMs(slot.ends_at);
-  if (fromStoredStart !== null && fromStoredEnd !== null && fromStoredEnd > fromStoredStart) {
-    const storedStartLabel = fmtTimeLabel(fromStoredStart);
-    const storedEndLabel = fmtTimeLabel(fromStoredEnd);
-    if (storedStartLabel === slot.start_time && storedEndLabel === slot.end_time) {
-      return { startMs: fromStoredStart, endMs: fromStoredEnd };
-    }
+  if (
+    missionIv &&
+    fromStoredStart !== null &&
+    fromStoredEnd !== null &&
+    fromStoredEnd > fromStoredStart &&
+    fromStoredStart >= missionIv.startMs &&
+    fromStoredEnd <= missionIv.endMs
+  ) {
+    return { startMs: fromStoredStart, endMs: fromStoredEnd };
   }
 
   return fromWall;
@@ -119,32 +162,34 @@ export function resolveSlotAbsoluteInterval(
   if (!missionIv) return null;
   const { startMs: missionStartMs, endMs: missionEndMs } = missionIv;
 
-  const startMin = parseTimeMinutes(startTime);
+  const startLabel = normalizeTimeLabel(startTime);
+  const endLabel = normalizeTimeLabel(endTime);
+  const startMin = parseTimeMinutes(startLabel);
   if (startMin === null) return null;
 
   // Carmel / full-mission convention: identical labels mean the entire mission window.
-  if (startTime === endTime) {
+  if (startLabel === endLabel) {
     return { startMs: missionStartMs, endMs: missionEndMs };
   }
 
-  const endMin = parseTimeMinutes(endTime);
-  const durMin = slotDurationMinutes(startTime, endTime);
+  const endMin = parseTimeMinutes(endLabel);
+  const durMin = slotDurationMinutes(startLabel, endLabel);
   if (durMin <= 0 || endMin === null) return null;
 
-  const missionStartLabel = fmtTimeLabel(missionStartMs);
-  const missionEndLabel = fmtTimeLabel(missionEndMs);
+  const missionStartLabel = fmtMissionTimeLabel(missionStartMs);
+  const missionEndLabel = fmtMissionTimeLabel(missionEndMs);
 
   // Full mission span when wall labels match mission boundaries (e.g. 09:00→09:00 next day).
   if (
-    startTime === missionStartLabel &&
-    endTime === missionEndLabel &&
+    startLabel === missionStartLabel &&
+    endLabel === missionEndLabel &&
     Math.abs(durMin - (missionEndMs - missionStartMs) / 60_000) <= 1
   ) {
     return { startMs: missionStartMs, endMs: missionEndMs };
   }
 
   // Overnight slot ending at mission end (e.g. officer duty 21:00–09:00 on a 09:00→09:00 mission).
-  if (endTime === missionEndLabel && endMin <= startMin) {
+  if (endLabel === missionEndLabel && endMin <= startMin) {
     const candidateEnd = missionEndMs;
     const candidateStart = candidateEnd - durMin * 60_000;
     if (candidateStart >= missionStartMs) {
@@ -152,9 +197,7 @@ export function resolveSlotAbsoluteInterval(
     }
   }
 
-  const baseDate = new Date(missionStartsAt);
-  baseDate.setHours(0, 0, 0, 0);
-  const baseMs = baseDate.getTime();
+  const baseMs = localMissionMidnightMs(missionStartMs);
   const daySpan = Math.ceil((missionEndMs - missionStartMs) / 86_400_000) + 2;
 
   for (let dayOffset = -1; dayOffset <= daySpan; dayOffset++) {

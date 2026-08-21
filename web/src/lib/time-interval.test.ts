@@ -7,12 +7,26 @@ import type { MissionDay } from "@/lib/types";
 describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
   const startsAt = "2026-08-21T09:00:00+03:00";
   const endsAt = "2026-08-22T09:00:00+03:00";
+  /** As stored in DB after MissionEditor save (UTC Z). */
+  const startsAtUtc = "2026-08-21T06:00:00.000Z";
+  const endsAtUtc = "2026-08-22T06:00:00.000Z";
 
   it("Carmel 09:00–09:00 spans full mission window", () => {
     const iv = resolveSlotAbsoluteInterval(startsAt, endsAt, "09:00", "09:00");
     expect(iv).not.toBeNull();
     expect(iv!.startMs).toBe(Date.parse(startsAt));
     expect(iv!.endMs).toBe(Date.parse(endsAt));
+  });
+
+  it("works when mission ISO is UTC Z (Vercel server path)", () => {
+    expect(resolveSlotAbsoluteInterval(startsAtUtc, endsAtUtc, "09:00", "09:00")).toEqual({
+      startMs: Date.parse(startsAtUtc),
+      endMs: Date.parse(endsAtUtc),
+    });
+    const officer = resolveSlotAbsoluteInterval(startsAtUtc, endsAtUtc, "21:00", "09:00");
+    expect(officer).not.toBeNull();
+    expect(officer!.endMs).toBe(Date.parse(endsAtUtc));
+    expect(officer!.endMs - officer!.startMs).toBe(12 * 3_600_000);
   });
 
   it("officer duty 21:00–09:00 ends at mission end", () => {
@@ -68,6 +82,50 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
               seat_count: 1,
             },
           ],
+        },
+      ],
+      assignments: {},
+      scheduling_rules: {},
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+  });
+
+  it("passes validation with UTC mission bounds and stale slot ISO", () => {
+    const mission: MissionDay = {
+      id: "g2",
+      title: "utc",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: startsAtUtc,
+      ends_at: endsAtUtc,
+      status: "draft",
+      positions: [
+        {
+          id: "ca",
+          name: "כרמל א׳ (כוננות)",
+          kind: "standby_carmel_a",
+          same_room: true,
+          same_gender: true,
+          slots: [
+            {
+              id: "ca1",
+              start_time: "09:00",
+              end_time: "09:00",
+              seat_count: 3,
+              // Stale bounds from an old 20:00 mission — should fall back to wall resolution.
+              starts_at: "2026-08-20T17:00:00.000Z",
+              ends_at: "2026-08-21T17:00:00.000Z",
+            },
+          ],
+        },
+        {
+          id: "off",
+          name: "קצין תורן",
+          kind: "officer_duty",
+          slots: [{ id: "o1", start_time: "21:00", end_time: "09:00", seat_count: 1 }],
         },
       ],
       assignments: {},

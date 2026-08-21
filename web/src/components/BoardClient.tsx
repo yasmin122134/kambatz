@@ -16,6 +16,7 @@ import {
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
+import { boardStartFromMissionStart } from "@/lib/mission-templates";
 import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules, parseTimeMinutes } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
@@ -636,6 +637,15 @@ function ConstraintsPanel({
   );
 }
 
+function missionBoardStartMin(mission: MissionDay): number {
+  const fromMissionStart = parseTimeMinutes(
+    boardStartFromMissionStart(mission.starts_at),
+  );
+  if (fromMissionStart !== null) return fromMissionStart;
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  return parseTimeMinutes(rules.board_start) ?? 20 * 60;
+}
+
 const TIMELINE_CYCLE_MIN = 1440;
 const TIMELINE_HEIGHT_PX = 960;
 const TIMELINE_TICK_STEP_MIN = 120;
@@ -657,6 +667,7 @@ function durationToPx(durationMin: number): number {
 function GuardTimeline({
   mission,
   slots,
+  boardStartMin,
   personName,
   isAdmin,
   dutyOfficerNames,
@@ -673,6 +684,7 @@ function GuardTimeline({
 }: {
   mission: MissionDay;
   slots: FlatSlot[];
+  boardStartMin: number;
   personName: string;
   isAdmin: boolean;
   dutyOfficerNames?: string[];
@@ -694,8 +706,6 @@ function GuardTimeline({
   onCancelSwap: () => void;
 }) {
   const positions = mission.positions || [];
-  const rules = normalizeSchedulingRules(mission.scheduling_rules);
-  const boardStartMin = parseTimeMinutes(rules.board_start) ?? 20 * 60;
   const hourStepPx = TIMELINE_HEIGHT_PX / 24;
   const ticks = Array.from(
     { length: TIMELINE_CYCLE_MIN / TIMELINE_TICK_STEP_MIN + 1 },
@@ -804,13 +814,15 @@ function MissionPanel({
   ) => void;
   onCancelSwap: () => void;
 }) {
-  const slots = flattenMissionSlots(mission);
+  const boardStartMin = missionBoardStartMin(mission);
+  const slots = flattenMissionSlots(mission, boardStartMin);
 
   if (mission.mission_type === "guards") {
     return (
       <GuardTimeline
         mission={mission}
         slots={slots}
+        boardStartMin={boardStartMin}
         personName={personName}
         isAdmin={isAdmin}
         dutyOfficerNames={dutyOfficerNames}

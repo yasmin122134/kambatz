@@ -16,6 +16,7 @@ import {
   type StaffingProfile,
 } from "@/lib/staffing-profile";
 import {
+  fmtMissionTimeLabel,
   fmtTimeLabel,
   materializeSlotAbsoluteBounds,
   missionInterval,
@@ -54,11 +55,11 @@ function newSlot(start = "08:00", end = "10:00", seats = 1): MissionSlot {
   return { id: uid(), start_time: start, end_time: end, seat_count: seats };
 }
 
-/** HH:MM מתאריך ISO (שעון מקומי) */
+/** HH:MM מתאריך ISO — תמיד לפי שעון ישראל (גם בשרת UTC). */
 export function isoToTimeLabel(iso: string | undefined): string | null {
   if (!iso) return null;
   const ms = parseIsoMs(iso);
-  return ms === null ? null : fmtTimeLabel(ms);
+  return ms === null ? null : fmtMissionTimeLabel(ms);
 }
 
 /** חלון כוננות כרמל — מתחילת יום המשימה עד סופו */
