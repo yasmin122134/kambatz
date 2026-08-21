@@ -16,6 +16,7 @@ import {
   type BaseWorkSchedulingRules,
   type KitchenSchedulingRules,
 } from "@/lib/types";
+import { resolveSlotAbsoluteInterval } from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -38,6 +39,8 @@ export type FlatSlot = {
   wallStartMin: number;
   /** 0 = תאריך mission_date, 1 = למחרת (משמרת לפנות בוקר בסוף מחזור) */
   calendarDayOffset: number;
+  startAtMs: number;
+  endAtMs: number;
   /** אינדקס משמרת מטבח (0-based) */
   kitchenShiftIndex?: number;
   /** אינדקס חלון עב״ס (0-based) */
@@ -199,6 +202,17 @@ export function flattenMissionSlots(
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
       const isBaseWorkSlot = mission.mission_type === "base_work";
+      const abs = resolveSlotAbsoluteInterval(
+        mission.starts_at,
+        mission.ends_at,
+        slot.start_time,
+        slot.end_time,
+      );
+      const fallbackStartMs =
+        new Date(`${mission.mission_date}T${slot.start_time}:00`).getTime() +
+        (mission.mission_type === "guards" && startMin < t0 ? 86_400_000 : 0);
+      const startAtMs = abs?.startMs ?? fallbackStartMs;
+      const endAtMs = abs?.endMs ?? startAtMs + dur * 60_000;
       out.push({
         slotId: slot.id,
         positionId: pos.id,
@@ -212,12 +226,14 @@ export function flattenMissionSlots(
         timeLabel: timeLabel(slot.start_time, slot.end_time),
         seatCount: slot.seat_count,
         assignees,
-        sortKey: startMin,
+        sortKey: startAtMs,
         durationMinutes: dur,
         cyclicStart: cyclicPos(startMin, t0),
         wallStartMin: startMin,
         calendarDayOffset:
           mission.mission_type === "guards" && startMin < t0 ? 1 : 0,
+        startAtMs,
+        endAtMs,
         kitchenShiftIndex: isKitchenSlot ? kitchenIdx++ : undefined,
         baseWorkShiftIndex: isBaseWorkSlot ? baseWorkIdx++ : undefined,
       });

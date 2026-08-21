@@ -79,6 +79,8 @@ function flatSlot(
     cyclicStart: ((sh * 60 + sm - 20 * 60) % 1440 + 1440) % 1440,
     wallStartMin: sh * 60 + sm,
     calendarDayOffset: sh * 60 + sm < 20 * 60 ? 1 : 0,
+    startAtMs: new Date(`2026-01-15T${start}:00`).getTime(),
+    endAtMs: new Date(`2026-01-15T${start}:00`).getTime() + dur * 60_000,
   };
 }
 
@@ -190,6 +192,8 @@ describe("fairness candidate selection", () => {
             cyclicStart: 240,
             missionId: "m1",
             slotId: "hard",
+            startAtMs: new Date("2026-01-15T00:00:00").getTime(),
+            endAtMs: new Date("2026-01-15T04:00:00").getTime(),
           },
         ],
         "ב׳": [
@@ -198,6 +202,8 @@ describe("fairness candidate selection", () => {
             cyclicStart: 720,
             missionId: "m1",
             slotId: "easy",
+            startAtMs: new Date("2026-01-15T08:00:00").getTime(),
+            endAtMs: new Date("2026-01-15T12:00:00").getTime(),
           },
         ],
       },

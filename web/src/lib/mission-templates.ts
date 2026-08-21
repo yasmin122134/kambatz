@@ -3,7 +3,6 @@ import {
   buildGuardDayPositions,
   footPatrolSlotsValid,
   guardPositionHint,
-  guardShiftWindowsAligned,
   officerDutySlotsValid,
   rearVehicleSlotsValid,
   summarizeGuardSlots,
@@ -170,6 +169,7 @@ function guardSlotIdsUnique(positions: MissionPosition[]): boolean {
 export function missionTemplateComplete(
   missionType: MissionType,
   positions: MissionPosition[],
+  opts?: { startsAt?: string; endsAt?: string },
 ): boolean {
   if (!positions?.length) return false;
   if (missionType === "guards") {
@@ -191,14 +191,15 @@ export function missionTemplateComplete(
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
     const foot = positions.find((p) => p.name.includes("רגלי"));
     const officer = positions.find((p) => p.kind === "officer_duty");
+    const startsAt = opts?.startsAt ?? "2026-01-01T20:00:00";
+    const endsAt = opts?.endsAt ?? "2026-01-02T20:00:00";
     return (
       positions.length >= 12 &&
       required.every((n) => names.has(n)) &&
       guardSlotIdsUnique(positions) &&
-      (!rear || rearVehicleSlotsValid(rear.slots)) &&
-      (!foot || footPatrolSlotsValid(foot.slots)) &&
-      (!officer || officerDutySlotsValid(officer.slots)) &&
-      guardShiftWindowsAligned(positions)
+      (!rear || rearVehicleSlotsValid(rear.slots, "06:00", "18:00", startsAt, endsAt)) &&
+      (!foot || footPatrolSlotsValid(foot.slots, "06:00", "19:00", startsAt, endsAt)) &&
+      (!officer || officerDutySlotsValid(officer.slots))
     );
   }
   if (missionType === "kitchen") {
@@ -226,7 +227,7 @@ export function missionTemplateComplete(
 }
 
 export const STANDARD_GUARD_DAY_SUMMARY = [
-  "חילוף מסונכרן — רשת משמרות לפי עוגן 08:00; יום שלא מתחיל ב-08:00 מקבל משמרת פתיחה קצרה עד הגבול הבא",
+  "חילוף משמרות ~4 שעות מעוגן לתחילת יום המשימה (לא ל-08:00 גלובלי)",
   "משמרת פתיחה/סגירה קצרה — מסנכרנת לרשת 08:00 (למשל 09:00–10:00, 06:00–08:00, 08:00–09:00)",
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",

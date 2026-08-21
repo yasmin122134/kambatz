@@ -1,30 +1,63 @@
 import type { MissionPosition, MissionPositionKind, MissionSlot } from "@/lib/types";
+import {
+  debugFormatPositionSlots,
+  generatePositionSlots,
+  slotStructuralKey,
+  type GeneratedPositionSlot,
+} from "@/lib/guard-slot-generation";
+import {
+  constantStaffingProfile,
+  FOOT_PATROL_STAFFING_SUMMER,
+  FOOT_PATROL_STAFFING_WINTER,
+  getRequiredSeats,
+  getRequiredSeatsAtWallMinute,
+  REAR_GATE_STAFFING_SUMMER,
+  REAR_GATE_STAFFING_WINTER,
+  type StaffingProfile,
+} from "@/lib/staffing-profile";
+import {
+  fmtTimeLabel,
+  missionInterval,
+  parseIsoMs,
+  parseTimeMinutes,
+  resolveSlotAbsoluteInterval,
+  slotDurationMinutes,
+} from "@/lib/time-interval";
+
+export {
+  fmtTimeLabel as fmtTimeFromMs,
+  intervalsOverlap,
+  parseTimeMinutes,
+  slotDurationMinutes,
+} from "@/lib/time-interval";
+export {
+  debugFormatPositionSlots,
+  generatePositionSlots,
+  partitionInterval,
+} from "@/lib/guard-slot-generation";
+export {
+  getRequiredSeats,
+  getRequiredSeatsAtWallMinute,
+  type DailyStaffingRule,
+  type StaffingProfile,
+} from "@/lib/staffing-profile";
+
+/** @deprecated Mission-relative cadence is anchored to missionStart, not 08:00. */
+export const CANONICAL_GUARD_GRID_START = "08:00";
 
 function uid() {
   return crypto.randomUUID();
-}
-
-export function parseTimeMinutes(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
-  if (!m) return null;
-  return +m[1] * 60 + +m[2];
 }
 
 function newSlot(start = "08:00", end = "10:00", seats = 1): MissionSlot {
   return { id: uid(), start_time: start, end_time: end, seat_count: seats };
 }
 
-function fmtTime(minutes: number): string {
-  const m = ((minutes % 1440) + 1440) % 1440;
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-}
-
 /** HH:MM מתאריך ISO (שעון מקומי) */
 export function isoToTimeLabel(iso: string | undefined): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return null;
-  return fmtTime(d.getHours() * 60 + d.getMinutes());
+  const ms = parseIsoMs(iso);
+  return ms === null ? null : fmtTimeLabel(ms);
 }
 
 /** חלון כוננות כרמל — מתחילת יום המשימה עד סופו */
@@ -60,182 +93,8 @@ function newPosition(
   };
 }
 
-/** חלונות משמרת מאוחדים לכל העמדות — אותם זמני חילוף (כולל סנכרון בתחילת היום) */
+/** Legacy type — kept for callers that still reference window tuples. */
 export type GuardShiftWindow = { startMin: number; endMin: number };
-
-function addWallClockBounds(
-  bounds: Set<number>,
-  boardMin: number,
-  cycleEnd: number,
-  wallTime: string,
-  shiftMin?: number,
-): void {
-  const wall = parseTimeMinutes(wallTime);
-  if (wall === null) return;
-
-  const boardWall = wallMin(boardMin);
-  let firstAbs = boardMin - boardWall + wall;
-  if (firstAbs <= boardMin) firstAbs += 1440;
-
-  for (let anchor = firstAbs; anchor < cycleEnd; anchor += 1440) {
-    bounds.add(anchor);
-    if (shiftMin == null) continue;
-    for (let t = anchor - shiftMin; t > boardMin; t -= shiftMin) {
-      bounds.add(t);
-    }
-    for (let t = anchor + shiftMin; t < cycleEnd; t += shiftMin) {
-      bounds.add(t);
-    }
-  }
-}
-
-/** עוגן קבוע לרשת משמרות — יום שמתחיל ב-08:00 הוא המצב הייחוס */
-export const CANONICAL_GUARD_GRID_START = "08:00";
-
-function collectWallBoundsFromGrid(
-  boardMin: number,
-  cycleEnd: number,
-  shiftHours: number,
-  dayNightSplit: string,
-  extraWallBounds: string[],
-): Set<number> {
-  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
-  const bounds = new Set<number>([boardMin, cycleEnd]);
-
-  addWallClockBounds(bounds, boardMin, cycleEnd, dayNightSplit, shiftMin);
-  for (const wall of extraWallBounds) {
-    if (wall === dayNightSplit) continue;
-    addWallClockBounds(bounds, boardMin, cycleEnd, wall);
-  }
-
-  return bounds;
-}
-
-/** שעות שעון (wall) של כל גבולות הרשת ביום ייחוס שמתחיל ב-08:00 */
-function canonicalWallBoundaries(
-  shiftHours: number,
-  dayNightSplit: string,
-  extraWallBounds: string[],
-): number[] {
-  const refBoardMin = parseTimeMinutes(CANONICAL_GUARD_GRID_START) ?? 8 * 60;
-  const refEnd = refBoardMin + 1440;
-  const bounds = collectWallBoundsFromGrid(
-    refBoardMin,
-    refEnd,
-    shiftHours,
-    dayNightSplit,
-    extraWallBounds,
-  );
-
-  const walls = new Set<number>();
-  for (const abs of bounds) {
-    walls.add(wallMin(abs));
-  }
-  return [...walls];
-}
-
-export function buildUnifiedGuardShiftWindows(
-  boardStart: string,
-  cycleMin: number,
-  shiftHours: number,
-  dayNightSplit = "18:00",
-  extraWallBounds: string[] = [],
-): GuardShiftWindow[] {
-  if (!dayNightSplit && extraWallBounds.length === 0) {
-    return buildPureFourHourShiftWindows(boardStart, cycleMin, shiftHours);
-  }
-
-  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
-  const cycleEnd = boardMin + cycleMin;
-  const bounds = new Set<number>([boardMin, cycleEnd]);
-
-  // רשת הייחוס (08:00) — המשמרת הראשונה ממלאת עד הגבול הבא, ואז כולם מסונכרנים
-  const canonicalWalls = canonicalWallBoundaries(shiftHours, dayNightSplit, extraWallBounds);
-  const boardWall = wallMin(boardMin);
-
-  for (const wall of canonicalWalls) {
-    let abs = boardMin - boardWall + wall;
-    if (abs < boardMin) abs += 1440;
-    while (abs < cycleEnd) {
-      if (abs > boardMin && abs < cycleEnd) bounds.add(abs);
-      abs += 1440;
-    }
-  }
-
-  const sorted = [...bounds].sort((a, b) => a - b);
-  const windows: GuardShiftWindow[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (sorted[i + 1] > sorted[i]) {
-      windows.push({ startMin: sorted[i], endMin: sorted[i + 1] });
-    }
-  }
-  return windows;
-}
-
-/** רשת משמרות 4 שעות בלבד — עוגן 08:00, בלי פיצולי יום/לילה גלובליים */
-export function buildPureFourHourShiftWindows(
-  boardStart: string,
-  cycleMin: number,
-  shiftHours: number,
-): GuardShiftWindow[] {
-  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
-  const cycleEnd = boardMin + cycleMin;
-  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
-  const refStart = parseTimeMinutes(CANONICAL_GUARD_GRID_START) ?? 8 * 60;
-  const bounds = new Set<number>([boardMin, cycleEnd]);
-  const boardWall = wallMin(boardMin);
-
-  for (let step = 0; step < 1440; step += shiftMin) {
-    const wall = wallMin(refStart + step);
-    let abs = boardMin - boardWall + wall;
-    if (abs <= boardMin) abs += 1440;
-    while (abs < cycleEnd) {
-      if (abs > boardMin && abs < cycleEnd) bounds.add(abs);
-      abs += 1440;
-    }
-  }
-
-  const sorted = [...bounds].sort((a, b) => a - b);
-  const windows: GuardShiftWindow[] = [];
-  for (let i = 0; i < sorted.length - 1; i++) {
-    if (sorted[i + 1] > sorted[i]) {
-      windows.push({ startMin: sorted[i], endMin: sorted[i + 1] });
-    }
-  }
-  return windows;
-}
-
-/** פיצול חלון בודד בגבול שעון (לש״ג אחורי / רגלי בלבד) */
-function splitWindowsAtWallClock(
-  windows: GuardShiftWindow[],
-  wallClockMin: number,
-): GuardShiftWindow[] {
-  const out: GuardShiftWindow[] = [];
-  for (const w of windows) {
-    const ws = wallMin(w.startMin);
-    const we = wallMin(w.endMin);
-    if (we <= ws) {
-      out.push(w);
-      continue;
-    }
-    if (wallClockMin <= ws || wallClockMin >= we) {
-      out.push(w);
-      continue;
-    }
-    const splitAbs = w.startMin + (wallClockMin - ws);
-    if (splitAbs <= w.startMin || splitAbs >= w.endMin) {
-      out.push(w);
-      continue;
-    }
-    out.push({ startMin: w.startMin, endMin: splitAbs });
-    out.push({ startMin: splitAbs, endMin: w.endMin });
-  }
-  return out;
-}
-
-function wallMin(absMin: number): number {
-  return ((absMin % 1440) + 1440) % 1440;
-}
 
 /** דקות מעוגנות ל-board_start — 0 = תחילת יום השמירות */
 function cyclicMinutesFromBoard(startTime: string, boardStart: string): number {
@@ -256,26 +115,35 @@ export function sortSlotsByBoardCycle(
   });
 }
 
-function slotsFromWindows(
-  windows: GuardShiftWindow[],
-  seatsFor: (w: GuardShiftWindow) => number,
-  keepZeroSeats = false,
-  maxSlotMinutes?: number,
-  boardStart?: string,
-): MissionSlot[] {
-  const raw = windows
-    .map((w) => ({ w, seats: seatsFor(w) }))
-    .filter((x) => keepZeroSeats || x.seats > 0)
-    .map(({ w, seats }) => newSlot(fmtTime(w.startMin), fmtTime(w.endMin), seats));
-  if (!maxSlotMinutes) {
-    return boardStart ? sortSlotsByBoardCycle(raw, boardStart) : raw;
+/**
+ * @deprecated Use generatePositionSlots with missionStartMs instead.
+ * Returns nominal 4h windows relative to mission start for backward-compatible tests.
+ */
+export function buildPureFourHourShiftWindows(
+  boardStart: string,
+  cycleMin: number,
+  shiftHours: number,
+): GuardShiftWindow[] {
+  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
+  const cycleEnd = boardMin + cycleMin;
+  const shiftMin = Math.max(60, Math.round(shiftHours * 60));
+  const bounds = new Set<number>([boardMin, cycleEnd]);
+  for (let t = boardMin + shiftMin; t < cycleEnd; t += shiftMin) {
+    bounds.add(t);
   }
-  return mergeAdjacentGuardSlots(raw, maxSlotMinutes, boardStart);
+  const sorted = [...bounds].sort((a, b) => a - b);
+  const windows: GuardShiftWindow[] = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    if (sorted[i + 1] > sorted[i]) {
+      windows.push({ startMin: sorted[i], endMin: sorted[i + 1] });
+    }
+  }
+  return windows;
 }
 
 /**
  * מאחד משמרות רצופות עם אותו מספר מאיישים כשסך הזמן ≤ maxSlotMinutes.
- * למשל 06:00–08:00 + 08:00–09:00 (סולו) → 06:00–09:00.
+ * Used when preserving legacy slot IDs after regeneration.
  */
 export function mergeAdjacentGuardSlots(
   slots: MissionSlot[],
@@ -322,96 +190,23 @@ export function mergeAdjacentGuardSlots(
   return out;
 }
 
-function slotDurationMinutes(start: string, end: string): number {
-  const a = parseTimeMinutes(start);
-  const b = parseTimeMinutes(end);
-  if (a === null || b === null) return 0;
-  if (b > a) return b - a;
-  if (b === a) return 1440;
-  return 1440 - a + b;
-}
-
-/** חלון שלם בתוך טווח שעון (ללא חציית חצות) */
-function windowFullyInsideWallRange(
-  w: GuardShiftWindow,
-  rangeStartMin: number,
-  rangeEndMin: number,
-): boolean {
-  const start = wallMin(w.startMin);
-  const end = wallMin(w.endMin);
-  if (end <= start) return false;
-  return start >= rangeStartMin && end <= rangeEndMin;
-}
-
-function rearSeatsForWindow(
-  w: GuardShiftWindow,
-  dayStartMin: number,
-  dayEndMin: number,
-): number {
-  if (windowFullyInsideWallRange(w, dayStartMin, dayEndMin)) return 1;
-  return 2;
-}
-
-function footSeatsForWindow(
-  w: GuardShiftWindow,
-  dayStartMin: number,
-  dayEndMin: number,
-): number {
-  return windowFullyInsideWallRange(w, dayStartMin, dayEndMin) ? 1 : 0;
-}
-
-function rotatingGuardSlots(
-  windows: GuardShiftWindow[],
-  seatsFor: (w: GuardShiftWindow) => number,
-): MissionSlot[] {
-  // כל העמדות חולקות את אותם חלונות — כולל משמרות קצרות לסנכרון
-  return slotsFromWindows(windows, seatsFor, true);
-}
-
-function rearVehicleSlotsFromWindows(
-  windows: GuardShiftWindow[],
-  dayStart: string,
-  dayEnd: string,
-  maxSlotMinutes?: number,
-  boardStart?: string,
-): MissionSlot[] {
-  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-  const split = splitWindowsAtWallClock(windows, dayEndMin);
-  return slotsFromWindows(
-    split,
-    (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
-    true,
-    maxSlotMinutes,
-    boardStart,
-  );
-}
-
-function footPatrolSlotsFromWindows(
-  windows: GuardShiftWindow[],
-  dayStart: string,
-  dayEnd: string,
-  maxSlotMinutes?: number,
-  boardStart?: string,
-): MissionSlot[] {
-  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
-  const split = splitWindowsAtWallClock(windows, dayEndMin);
-  return slotsFromWindows(
-    split,
-    (w) => footSeatsForWindow(w, dayStartMin, dayEndMin),
-    true,
-    maxSlotMinutes,
-    boardStart,
-  );
-}
-
 /** קצין תורן — שתי משמרות בלבד, חצי מחזור יום השמירות כל אחת */
-function officerDutySlots(boardStart: string, cycleMin: number): MissionSlot[] {
-  const boardMin = parseTimeMinutes(boardStart) ?? 20 * 60;
-  const mid = boardMin + Math.floor(cycleMin / 2);
-  const end = boardMin + cycleMin;
-  return [newSlot(fmtTime(boardMin), fmtTime(mid), 1), newSlot(fmtTime(mid), fmtTime(end), 1)];
+function officerDutySlots(missionStartMs: number, missionEndMs: number): MissionSlot[] {
+  const mid = missionStartMs + Math.floor((missionEndMs - missionStartMs) / 2);
+  return [
+    {
+      id: uid(),
+      start_time: fmtTimeLabel(missionStartMs),
+      end_time: fmtTimeLabel(mid),
+      seat_count: 1,
+    },
+    {
+      id: uid(),
+      start_time: fmtTimeLabel(mid),
+      end_time: fmtTimeLabel(missionEndMs),
+      seat_count: 1,
+    },
+  ];
 }
 
 /** האם מבנה קצין תורן תקין (בדיוק 2 משמרות) */
@@ -419,24 +214,12 @@ export function officerDutySlotsValid(slots: MissionSlot[]): boolean {
   return slots.length === 2 && slots.every((s) => s.seat_count >= 1);
 }
 
-/** כל עמדות השמירה המסתובבות (מלבד כוננות/קצין תורן) חולקות אותם חלונות זמן */
-export function guardShiftWindowsAligned(positions: MissionPosition[]): boolean {
-  const keys = (slots: MissionSlot[]) =>
-    slots.map((s) => `${s.start_time}-${s.end_time}`).join("|");
-
-  const rotating = positions.filter(
-    (p) =>
-      p.kind !== "standby_carmel_a" &&
-      p.kind !== "standby_carmel_b" &&
-      p.kind !== "officer_duty" &&
-      !p.name.includes("כוננות") &&
-      !p.name.includes("רכב אחורי") &&
-      !p.name.includes("רגלי"),
-  );
-  if (rotating.length < 2) return true;
-
-  const ref = keys(rotating[0].slots);
-  return rotating.every((p) => keys(p.slots) === ref);
+/**
+ * @deprecated Positions may legitimately have different slot boundaries (e.g. foot patrol vs front gate).
+ * Always returns true — kept so older callers do not break.
+ */
+export function guardShiftWindowsAligned(_positions: MissionPosition[]): boolean {
+  return true;
 }
 
 function guardPosition(
@@ -449,162 +232,97 @@ function guardPosition(
 }
 
 function cycleMinutesFromMission(startsAt?: string, endsAt?: string): number {
-  if (startsAt && endsAt) {
-    const startMs = new Date(startsAt).getTime();
-    const endMs = new Date(endsAt).getTime();
-    if (!Number.isNaN(startMs) && !Number.isNaN(endMs) && endMs > startMs) {
-      return Math.max(60, Math.round((endMs - startMs) / 60000));
-    }
-  }
-  return 1440;
+  const interval = startsAt && endsAt ? missionInterval(startsAt, endsAt) : null;
+  if (!interval) return 1440;
+  return Math.max(60, Math.round((interval.endMs - interval.startMs) / 60_000));
 }
 
-function isDaytime(clockMin: number, dayStartMin: number, dayEndMin: number): boolean {
-  return clockMin >= dayStartMin && clockMin < dayEndMin;
-}
-
-/** חלונות יום/לילה בתוך מחזור יום השמירות (מתחילת board_start) */
-export function dayNightSegmentsInCycle(
-  boardMin: number,
-  cycleMin: number,
-  dayStartMin: number,
-  dayEndMin: number,
-  daySeats: number,
-  nightSeats: number,
-): Array<{ startMin: number; endMin: number; seats: number }> {
-  if (cycleMin <= 0) return [];
-
-  const segments: Array<{ startMin: number; endMin: number; seats: number }> = [];
-  let segStart = 0;
-  let segSeats = isDaytime((boardMin + 0) % 1440, dayStartMin, dayEndMin) ? daySeats : nightSeats;
-
-  for (let offset = 1; offset <= cycleMin; offset++) {
-    const atEnd = offset === cycleMin;
-    const nextSeats = atEnd
-      ? null
-      : isDaytime((boardMin + offset) % 1440, dayStartMin, dayEndMin)
-        ? daySeats
-        : nightSeats;
-
-    if (atEnd || nextSeats !== segSeats) {
-      if (segSeats > 0) {
-        segments.push({
-          startMin: boardMin + segStart,
-          endMin: boardMin + offset,
-          seats: segSeats,
-        });
-      }
-      if (!atEnd && nextSeats != null) {
-        segStart = offset;
-        segSeats = nextSeats;
-      }
-    }
-  }
-
-  return segments;
-}
-
-function slotCrossesWallBoundary(
-  startMin: number,
-  endMin: number,
-  boundaryMin: number,
+function slotsCrossStaffingBoundary(
+  profile: StaffingProfile,
+  missionStartsAt: string,
+  missionEndsAt: string,
+  slot: MissionSlot,
 ): boolean {
-  if (endMin <= startMin || endMin > 1440) return false;
-  return startMin < boundaryMin && endMin > boundaryMin;
+  const abs = resolveSlotAbsoluteInterval(
+    missionStartsAt,
+    missionEndsAt,
+    slot.start_time,
+    slot.end_time,
+  );
+  if (!abs) return true;
+  const stepMs = 60_000;
+  let prev = getRequiredSeats(profile, abs.startMs);
+  for (let t = abs.startMs + stepMs; t < abs.endMs; t += stepMs) {
+    const cur = getRequiredSeats(profile, t);
+    if (cur !== prev) return true;
+    prev = cur;
+  }
+  return false;
 }
 
-const REAR_VEHICLE_DAY_START = "06:00";
-const REAR_VEHICLE_DAY_END = "18:00";
-
-function slotInsideWallRange(
-  startMin: number,
-  endMin: number,
-  rangeStartMin: number,
-  rangeEndMin: number,
+function slotsMatchStaffingProfile(
+  profile: StaffingProfile,
+  missionStartsAt: string,
+  missionEndsAt: string,
+  slots: MissionSlot[],
+  allowZeroSeatSlots: boolean,
 ): boolean {
-  if (endMin <= startMin) return false;
-  if (endMin > 1440) return false;
-  return startMin >= rangeStartMin && endMin <= rangeEndMin;
+  for (const slot of slots) {
+    if (!allowZeroSeatSlots && slot.seat_count <= 0) return false;
+    if (allowZeroSeatSlots && slot.seat_count === 0) continue;
+
+    const abs = resolveSlotAbsoluteInterval(
+      missionStartsAt,
+      missionEndsAt,
+      slot.start_time,
+      slot.end_time,
+    );
+    if (!abs) return false;
+    if (slotsCrossStaffingBoundary(profile, missionStartsAt, missionEndsAt, slot)) {
+      return false;
+    }
+
+    const midMs = abs.startMs + (abs.endMs - abs.startMs) / 2;
+    if (getRequiredSeats(profile, midMs) !== slot.seat_count) return false;
+  }
+  return true;
 }
 
 /** האם משמרות ש״ג אחורי תקינות — 1 ב־06–18, 2 בכל שאר השעות, ללא חציית גבולות */
 export function rearVehicleSlotsValid(
   slots: MissionSlot[],
-  dayStart = REAR_VEHICLE_DAY_START,
-  dayEnd = REAR_VEHICLE_DAY_END,
+  dayStart = "06:00",
+  dayEnd = "18:00",
+  missionStartsAt = "2026-01-01T20:00:00",
+  missionEndsAt = "2026-01-02T20:00:00",
 ): boolean {
-  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(dayEnd) ?? 18 * 60;
-
-  for (const slot of slots) {
-    const start = parseTimeMinutes(slot.start_time);
-    if (start === null) return false;
-    const dur = slotDurationMinutes(slot.start_time, slot.end_time);
-    if (dur <= 0) return false;
-
-    if (dur >= 1440 || start + dur > 1440) {
-      if (slot.seat_count !== 2) return false;
-      continue;
-    }
-
-    const end = start + dur;
-    if (
-      slotCrossesWallBoundary(start, end, dayStartMin) ||
-      slotCrossesWallBoundary(start, end, dayEndMin)
-    ) {
-      return false;
-    }
-
-    const inDay = slotInsideWallRange(start, end, dayStartMin, dayEndMin);
-    if (inDay) {
-      if (slot.seat_count !== 1) return false;
-    } else if (slot.seat_count !== 2) {
-      return false;
-    }
-  }
-
-  return true;
+  const profile: StaffingProfile =
+    dayStart === "05:00"
+      ? REAR_GATE_STAFFING_WINTER
+      : [
+          { startTime: dayStart, endTime: dayEnd, seats: 1 },
+          { startTime: dayEnd, endTime: dayStart, seats: 2 },
+        ];
+  return slotsMatchStaffingProfile(profile, missionStartsAt, missionEndsAt, slots, false);
 }
 
-const FOOT_PATROL_DAY_START = "06:00";
-const FOOT_PATROL_DAY_END = "19:00";
-
-/** האם משמרות ש״ג רגלי תקינות — 1 ב־06–19, 0 בכל שאר השעות, ללא חציית גבולות */
+/** האם משמרות ש״ג רגלי תקינות — 1 ב־06–19, ללא משמרות מחוץ לטווח */
 export function footPatrolSlotsValid(
   slots: MissionSlot[],
-  dayStart = FOOT_PATROL_DAY_START,
-  dayEnd = FOOT_PATROL_DAY_END,
+  dayStart = "06:00",
+  dayEnd = "19:00",
+  missionStartsAt = "2026-01-01T20:00:00",
+  missionEndsAt = "2026-01-02T20:00:00",
 ): boolean {
-  const dayStartMin = parseTimeMinutes(dayStart) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(dayEnd) ?? 19 * 60;
-
-  for (const slot of slots) {
-    const start = parseTimeMinutes(slot.start_time);
-    if (start === null) return false;
-    const dur = slotDurationMinutes(slot.start_time, slot.end_time);
-    if (dur <= 0) return false;
-    if (dur >= 1440 || start + dur > 1440) {
-      if (slot.seat_count !== 0) return false;
-      continue;
-    }
-
-    const end = start + dur;
-    if (
-      slotCrossesWallBoundary(start, end, dayStartMin) ||
-      slotCrossesWallBoundary(start, end, dayEndMin)
-    ) {
-      return false;
-    }
-
-    const inFootDay = slotInsideWallRange(start, end, dayStartMin, dayEndMin);
-    if (inFootDay) {
-      if (slot.seat_count !== 1) return false;
-    } else if (slot.seat_count !== 0) {
-      return false;
-    }
-  }
-
-  return true;
+  const profile: StaffingProfile =
+    dayStart === "05:00"
+      ? FOOT_PATROL_STAFFING_WINTER
+      : [
+          { startTime: dayStart, endTime: dayEnd, seats: 1 },
+          { startTime: dayEnd, endTime: dayStart, seats: 0 },
+        ];
+  if (slots.some((s) => s.seat_count <= 0)) return false;
+  return slotsMatchStaffingProfile(profile, missionStartsAt, missionEndsAt, slots, false);
 }
 
 export type BuildGuardDayOptions = {
@@ -618,44 +336,73 @@ export type BuildGuardDayOptions = {
 
 type GuardDayContext = {
   board: string;
-  cycleMin: number;
-  shift: number;
-  day: readonly [string, string];
-  footDay: readonly [string, string];
+  missionStartMs: number;
+  missionEndMs: number;
+  shiftMin: number;
   season: "summer" | "winter";
-  missionStartsAt?: string;
-  missionEndsAt?: string;
+  missionStartsAt: string;
+  missionEndsAt: string;
   carmelSeats: number;
+  rearProfile: StaffingProfile;
+  footProfile: StaffingProfile;
 };
 
 function resolveGuardDayContext(options?: BuildGuardDayOptions): GuardDayContext {
+  const missionStartsAt =
+    options?.missionStartsAt ??
+    (options?.boardStart
+      ? `2026-01-01T${options.boardStart}:00`
+      : "2026-01-01T20:00:00");
+  const missionEndsAt =
+    options?.missionEndsAt ??
+    (() => {
+      const startMs = parseIsoMs(missionStartsAt) ?? Date.parse("2026-01-01T20:00:00");
+      return new Date(startMs + 86_400_000).toISOString();
+    })();
+
+  const interval = missionInterval(missionStartsAt, missionEndsAt);
+  const missionStartMs = interval?.startMs ?? parseIsoMs(missionStartsAt) ?? 0;
+  const missionEndMs =
+    interval?.endMs ?? missionStartMs + cycleMinutesFromMission(missionStartsAt, missionEndsAt) * 60_000;
+
   const shift = options?.shiftHours ?? 4;
-  const board = options?.boardStart ?? isoToTimeLabel(options?.missionStartsAt) ?? "20:00";
-  const cycleMin = cycleMinutesFromMission(options?.missionStartsAt, options?.missionEndsAt);
-  const day =
-    options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "18:00"] as const);
-  const footDay =
-    options?.season === "winter" ? (["05:00", "17:00"] as const) : (["06:00", "19:00"] as const);
+  const board = options?.boardStart ?? isoToTimeLabel(missionStartsAt) ?? "20:00";
+  const season = options?.season ?? "summer";
+
   return {
     board,
-    cycleMin,
-    shift,
-    day,
-    footDay,
-    season: options?.season ?? "summer",
-    missionStartsAt: options?.missionStartsAt,
-    missionEndsAt: options?.missionEndsAt,
+    missionStartMs,
+    missionEndMs,
+    shiftMin: Math.max(60, Math.round(shift * 60)),
+    season,
+    missionStartsAt,
+    missionEndsAt,
     carmelSeats: options?.carmelSeats ?? 3,
+    rearProfile: season === "winter" ? REAR_GATE_STAFFING_WINTER : REAR_GATE_STAFFING_SUMMER,
+    footProfile: season === "winter" ? FOOT_PATROL_STAFFING_WINTER : FOOT_PATROL_STAFFING_SUMMER,
   };
 }
 
-function slotWindowKey(slot: Pick<MissionSlot, "start_time" | "end_time">): string {
-  return `${slot.start_time}-${slot.end_time}`;
+function slotWindowKey(slot: Pick<MissionSlot, "start_time" | "end_time" | "seat_count">): string {
+  return `${slot.start_time}-${slot.end_time}-${slot.seat_count}`;
 }
 
-/** רשת משמרות מאוחדת — 4 שעות מעוגן 08:00; פיצולי יום/לילה רק לש״ג אחורי/רגלי */
-function buildGuardDayWindows(ctx: GuardDayContext): GuardShiftWindow[] {
-  return buildPureFourHourShiftWindows(ctx.board, ctx.cycleMin, ctx.shift);
+function generatedSlotsToMissionSlots(
+  positionId: string,
+  generated: GeneratedPositionSlot[],
+  boardStart: string,
+): MissionSlot[] {
+  const slots = generated.map((g) => ({
+    id: uid(),
+    start_time: fmtTimeLabel(g.startMs),
+    end_time: fmtTimeLabel(g.endMs),
+    seat_count: g.requiredSeats,
+    _key: slotStructuralKey(positionId, g.startMs, g.endMs),
+  }));
+  return sortSlotsByBoardCycle(
+    slots.map(({ _key, ...s }) => s),
+    boardStart,
+  );
 }
 
 function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
@@ -669,7 +416,11 @@ function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): Miss
       return { ...slot, id: exact.id };
     }
     const sameStart = prev.find(
-      (p) => p.start_time === slot.start_time && !usedPrevIds.has(p.id),
+      (p) =>
+        p.start_time === slot.start_time &&
+        p.end_time === slot.end_time &&
+        p.seat_count === slot.seat_count &&
+        !usedPrevIds.has(p.id),
     );
     if (sameStart) {
       usedPrevIds.add(sameStart.id);
@@ -679,7 +430,6 @@ function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): Miss
   });
 }
 
-/** כל משמרת חייבת מזהה ייחודי — כרמל א׳/ב׳ לא יכולים לשתף slot.id */
 function ensureUniqueSlotIds(positions: MissionPosition[]): MissionPosition[] {
   const used = new Set<string>();
   return positions.map((pos) => ({
@@ -696,58 +446,42 @@ function ensureUniqueSlotIds(positions: MissionPosition[]): MissionPosition[] {
   }));
 }
 
-function guardSlotsForPosition(
+function staffingProfileForPosition(
   pos: MissionPosition,
-  windows: GuardShiftWindow[],
   ctx: GuardDayContext,
-): MissionSlot[] | null {
-  const dayStartMin = parseTimeMinutes(ctx.day[0]) ?? 6 * 60;
-  const dayEndMin = parseTimeMinutes(ctx.day[1]) ?? 18 * 60;
-  const footStartMin = parseTimeMinutes(ctx.footDay[0]) ?? 6 * 60;
-  const footEndMin = parseTimeMinutes(ctx.footDay[1]) ?? 19 * 60;
-  const maxMin = Math.round(ctx.shift * 60);
-
-  if (pos.kind === "officer_duty") {
-    return officerDutySlots(ctx.board, ctx.cycleMin);
-  }
-  if (pos.name.includes("רכב אחורי")) {
-    const split = splitWindowsAtWallClock(windows, dayEndMin);
-    return slotsFromWindows(
-      split,
-      (w) => rearSeatsForWindow(w, dayStartMin, dayEndMin),
-      true,
-      maxMin,
-      ctx.board,
-    );
-  }
-  if (pos.name.includes("רגלי")) {
-    const split = splitWindowsAtWallClock(windows, footEndMin);
-    return slotsFromWindows(
-      split,
-      (w) => footSeatsForWindow(w, footStartMin, footEndMin),
-      true,
-      maxMin,
-      ctx.board,
-    );
-  }
-  if (pos.name.includes("רכב קדמי")) {
-    return slotsFromWindows(windows, () => 2, true, maxMin, ctx.board);
-  }
-  if (pos.kind === "duty") {
-    return slotsFromWindows(windows, () => 3, true, maxMin, ctx.board);
-  }
-  return slotsFromWindows(windows, () => 1, true, maxMin, ctx.board);
+): StaffingProfile | null {
+  if (pos.kind === "officer_duty") return null;
+  if (pos.name.includes("רכב אחורי")) return ctx.rearProfile;
+  if (pos.name.includes("רגלי")) return ctx.footProfile;
+  if (pos.name.includes("רכב קדמי")) return constantStaffingProfile(2);
+  if (pos.kind === "duty") return constantStaffingProfile(3);
+  return constantStaffingProfile(1);
 }
 
-/** מסנכרן חלונות משמרת לכל העמדות — רשת 4 שעות; פיצול יום/לילה רק לש״ג אחורי/רגלי. */
+function guardSlotsForPosition(pos: MissionPosition, ctx: GuardDayContext): MissionSlot[] | null {
+  if (pos.kind === "officer_duty") {
+    return officerDutySlots(ctx.missionStartMs, ctx.missionEndMs);
+  }
+
+  const profile = staffingProfileForPosition(pos, ctx);
+  if (!profile) return null;
+
+  const generated = generatePositionSlots({
+    missionStartMs: ctx.missionStartMs,
+    missionEndMs: ctx.missionEndMs,
+    nominalShiftDurationMin: ctx.shiftMin,
+    staffingProfile: profile,
+  });
+
+  return generatedSlotsToMissionSlots(pos.id, generated, ctx.board);
+}
+
+/** מסנכרן חלונות משמרת — כל עמדה מייצרת משמרות משלה לפי פרופיל כיסוי. */
 export function syncGuardShiftSlots(
   positions: MissionPosition[],
   options?: BuildGuardDayOptions,
 ): MissionPosition[] {
   const ctx = resolveGuardDayContext(options);
-  const windows = buildGuardDayWindows(ctx);
-
-  const maxMin = Math.round(ctx.shift * 60);
 
   return ensureUniqueSlotIds(
     positions.map((pos) => {
@@ -761,15 +495,9 @@ export function syncGuardShiftSlots(
         return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
       }
 
-      if (pos.kind === "officer_duty") {
-        const next = guardSlotsForPosition(pos, windows, ctx);
-        return next ? { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) } : pos;
-      }
-
-      const next = guardSlotsForPosition(pos, windows, ctx);
+      const next = guardSlotsForPosition(pos, ctx);
       if (!next) return pos;
-      const synced = mergeSlotsPreservingIds(pos.slots, next);
-      return { ...pos, slots: mergeAdjacentGuardSlots(synced, maxMin, ctx.board) };
+      return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
     }),
   );
 }
@@ -777,60 +505,30 @@ export function syncGuardShiftSlots(
 /** מערך שמירות סטנדרטי — כל העמדות לפי הפקודה */
 export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
   const ctx = resolveGuardDayContext(options);
-  const windows = buildGuardDayWindows(ctx);
-  const maxMin = Math.round(ctx.shift * 60);
-  const fixedSeats = (seats: number) =>
-    slotsFromWindows(windows, () => seats, true, maxMin, ctx.board);
 
   const positions = [
     guardPosition(
       "כרמל א׳ (כוננות)",
-      [
-        carmelSlotFromMission(
-          ctx.missionStartsAt,
-          ctx.missionEndsAt,
-          ctx.board,
-          ctx.carmelSeats,
-        ),
-      ],
+      [carmelSlotFromMission(ctx.missionStartsAt, ctx.missionEndsAt, ctx.board, ctx.carmelSeats)],
       "standby_carmel_a",
-      {
-        same_room: true,
-        same_gender: true,
-      },
+      { same_room: true, same_gender: true },
     ),
     guardPosition(
       "כרמל ב׳ (כוננות)",
-      [
-        carmelSlotFromMission(
-          ctx.missionStartsAt,
-          ctx.missionEndsAt,
-          ctx.board,
-          ctx.carmelSeats,
-        ),
-      ],
+      [carmelSlotFromMission(ctx.missionStartsAt, ctx.missionEndsAt, ctx.board, ctx.carmelSeats)],
       "standby_carmel_b",
-      {
-        same_room: true,
-        same_gender: true,
-      },
+      { same_room: true, same_gender: true },
     ),
-    guardPosition(
-      "ש״ג רכב אחורי",
-      rearVehicleSlotsFromWindows(windows, ctx.day[0], ctx.day[1], maxMin, ctx.board),
-    ),
-    guardPosition("ש״ג רכב קדמי", fixedSeats(2)),
-    guardPosition("פטל", fixedSeats(1)),
-    guardPosition("תצפיתן", fixedSeats(1)),
-    guardPosition(
-      "ש״ג רגלי",
-      footPatrolSlotsFromWindows(windows, ctx.footDay[0], ctx.footDay[1], maxMin, ctx.board),
-    ),
-    guardPosition("ימ״ח", fixedSeats(1)),
-    guardPosition("נשקייה", fixedSeats(1)),
-    guardPosition("בונקר", fixedSeats(1)),
-    guardPosition("כוח עתודה", fixedSeats(3), "duty"),
-    guardPosition("קצין תורן", officerDutySlots(ctx.board, ctx.cycleMin), "officer_duty"),
+    guardPosition("ש״ג רכב אחורי", []),
+    guardPosition("ש״ג רכב קדמי", []),
+    guardPosition("פטל", []),
+    guardPosition("תצפיתן", []),
+    guardPosition("ש״ג רגלי", []),
+    guardPosition("ימ״ח", []),
+    guardPosition("נשקייה", []),
+    guardPosition("בונקר", []),
+    guardPosition("כוח עתודה", [], "duty"),
+    guardPosition("קצין תורן", [], "officer_duty"),
   ];
 
   return syncGuardShiftSlots(positions, options);
@@ -858,16 +556,16 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       break;
   }
   if (pos.name.includes("רכב אחורי")) {
-    return "בדיוק 1 שומר 06:00–18:00, בדיוק 2 בכל שאר השעות — אותם זמני חילוף כמו שאר העמדות (כולל משמרות קצרות לסנכרון).";
+    return "בדיוק 1 שומר 06:00–18:00, בדיוק 2 בכל שאר השעות. חלונות משמרת נקבעים לפי פרופיל הכיסוי.";
   }
   if (pos.name.includes("רכב קדמי")) {
-    return "2 שומרים בכל משמרת — חילוף מסונכרן עם כל העמדות.";
+    return "2 שומרים בכל משמרת — משמרות ~4 שעות מעוגנות לתחילת יום המשימה.";
   }
   if (pos.name.includes("רגלי")) {
-    return "בדיוק 1 שומר 06:00–19:00, 0 בכל שאר השעות — אותם זמני חילוף כמו שאר העמדות (משמרות לילה עם 0 מאיישים לסנכרון).";
+    return "בדיוק 1 שומר 06:00–19:00. אין משמרות מחוץ לשעות הפעילות.";
   }
   if (["פטל", "תצפיתן", "ימ״ח", "נשקייה", "בונקר"].some((n) => pos.name.includes(n))) {
-    return "משמרות מסתובבות — אותם זמני חילוף בכל העמדות.";
+    return "משמרות מסתובבות ~4 שעות מעוגנות לתחילת יום המשימה.";
   }
   return null;
 }
@@ -895,5 +593,19 @@ export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
   { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (3)" },
-  { bucket: "kitchen", label: "מטבח", default: 0.1, examples: "35 למשמרת" },
+  { bucket: "kitchen", label: "מטבch", default: 0.1, examples: "35 למשמרת" },
 ] as const;
+
+/** @deprecated Unused — unified grid removed. */
+export function buildUnifiedGuardShiftWindows(
+  boardStart: string,
+  cycleMin: number,
+  shiftHours: number,
+): GuardShiftWindow[] {
+  return buildPureFourHourShiftWindows(boardStart, cycleMin, shiftHours);
+}
+
+/** @deprecated Unused — replaced by staffing-profile segments. */
+export function dayNightSegmentsInCycle(): Array<{ startMin: number; endMin: number; seats: number }> {
+  return [];
+}

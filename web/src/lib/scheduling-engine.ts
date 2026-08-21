@@ -20,6 +20,10 @@ import {
 } from "@/lib/mission-utils";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import { missionsOverlapCompatible } from "@/lib/standby-compat";
+import {
+  intervalsConflictWithGap,
+  intervalsOverlap,
+} from "@/lib/time-interval";
 import type {
   FairnessRules,
   Issue,
@@ -34,6 +38,8 @@ type BusyBlock = BurdenTimelineBlock & {
   cyclicStart: number;
   slotId: string;
   missionId: string;
+  startAtMs: number;
+  endAtMs: number;
 };
 
 function busyToBurdenBlocks(blocks: BusyBlock[]): BurdenTimelineBlock[] {
@@ -188,6 +194,14 @@ function restOk(
   return 1440 - worked - slot.durationMinutes >= restMin;
 }
 
+function slotInterval(slot: FlatSlot): { startMs: number; endMs: number } {
+  return { startMs: slot.startAtMs, endMs: slot.endAtMs };
+}
+
+function blockInterval(block: BusyBlock): { startMs: number; endMs: number } {
+  return { startMs: block.startAtMs, endMs: block.endAtMs };
+}
+
 function overlapsSlot(
   personName: string,
   slot: FlatSlot,
@@ -196,10 +210,10 @@ function overlapsSlot(
   ignoreSlotId?: string,
 ): boolean {
   const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+  const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    // כמה מאיישים באותה משמרת — לא נחשב חפיפה
     if (b.slotId === slot.slotId) continue;
     if (
       missionsOverlapCompatible(
@@ -212,9 +226,7 @@ function overlapsSlot(
       continue;
     }
 
-    const crossType =
-      slot.missionType !== b.missionType &&
-      slot.calendarDayOffset === b.calendarDayOffset;
+    const blockIv = blockInterval(b);
     const extraGap = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
@@ -224,22 +236,9 @@ function overlapsSlot(
       ? gapMin
       : 0;
 
-    if (crossType) {
-      if (
-        segmentsConflictWithGap(
-          wallSegments(slot.wallStartMin, slot.durationMinutes),
-          wallSegments(b.wallStartMin, b.durationMinutes),
-          extraGap,
-        )
-      ) {
-        return true;
-      }
-      continue;
-    }
-
-    if (
-      cyclicOverlap(b.cyclicStart, b.durationMinutes, slot.cyclicStart, slot.durationMinutes)
-    ) {
+    if (extraGap > 0) {
+      if (intervalsConflictWithGap(slotIv, blockIv, extraGap)) return true;
+    } else if (intervalsOverlap(slotIv, blockIv)) {
       return true;
     }
   }
@@ -406,6 +405,8 @@ export function placePerson(
     endTime: slot.endTime,
     slotId: slot.slotId,
     missionId,
+    startAtMs: slot.startAtMs,
+    endAtMs: slot.endAtMs,
   };
   tracker.busy[personName] = [...(tracker.busy[personName] || []), block];
   if (isGuardKind(slot.positionKind)) {
@@ -676,6 +677,7 @@ function overlapAssignmentWarning(
   scheduling: MissionSchedulingRules,
 ): string | null {
   const gapMin = scheduling.duty_guard_gap_minutes ?? 30;
+  const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
@@ -690,37 +692,29 @@ function overlapAssignmentWarning(
       continue;
     }
 
-    const crossType =
-      slot.missionType !== b.missionType &&
-      slot.calendarDayOffset === b.calendarDayOffset;
+    const blockIv = blockInterval(b);
     const dutyGuardGap = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
       b.positionKind,
       b.missionType,
     );
+    const extraGap = dutyGuardGap ? gapMin : 0;
 
-    if (crossType) {
-      const segsA = wallSegments(slot.wallStartMin, slot.durationMinutes);
-      const segsB = wallSegments(b.wallStartMin, b.durationMinutes);
-      const extraGap = dutyGuardGap ? gapMin : 0;
-      if (segmentsConflictWithGap(segsA, segsB, extraGap)) {
-        if (dutyGuardGap) {
-          const guardFirst =
-            (slot.missionType === "guards" && isGuardKind(slot.positionKind)) ||
-            (b.missionType === "base_work");
-          return guardFirst
-            ? `${personName}: לא נח מספיק בין שמירה לעב״ס`
-            : `${personName}: לא נח מספיק בין עב״ס לשמירה`;
-        }
-        return `${personName}: חפיפה עם ${blockLabel(b)} (${slot.timeLabel})`;
+    const conflicts =
+      extraGap > 0
+        ? intervalsConflictWithGap(slotIv, blockIv, extraGap)
+        : intervalsOverlap(slotIv, blockIv);
+
+    if (conflicts) {
+      if (dutyGuardGap) {
+        const guardFirst =
+          (slot.missionType === "guards" && isGuardKind(slot.positionKind)) ||
+          (b.missionType === "base_work");
+        return guardFirst
+          ? `${personName}: לא נח מספיק בין שמירה לעב״ס`
+          : `${personName}: לא נח מספיק בין עב״ס לשמירה`;
       }
-      continue;
-    }
-
-    if (
-      cyclicOverlap(b.cyclicStart, b.durationMinutes, slot.cyclicStart, slot.durationMinutes)
-    ) {
       return `${personName}: חפיפה עם ${blockLabel(b)} (${slot.timeLabel})`;
     }
   }
@@ -1499,6 +1493,81 @@ export function findAssignmentConflicts(
         slot.seatCount,
         mission.mission_type,
       );
+    }
+  }
+
+  return [...new Set(messages)];
+}
+
+export type ValidateGeneratedRosterInput = {
+  missions: MissionDay[];
+  issues?: Issue[];
+  peopleByName?: Record<string, Person>;
+};
+
+/** Final validation before accepting an auto-generated roster. */
+export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): string[] {
+  const messages: string[] = [];
+  const issues = input.issues ?? [];
+  const peopleByName = input.peopleByName ?? {};
+  const rules: FairnessRules = {
+    solo: 1,
+    pair: 1,
+    standby: 1,
+    standby_a: 1,
+    standby_b: 1,
+    duty: 1,
+    kitchen: 1,
+    hist: 0,
+  };
+  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+
+  for (const mission of input.missions) {
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+    const missionStartMs = Date.parse(mission.starts_at);
+    const missionEndMs = Date.parse(mission.ends_at);
+
+    for (const slot of flattenMissionSlots(mission)) {
+      if (slot.startAtMs >= slot.endAtMs) {
+        messages.push(`${slot.positionName} ${slot.timeLabel}: start >= end`);
+      }
+      if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
+        messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
+      }
+
+      const seats = mission.assignments[slot.slotId] || [];
+      const filled = seats.filter(Boolean);
+      if (slot.seatCount > 0 && filled.length !== slot.seatCount) {
+        messages.push(
+          `${slot.positionName} ${slot.timeLabel}: coverage ${filled.length}/${slot.seatCount}`,
+        );
+      }
+
+      const unique = new Set(filled);
+      if (unique.size !== filled.length) {
+        messages.push(`${slot.positionName} ${slot.timeLabel}: duplicate assignee in slot`);
+      }
+
+      for (const name of filled) {
+        if (!name) continue;
+        const person = peopleByName[name];
+        if (person && !canAssignKind(person, slot.positionKind)) {
+          messages.push(`${name}: not eligible for ${slot.positionName}`);
+        }
+        if (blockedByIssue(name, slot, issues)) {
+          messages.push(`${name}: blocked by approved issue during ${slot.timeLabel}`);
+        }
+        if (overlapsSlot(name, slot, tracker, scheduling)) {
+          messages.push(`${name}: illegal overlap at ${slot.positionName} ${slot.timeLabel}`);
+        }
+        if (
+          isGuardKind(slot.positionKind) &&
+          !guardOk(name, slot, tracker.guardShifts, scheduling.guard_ratio)
+        ) {
+          messages.push(`${name}: guard ratio violated at ${slot.timeLabel}`);
+        }
+        placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount, mission.mission_type);
+      }
     }
   }
 
