@@ -709,6 +709,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     requiredSeats,
     unresolved,
     warnings,
+    carmelSnapshots,
     objectiveSummary: {
       filledSeats: filled,
       requiredSeats,
