@@ -9,10 +9,12 @@ import {
   findAssignmentConflicts,
   fitsPerson,
   forceFillEmptySeats,
+  formatBaseWorkDiagnostics,
   pickBestCandidate,
   placePerson,
   repairGuardAssignmentGaps,
   slotRank,
+  validateNoPersonOverlaps,
 } from "@/lib/scheduling-engine";
 import {
   flattenMissionSlots,
@@ -45,11 +47,20 @@ async function finalizeAutoAssign(
   peopleByName: Record<string, Person>,
   filled: number,
   skipped: number,
+  overlapScope: MissionDay[] = [],
 ): Promise<AutoAssignResult> {
   const draft: MissionDay = { ...mission, assignments };
   for (const msg of findAssignmentConflicts(draft, peopleByName)) {
     if (!warnings.includes(msg)) warnings.push(msg);
   }
+
+  const scope = overlapScope.length
+    ? overlapScope.map((m) => (m.id === mission.id ? draft : m))
+    : [draft];
+  for (const msg of validateNoPersonOverlaps(scope)) {
+    if (!warnings.includes(msg)) warnings.push(`⚠ ${msg}`);
+  }
+
   const saved = await saveMissionDay(
     { ...mission, assignments },
     { validateAssignments: false },
@@ -241,7 +252,7 @@ function autoAssignBaseWorkMission(
       continue;
     }
 
-    const { names, workSquad, usedFallback } = assignBaseWorkShift({
+    const { names, workSquad, usedFallback, diagnostics } = assignBaseWorkShift({
       people,
       slot,
       shiftIndex,
@@ -268,20 +279,75 @@ function autoAssignBaseWorkMission(
 
     if (workSquad) {
       warnings.push(
-        `${slot.timeLabel}: צוות ${workSquad} (${names.length} צוערים) · צ${restSquad} במנוחה`,
+        `${slot.timeLabel}: צוות ${workSquad} (${diagnostics.assigned} צוערים) · צ${restSquad} במנוחה`,
       );
     }
     if (usedFallback) {
       warnings.push(`${slot.timeLabel}: שיבוץ חלקי — לא נמצא צוות שלם פנוי`);
     }
-    if (names.length < 13) {
-      warnings.push(`${slot.timeLabel}: רק ${names.length} צוערים (יעד 13–15)`);
+    if (diagnostics.assigned < diagnostics.required) {
+      warnings.push(formatBaseWorkDiagnostics(slot.timeLabel, diagnostics));
     }
 
     assignments[slot.slotId] = seats;
   }
 
   return { assignments, filled, skipped, warnings };
+}
+
+function sameDayMissionScope(
+  mission: MissionDay,
+  allMissions: MissionDay[],
+): MissionDay[] {
+  const date = mission.mission_date.slice(0, 10);
+  return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
+}
+
+function missionHasAnyAssignment(mission: MissionDay): boolean {
+  return Object.values(mission.assignments).some((seats) => seats.some(Boolean));
+}
+
+async function ensureLinkedBaseWorkAssigned(input: {
+  guardsMission: MissionDay;
+  allMissions: MissionDay[];
+  people: Person[];
+  issues: Issue[];
+  rules: Awaited<ReturnType<typeof getFairnessRules>>;
+  meanPrior: number;
+  keepExisting: boolean;
+}): Promise<{ allMissions: MissionDay[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  const scheduling = normalizeSchedulingRules(input.guardsMission.scheduling_rules);
+  const linkedId = scheduling.linked_mission_id;
+  if (!linkedId) return { allMissions: input.allMissions, warnings };
+
+  let linked = input.allMissions.find((m) => m.id === linkedId);
+  if (!linked || linked.mission_type !== "base_work") {
+    return { allMissions: input.allMissions, warnings };
+  }
+  if (missionHasAnyAssignment(linked)) {
+    return { allMissions: input.allMissions, warnings };
+  }
+
+  const tracker = buildTrackerFromMissions(input.allMissions, input.rules, new Set([linked.id]));
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const result = autoAssignBaseWorkMission(
+    linked,
+    input.people,
+    input.issues,
+    input.rules,
+    tracker,
+    normalizeSchedulingRules(linked.scheduling_rules),
+    input.meanPrior,
+    input.keepExisting,
+  );
+  warnings.push(...result.warnings);
+  const saved = await saveMissionDay(
+    { ...linked, assignments: result.assignments },
+    { validateAssignments: false },
+  );
+  const allMissions = input.allMissions.map((m) => (m.id === saved.id ? saved : m));
+  return { allMissions, warnings };
 }
 
 export async function autoAssignMission(
@@ -304,13 +370,28 @@ export async function autoAssignMission(
   const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
   const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
   const excludeIds = new Set([mission.id]);
+  let scopedMissions = allMissions;
+  let preWarnings: string[] = [];
 
-  const sameDayOthers = allMissions.filter(
-    (m) => m.mission_date === mission.mission_date && m.id !== mission.id,
-  );
+  if (mission.mission_type === "guards") {
+    const ensured = await ensureLinkedBaseWorkAssigned({
+      guardsMission: mission,
+      allMissions,
+      people,
+      issues,
+      rules,
+      meanPrior: people.reduce((sum, p) => sum + (p.prior_score || 0), 0) / (people.length || 1),
+      keepExisting,
+    });
+    scopedMissions = ensured.allMissions;
+    preWarnings = ensured.warnings;
+  }
 
-  const tracker = buildTrackerFromMissions(allMissions, rules, excludeIds);
+  const sameDayScope = sameDayMissionScope(mission, scopedMissions);
+
+  const tracker = buildTrackerFromMissions(scopedMissions, rules, excludeIds);
   if (options.includeSameDay !== false) {
+    const sameDayOthers = sameDayScope.filter((m) => m.id !== mission.id);
     for (const other of sameDayOthers) {
       const t2 = buildTrackerFromMissions([other], rules);
       for (const [name, blocks] of Object.entries(t2.busy)) {
@@ -356,10 +437,11 @@ export async function autoAssignMission(
     return finalizeAutoAssign(
       mission,
       forced.assignments,
-      [...result.warnings, ...forced.warnings],
+      [...preWarnings, ...result.warnings, ...forced.warnings],
       peopleByName,
       result.filled + forced.filled,
       result.skipped,
+      sameDayScope,
     );
   }
 
@@ -387,10 +469,11 @@ export async function autoAssignMission(
     return finalizeAutoAssign(
       mission,
       forced.assignments,
-      [...result.warnings, ...forced.warnings],
+      [...preWarnings, ...result.warnings, ...forced.warnings],
       peopleByName,
       result.filled + forced.filled,
       result.skipped,
+      sameDayScope,
     );
   }
 
@@ -582,10 +665,11 @@ export async function autoAssignMission(
   return finalizeAutoAssign(
     guardMission,
     assignments,
-    warnings,
+    [...preWarnings, ...warnings],
     peopleByName,
     filled,
     skipped,
+    sameDayScope,
   );
 }
 

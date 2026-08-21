@@ -19,10 +19,10 @@ import {
   slotDurationMinutes,
 } from "@/lib/mission-utils";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
-import { missionsOverlapCompatible } from "@/lib/standby-compat";
 import {
   intervalsConflictWithGap,
   intervalsOverlap,
+  type TimeInterval,
 } from "@/lib/time-interval";
 import type {
   FairnessRules,
@@ -194,12 +194,21 @@ function restOk(
   return 1440 - worked - slot.durationMinutes >= restMin;
 }
 
-function slotInterval(slot: FlatSlot): { startMs: number; endMs: number } {
+function slotInterval(slot: FlatSlot): TimeInterval {
   return { startMs: slot.startAtMs, endMs: slot.endAtMs };
 }
 
-function blockInterval(block: BusyBlock): { startMs: number; endMs: number } {
+function blockInterval(block: BusyBlock): TimeInterval {
   return { startMs: block.startAtMs, endMs: block.endAtMs };
+}
+
+/** Canonical overlap check for assignment intervals — half-open [start, end). */
+export function assignmentIntervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
+  return intervalsOverlap(a, b);
+}
+
+export function describeAssignmentBlock(block: BusyBlock): string {
+  return `${blockLabel(block)} ${block.startTime}–${block.endTime}`;
 }
 
 function overlapsSlot(
@@ -215,16 +224,6 @@ function overlapsSlot(
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
-    if (
-      missionsOverlapCompatible(
-        slot.positionKind,
-        slot.missionType,
-        b.positionKind,
-        b.missionType,
-      )
-    ) {
-      continue;
-    }
 
     const blockIv = blockInterval(b);
     const extraGap = needsDutyGuardGap(
@@ -238,7 +237,7 @@ function overlapsSlot(
 
     if (extraGap > 0) {
       if (intervalsConflictWithGap(slotIv, blockIv, extraGap)) return true;
-    } else if (intervalsOverlap(slotIv, blockIv)) {
+    } else if (assignmentIntervalsOverlap(slotIv, blockIv)) {
       return true;
     }
   }
@@ -358,6 +357,36 @@ export function projectedGuardCandidateScore(
   );
   const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
   return projected + priorAdj;
+}
+
+/** Whether two assignment kinds require minimum spacing (not overlap — e.g. guard↔base work). */
+export function assignmentNeedsSpacingGap(
+  kindA: MissionPositionKind,
+  typeA: MissionType,
+  kindB: MissionPositionKind,
+  typeB: MissionType,
+): boolean {
+  return needsDutyGuardGap(kindA, typeA, kindB, typeB);
+}
+
+export function explainFitsPersonFailure(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  ignoreSlotId?: string,
+): string | null {
+  if (!canAssignKind(person, slot.positionKind)) return "canAssignKind";
+  if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
+  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
+  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) return "guardOk";
+  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
+  return null;
 }
 
 export function fitsPerson(
@@ -681,16 +710,6 @@ function overlapAssignmentWarning(
 
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
-    if (
-      missionsOverlapCompatible(
-        slot.positionKind,
-        slot.missionType,
-        b.positionKind,
-        b.missionType,
-      )
-    ) {
-      continue;
-    }
 
     const blockIv = blockInterval(b);
     const dutyGuardGap = needsDutyGuardGap(
@@ -704,7 +723,7 @@ function overlapAssignmentWarning(
     const conflicts =
       extraGap > 0
         ? intervalsConflictWithGap(slotIv, blockIv, extraGap)
-        : intervalsOverlap(slotIv, blockIv);
+        : assignmentIntervalsOverlap(slotIv, blockIv);
 
     if (conflicts) {
       if (dutyGuardGap) {
@@ -715,13 +734,13 @@ function overlapAssignmentWarning(
           ? `${personName}: לא נח מספיק בין שמירה לעב״ס`
           : `${personName}: לא נח מספיק בין עב״ס לשמירה`;
       }
-      return `${personName}: חפיפה עם ${blockLabel(b)} (${slot.timeLabel})`;
+      return `${personName}: חפיפה עם ${describeAssignmentBlock(b)} (${slot.timeLabel})`;
     }
   }
   return null;
 }
 
-/** מועמדים כשאין מי שעומד בכל הכללים — עדיין בודק זכאות בסיסית וכוננות (חדר/מגדר) */
+/** מועמדים כשאין מי שעומד בכל הכללים — עדיין אוסר חפיפות */
 export function pickRelaxedCandidate(
   people: Person[],
   slot: FlatSlot,
@@ -738,6 +757,7 @@ export function pickRelaxedCandidate(
     if (exclude.has(p.name) || mates.includes(p.name)) return false;
     if (!canAssignKind(p, slot.positionKind)) return false;
     if (blockedByIssue(p.name, slot, issues)) return false;
+    if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
     if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
     if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
     return true;
@@ -747,7 +767,7 @@ export function pickRelaxedCandidate(
   });
 }
 
-/** ממלא משבצות ריקות — גם בהפרת מנוחה/חפיפה, עם אזהרות */
+/** ממלא משבצות ריקות — ללא הפרת חפיפה */
 export function forceFillEmptySeats(input: {
   mission: MissionDay;
   assignments: Record<string, string[]>;
@@ -1133,6 +1153,58 @@ export function assignKitchenShift(input: {
 }
 
 /** שיבוץ חלון עב״ס — צוות שלם (13–15), צוות אחד במנוחה */
+export type BaseWorkShiftDiagnostics = {
+  required: number;
+  assigned: number;
+  rejectedOverlap: number;
+  rejectedIssue: number;
+  rejectedIneligible: number;
+  rejectedRest: number;
+  rejectedGuardRatio: number;
+  rejectedOther: number;
+};
+
+function classifyCandidateRejection(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
+  if (!canAssignKind(person, slot.positionKind)) return "rejectedIneligible";
+  if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
+  if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
+  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
+    return "rejectedGuardRatio";
+  }
+  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "rejectedRest";
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "rejectedOther";
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "rejectedOther";
+  return null;
+}
+
+export function formatBaseWorkDiagnostics(
+  slotLabel: string,
+  diagnostics: BaseWorkShiftDiagnostics,
+): string {
+  const lines = [
+    `${slotLabel}:`,
+    `required: ${diagnostics.required}`,
+    `assigned: ${diagnostics.assigned}`,
+  ];
+  if (diagnostics.rejectedOverlap) lines.push(`- ${diagnostics.rejectedOverlap} overlapping assignment`);
+  if (diagnostics.rejectedIssue) lines.push(`- ${diagnostics.rejectedIssue} approved issue`);
+  if (diagnostics.rejectedIneligible) lines.push(`- ${diagnostics.rejectedIneligible} unavailable`);
+  if (diagnostics.rejectedRest) lines.push(`- ${diagnostics.rejectedRest} rest constraint`);
+  if (diagnostics.rejectedGuardRatio) {
+    lines.push(`- ${diagnostics.rejectedGuardRatio} guard-ratio constraint`);
+  }
+  if (diagnostics.rejectedOther) lines.push(`- ${diagnostics.rejectedOther} other constraint`);
+  return lines.join("\n");
+}
+
 export function assignBaseWorkShift(input: {
   people: Person[];
   slot: FlatSlot;
@@ -1145,12 +1217,31 @@ export function assignBaseWorkShift(input: {
   missionId: string;
   missionType: MissionType;
   taken: string[];
-}): { names: string[]; workSquad: number | null; usedFallback: boolean } {
+}): {
+  names: string[];
+  workSquad: number | null;
+  usedFallback: boolean;
+  diagnostics: BaseWorkShiftDiagnostics;
+} {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const cfg = input.scheduling.base_work;
-  const target = cfg?.seats_per_shift ?? 14;
+  const configuredTarget = cfg?.seats_per_shift ?? 14;
+  const target = Math.max(
+    13,
+    Math.min(15, input.slot.seatCount || configuredTarget),
+  );
   const restList = cfg?.squad_rest_by_shift ?? [1, 2, 3];
   const restSquad = restList[input.shiftIndex % restList.length] ?? (input.shiftIndex % 4) + 1;
+  const diagnostics: BaseWorkShiftDiagnostics = {
+    required: target,
+    assigned: input.taken.length,
+    rejectedOverlap: 0,
+    rejectedIssue: 0,
+    rejectedIneligible: 0,
+    rejectedRest: 0,
+    rejectedGuardRatio: 0,
+    rejectedOther: 0,
+  };
 
   const sortedPeople = [...input.people].sort((a, b) =>
     a.name.localeCompare(b.name, "he"),
@@ -1159,21 +1250,32 @@ export function assignBaseWorkShift(input: {
     effectiveSquad(p, sortedPeople.findIndex((x) => x.id === p.id));
   const groups = groupPeopleBySquad(sortedPeople, squadOf);
 
-  const fitsAll = (members: Person[]) =>
-    members.every((p) =>
-      fitsPerson(
-        p,
-        input.slot,
-        input.tracker,
-        input.issues,
-        input.scheduling,
-        input.taken,
-        peopleByName,
-      ),
+  const countRejection = (person: Person, mates: string[]) => {
+    const reason = classifyCandidateRejection(
+      person,
+      input.slot,
+      input.tracker,
+      input.issues,
+      input.scheduling,
+      mates,
+      peopleByName,
     );
+    if (reason) diagnostics[reason] += 1;
+  };
+
+  const fitsCandidate = (person: Person, mates: string[]) =>
+    classifyCandidateRejection(
+      person,
+      input.slot,
+      input.tracker,
+      input.issues,
+      input.scheduling,
+      mates,
+      peopleByName,
+    ) === null;
 
   const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
-  const candidates = activeSquads
+  const squadCandidates = activeSquads
     .map((s) => ({ squad: s, members: groups[s] }))
     .filter(({ members }) => members.length >= 13 && members.length <= 15)
     .sort(
@@ -1181,10 +1283,13 @@ export function assignBaseWorkShift(input: {
         Math.abs(a.members.length - target) - Math.abs(b.members.length - target),
     );
 
-  for (const { squad, members } of candidates) {
+  for (const { squad, members } of squadCandidates) {
     const pool = members.filter((m) => !input.taken.includes(m.name));
     if (pool.length < 13 || pool.length > 15) continue;
-    if (!fitsAll(pool)) continue;
+    if (!pool.every((p) => fitsCandidate(p, input.taken))) {
+      for (const p of pool) countRejection(p, input.taken);
+      continue;
+    }
     const names = pool.map((p) => p.name);
     for (const name of names) {
       placePerson(
@@ -1198,50 +1303,35 @@ export function assignBaseWorkShift(input: {
         input.missionType,
       );
     }
-    return { names, workSquad: squad, usedFallback: false };
+    diagnostics.assigned = names.length;
+    return { names, workSquad: squad, usedFallback: false, diagnostics };
   }
 
-  // גיבוי: חלוקה יחסית עד יעד 13–15
-  const need = Math.max(13, Math.min(15, target));
-  const activePools = activeSquads.map((s) => groups[s]);
-  const sizes = activePools.map((pool) =>
-    pool.filter((p) =>
-      fitsPerson(
-        p,
-        input.slot,
-        input.tracker,
-        input.issues,
-        input.scheduling,
-        input.taken,
-        peopleByName,
-      ),
-    ).length,
-  );
-  const targets = apportionSeats(need, sizes);
+  const need = Math.max(0, target - input.taken.length);
   const assigned: string[] = [];
+  const activePools = activeSquads.map((s) => groups[s]);
+  const eligibleCounts = activePools.map(
+    (pool) => pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length,
+  );
+  const targets = apportionSeats(need, eligibleCounts);
 
   for (let i = 0; i < activeSquads.length; i++) {
-    const squad = activeSquads[i];
     const pool = activePools[i]
-      .filter((p) =>
-        fitsPerson(
-          p,
-          input.slot,
-          input.tracker,
-          input.issues,
-          input.scheduling,
-          [...input.taken, ...assigned],
-          peopleByName,
-        ),
-      )
+      .filter((p) => !input.taken.includes(p.name) && !assigned.includes(p.name))
       .sort((a, b) => {
         const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
         const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
         return wa - wb || a.name.localeCompare(b.name, "he");
       });
+
     let squadAdded = 0;
     for (const p of pool) {
       if (assigned.length >= need || squadAdded >= targets[i]) break;
+      const mates = [...input.taken, ...assigned];
+      if (!fitsCandidate(p, mates)) {
+        countRejection(p, mates);
+        continue;
+      }
       assigned.push(p.name);
       squadAdded += 1;
       placePerson(
@@ -1257,10 +1347,37 @@ export function assignBaseWorkShift(input: {
     }
   }
 
+  if (assigned.length < need) {
+    const remaining = sortedPeople.filter(
+      (p) => !input.taken.includes(p.name) && !assigned.includes(p.name),
+    );
+    for (const p of remaining) {
+      if (assigned.length >= need) break;
+      const mates = [...input.taken, ...assigned];
+      if (!fitsCandidate(p, mates)) {
+        countRejection(p, mates);
+        continue;
+      }
+      assigned.push(p.name);
+      placePerson(
+        p.name,
+        input.slot,
+        input.missionId,
+        input.tracker,
+        input.rules,
+        input.scheduling,
+        input.slot.seatCount,
+        input.missionType,
+      );
+    }
+  }
+
+  diagnostics.assigned = input.taken.length + assigned.length;
   return {
     names: assigned,
     workSquad: assigned.length ? squadOf(peopleByName[assigned[0]]) : null,
     usedFallback: true,
+    diagnostics,
   };
 }
 
@@ -1469,18 +1586,11 @@ export function findAssignmentConflicts(
 
       if (overlapsSlot(name, slot, tracker, scheduling)) {
         const blocker = (tracker.busy[name] || []).find(
-          (b) =>
-            b.slotId !== slot.slotId &&
-            !missionsOverlapCompatible(
-              slot.positionKind,
-              slot.missionType,
-              b.positionKind,
-              b.missionType,
-            ),
+          (b) => b.slotId !== slot.slotId && assignmentIntervalsOverlap(blockInterval(b), slotInterval(slot)),
         );
         messages.push(
           `${name}: חפיפה — ${slot.positionName} ${slot.timeLabel}` +
-            (blocker ? ` ↔ ${blockLabel(blocker)}` : ""),
+            (blocker ? ` ↔ ${describeAssignmentBlock(blocker)}` : ""),
         );
       }
       placePerson(
@@ -1499,6 +1609,65 @@ export function findAssignmentConflicts(
   return [...new Set(messages)];
 }
 
+type TrackedAssignment = {
+  label: string;
+  startMs: number;
+  endMs: number;
+  slotId: string;
+  missionId: string;
+};
+
+/** Global validator — every person must have zero overlapping assignment pairs. */
+export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
+  const byPerson = new Map<string, TrackedAssignment[]>();
+
+  for (const mission of missions) {
+    for (const slot of flattenMissionSlots(mission)) {
+      const seats = mission.assignments[slot.slotId] || [];
+      for (const name of seats) {
+        if (!name) continue;
+        const list = byPerson.get(name) || [];
+        list.push({
+          label: `${slot.positionName} ${slot.timeLabel}`,
+          startMs: slot.startAtMs,
+          endMs: slot.endAtMs,
+          slotId: slot.slotId,
+          missionId: mission.id,
+        });
+        byPerson.set(name, list);
+      }
+    }
+  }
+
+  const messages: string[] = [];
+  for (const [person, blocks] of byPerson) {
+    const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const a = sorted[i];
+        const b = sorted[j];
+        if (a.slotId === b.slotId && a.missionId === b.missionId) continue;
+        if (
+          assignmentIntervalsOverlap(
+            { startMs: a.startMs, endMs: a.endMs },
+            { startMs: b.startMs, endMs: b.endMs },
+          )
+        ) {
+          messages.push(
+            [
+              "Overlap detected:",
+              `Person: ${person}`,
+              `Assignment A: ${a.label}`,
+              `Assignment B: ${b.label}`,
+            ].join("\n"),
+          );
+        }
+      }
+    }
+  }
+  return messages;
+}
+
 export type ValidateGeneratedRosterInput = {
   missions: MissionDay[];
   issues?: Issue[];
@@ -1507,6 +1676,9 @@ export type ValidateGeneratedRosterInput = {
 
 /** Final validation before accepting an auto-generated roster. */
 export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): string[] {
+  const overlapMessages = validateNoPersonOverlaps(input.missions);
+  if (overlapMessages.length) return overlapMessages;
+
   const messages: string[] = [];
   const issues = input.issues ?? [];
   const peopleByName = input.peopleByName ?? {};

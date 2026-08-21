@@ -310,6 +310,6 @@ describe("cross-mission overlap rejection", () => {
       missions: [baseMission, guardAssigned],
       peopleByName: { [person.name]: person },
     });
-    expect(errors.some((e) => e.includes("overlap") || e.includes("חפיפה"))).toBe(true);
+    expect(errors.some((e) => /overlap|חפיפה/i.test(e))).toBe(true);
   });
 });
