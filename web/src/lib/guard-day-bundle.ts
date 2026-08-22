@@ -171,3 +171,28 @@ export function missionsInBundle(
   if (!bundleId) return [mission];
   return missions.filter((m) => m.scheduling_rules?.guard_day_bundle_id === bundleId);
 }
+
+/** שמירות + עב״ס מקושרים — לשיבוץ חכם (לא כולל מטבח/משימות אחרות באותו תאריך). */
+export function linkedGuardDayAssignScope(
+  mission: MissionDay,
+  allMissions: MissionDay[],
+): MissionDay[] {
+  const bundle = missionsInBundle(allMissions, mission);
+  if (bundle.length > 1) {
+    return sortAssignScope(bundle);
+  }
+  const linkedId = mission.scheduling_rules?.linked_mission_id;
+  if (!linkedId) return [mission];
+  const linked = allMissions.find((m) => m.id === linkedId);
+  if (!linked) return [mission];
+  return sortAssignScope([mission, linked]);
+}
+
+function sortAssignScope(missions: MissionDay[]): MissionDay[] {
+  const order: Record<string, number> = { kitchen: 0, base_work: 1, guards: 2 };
+  return [...missions].sort(
+    (a, b) =>
+      (order[a.mission_type] ?? 9) - (order[b.mission_type] ?? 9) ||
+      a.starts_at.localeCompare(b.starts_at),
+  );
+}

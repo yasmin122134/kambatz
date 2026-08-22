@@ -308,7 +308,10 @@ function overlapsSlot(
   scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
 ): boolean {
-  const gapMin = scheduling.duty_guard_gap_minutes ?? DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes;
+  const gapMin =
+    scheduling.duty_guard_gap_minutes ??
+    DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
+    90;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
@@ -798,7 +801,10 @@ function overlapAssignmentWarning(
   tracker: ScheduleTracker,
   scheduling: MissionSchedulingRules,
 ): string | null {
-  const gapMin = scheduling.duty_guard_gap_minutes ?? DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes;
+  const gapMin =
+    scheduling.duty_guard_gap_minutes ??
+    DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
+    90;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {

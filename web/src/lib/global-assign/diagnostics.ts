@@ -10,6 +10,7 @@ import type {
 export function countRequiredSeats(units: AssignmentUnit[]): number {
   return units.reduce((sum, u) => {
     if (u.kind === "carmel") return sum + u.need;
+    if (u.kind === "basework") return sum + u.seatIndices.length;
     return sum + 1;
   }, 0);
 }
@@ -21,7 +22,7 @@ export function countFilledSeats(
   let filled = 0;
   for (const unit of units) {
     const seats = assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
-    if (unit.kind === "carmel") {
+    if (unit.kind === "carmel" || unit.kind === "basework") {
       filled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
     } else if (seats[unit.seatIndex]) {
       filled += 1;
@@ -42,11 +43,14 @@ export function buildUnresolvedRequirements(input: {
     const seats = input.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
     const key = `${unit.mission.id}:${unit.slot.slotId}`;
 
-    if (unit.kind === "carmel") {
+    if (unit.kind === "carmel" || unit.kind === "basework") {
       const assigned = unit.seatIndices.filter((i) => Boolean(seats[i])).length;
-      const required = unit.need;
+      const required = unit.kind === "carmel" ? unit.need : unit.seatIndices.length;
       if (assigned >= required) continue;
-      const snapshot = input.carmelSnapshots.find((s) => s.slotId === unit.slot.slotId);
+      const snapshot =
+        unit.kind === "carmel"
+          ? input.carmelSnapshots.find((s) => s.slotId === unit.slot.slotId)
+          : undefined;
       bySlot.set(key, {
         missionId: unit.mission.id,
         positionName: unit.slot.positionName,
@@ -54,7 +58,9 @@ export function buildUnresolvedRequirements(input: {
         requiredSeats: required,
         assignedSeats: assigned,
         reasons: input.failureReasons.get(key) || [
-          "לא נותרה קבוצת חדר/מגדר תקפה לאחר שיבוצים אחרים",
+          unit.kind === "basework"
+            ? "לא נמצא צוות שלם לעב״ס (מנוחה/שמירות/מרווח 90 דק׳)"
+            : "לא נותרה קבוצת חדר/מגדר תקפה לאחר שיבוצים אחרים",
         ],
         carmelSnapshot: snapshot,
       });

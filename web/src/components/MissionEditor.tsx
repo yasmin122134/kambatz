@@ -276,7 +276,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
 
   async function runAutoAssign() {
     if (!missionId) return;
-    if (!confirm("ליצור שיבוץ חכם? משבצות שכבר מלאות יישארו.")) return;
+    if (!confirm("ליצור שיבוץ חכם לשמירות ועב״ס המקושרים? משבצות שכבר מלאות יישארו.")) return;
     setAutoAssigning(true);
     setErr("");
     setMsg("");

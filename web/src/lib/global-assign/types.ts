@@ -56,7 +56,20 @@ export type SeatAssignmentUnit = {
   seatIndex: number;
 };
 
-export type AssignmentUnit = CarmelAssignmentUnit | SeatAssignmentUnit;
+export type BaseWorkAssignmentUnit = {
+  kind: "basework";
+  id: string;
+  mission: MissionDay;
+  slot: FlatSlot;
+  shiftIndex: number;
+  seatIndices: number[];
+  fixedNames: string[];
+};
+
+export type AssignmentUnit =
+  | CarmelAssignmentUnit
+  | SeatAssignmentUnit
+  | BaseWorkAssignmentUnit;
 
 export type GlobalAssignInput = {
   missions: MissionDay[];

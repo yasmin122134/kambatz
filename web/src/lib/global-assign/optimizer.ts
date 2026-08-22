@@ -1,5 +1,6 @@
 import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
+  assignBaseWorkShift,
   buildTrackerFromMissions,
   fitsPerson,
   placePerson,
@@ -16,6 +17,7 @@ import {
   syncAssignmentSeats,
 } from "@/lib/mission-utils";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
+import { personIsDutyOfficer } from "@/lib/officers";
 import { enumerateCarmelGroups, hasCarmelGroupCandidates, summarizeCarmelRooms } from "./carmel-groups";
 import {
   buildUnresolvedRequirements,
@@ -40,7 +42,8 @@ type SolverState = {
 
 type CandidateChoice =
   | { kind: "carmel"; group: CarmelGroupCandidate }
-  | { kind: "seat"; person: Person };
+  | { kind: "seat"; person: Person }
+  | { kind: "basework"; names: string[] };
 
 /** Branching limits — keeps server-side assign under ~15s on full guard days. */
 const DEFAULT_MAX_NODES = 12_000;
@@ -82,6 +85,7 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
   const units: AssignmentUnit[] = [];
   for (const mission of missions) {
     const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+    let baseShiftIndex = 0;
     for (const slot of flattenMissionSlots(mission)) {
       const seats = assignments[slot.slotId] || [];
       const emptyIndices = seats
@@ -90,6 +94,20 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
         .map(({ i }) => i);
 
       if (!emptyIndices.length) continue;
+
+      if (mission.mission_type === "base_work") {
+        const fixedNames = keepExisting ? seats.filter(Boolean) : [];
+        units.push({
+          kind: "basework",
+          id: `${mission.id}:${slot.slotId}:basework`,
+          mission,
+          slot,
+          shiftIndex: baseShiftIndex++,
+          seatIndices: emptyIndices,
+          fixedNames,
+        });
+        continue;
+      }
 
       if (isStandbyKind(slot.positionKind) && slot.sameRoom) {
         const fixedNames = keepExisting ? seats.filter(Boolean) : [];
@@ -217,29 +235,97 @@ function countCarmelCandidates(
     : 0;
 }
 
+function countBaseworkCandidates(
+  unit: Extract<AssignmentUnit, { kind: "basework" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+): number {
+  const scheduling = schedulingFor(unit.mission);
+  const seats = state.assignmentsByMission.get(unit.mission.id)!;
+  const row = seats[unit.slot.slotId] || [];
+  const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+  const probe = cloneTracker(state.tracker);
+  const result = assignBaseWorkShift({
+    people,
+    slot: unit.slot,
+    shiftIndex: unit.shiftIndex,
+    tracker: probe,
+    issues,
+    scheduling,
+    rules,
+    meanPrior,
+    missionId: unit.mission.id,
+    missionType: unit.mission.mission_type,
+    taken,
+  });
+  const target = Math.max(13, Math.min(15, unit.slot.seatCount || 14));
+  const need = Math.min(target, unit.seatIndices.length + taken.length);
+  return result.diagnostics.assigned >= need ? 1 : 0;
+}
+
+function computeBaseworkNames(
+  unit: Extract<AssignmentUnit, { kind: "basework" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+): string[] {
+  const scheduling = schedulingFor(unit.mission);
+  const seats = state.assignmentsByMission.get(unit.mission.id)!;
+  const row = seats[unit.slot.slotId] || [];
+  const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+  const probe = cloneTracker(state.tracker);
+  const result = assignBaseWorkShift({
+    people,
+    slot: unit.slot,
+    shiftIndex: unit.shiftIndex,
+    tracker: probe,
+    issues,
+    scheduling,
+    rules,
+    meanPrior,
+    missionId: unit.mission.id,
+    missionType: unit.mission.mission_type,
+    taken,
+  });
+  const roster = [...taken];
+  for (const name of result.names) {
+    if (!roster.includes(name)) roster.push(name);
+  }
+  return roster.filter((n) => !taken.includes(n));
+}
+
 function unitDifficulty(
   unit: AssignmentUnit,
   state: SolverState,
   people: Person[],
   issues: Issue[],
   peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
 ): number {
   const candidates =
     unit.kind === "carmel"
       ? countCarmelCandidates(unit, state, people, issues, peopleByName)
-      : countSeatCandidates(unit, state, people, issues, peopleByName);
+      : unit.kind === "basework"
+        ? countBaseworkCandidates(unit, state, people, issues, rules, meanPrior)
+        : countSeatCandidates(unit, state, people, issues, peopleByName);
 
   if (unit.kind === "carmel") {
     return 100_000 + 10_000 / Math.max(1, candidates);
+  }
+  if (unit.kind === "basework") {
+    return 9_000 + 900 / Math.max(1, candidates);
   }
   if (unit.slot.positionKind === "officer_duty") {
     return 50_000 + 5_000 / Math.max(1, candidates);
   }
   if (isGuardKind(unit.slot.positionKind)) {
     return 10_000 + 1_000 / Math.max(1, candidates);
-  }
-  if (unit.mission.mission_type === "base_work") {
-    return 1_000 + 100 / Math.max(1, candidates);
   }
   if (unit.mission.mission_type === "kitchen") {
     return 100 + 10 / Math.max(1, candidates);
@@ -253,12 +339,22 @@ function pickNextUnit(
   people: Person[],
   issues: Issue[],
   peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
 ): AssignmentUnit | null {
   let best: AssignmentUnit | null = null;
   let bestScore = -Infinity;
   for (const unit of units) {
     if (state.assignedUnitIds.has(unit.id)) continue;
-    const score = unitDifficulty(unit, state, people, issues, peopleByName);
+    const score = unitDifficulty(
+      unit,
+      state,
+      people,
+      issues,
+      peopleByName,
+      rules,
+      meanPrior,
+    );
     if (score > bestScore) {
       bestScore = score;
       best = unit;
@@ -329,11 +425,20 @@ function listSeatCandidates(
       fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName),
   );
 
+  let candidates = pool;
+  if (unit.slot.positionKind === "officer_duty") {
+    candidates = pool.filter((p) => personIsDutyOfficer(p));
+    if (siblingOfficer) {
+      const other = candidates.filter((p) => p.name !== siblingOfficer);
+      if (other.length) candidates = other;
+    }
+  }
+
   const scarcity = new Map(
-    pool.map((p) => [p.name, countPersonScarcity(p, units, issues, state, peopleByName)]),
+    candidates.map((p) => [p.name, countPersonScarcity(p, units, issues, state, peopleByName)]),
   );
 
-  return pool.sort((a, b) => {
+  return candidates.sort((a, b) => {
     if (unit.slot.positionKind === "officer_duty" && siblingOfficer) {
       if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
       if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
@@ -408,6 +513,31 @@ function applyChoice(
   const seats = state.assignmentsByMission.get(unit.mission.id)!;
   const row = seats[unit.slot.slotId] || [];
 
+  if (unit.kind === "basework" && choice.kind === "basework") {
+    let ni = 0;
+    for (const idx of unit.seatIndices) {
+      if (row[idx]) continue;
+      const name = choice.names[ni++];
+      if (!name) continue;
+      row[idx] = name;
+      if (!personAlreadyInSlot(name, unit.slot.slotId, unit.mission.id, state.tracker)) {
+        placePerson(
+          name,
+          unit.slot,
+          unit.mission.id,
+          state.tracker,
+          rules,
+          scheduling,
+          unit.slot.seatCount,
+          unit.mission.mission_type,
+        );
+      }
+    }
+    seats[unit.slot.slotId] = row;
+    state.assignedUnitIds.add(unit.id);
+    return;
+  }
+
   if (unit.kind === "carmel" && choice.kind === "carmel") {
     let pi = 0;
     for (const idx of unit.seatIndices) {
@@ -459,6 +589,18 @@ function revertChoice(
   const seats = state.assignmentsByMission.get(unit.mission.id)!;
   const row = seats[unit.slot.slotId] || [];
 
+  if (unit.kind === "basework" && choice.kind === "basework") {
+    for (const name of choice.names) {
+      for (const idx of unit.seatIndices) {
+        if (row[idx] === name) row[idx] = "";
+      }
+      unplacePerson(name, unit.slot, unit.mission.id, state.tracker, rules, scheduling);
+    }
+    seats[unit.slot.slotId] = row;
+    state.assignedUnitIds.delete(unit.id);
+    return;
+  }
+
   if (unit.kind === "carmel" && choice.kind === "carmel") {
     for (const idx of unit.seatIndices) {
       const name = row[idx];
@@ -476,6 +618,96 @@ function revertChoice(
     seats[unit.slot.slotId] = row;
     unplacePerson(choice.person.name, unit.slot, unit.mission.id, state.tracker, rules, scheduling);
     state.assignedUnitIds.delete(unit.id);
+  }
+}
+
+/** ממלא קצין תורן — תמיד רני/יסמין, משמרת אחת לכל אחד כשאפשר */
+function seedOfficerDutyInState(
+  missions: MissionDay[],
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  state: SolverState,
+  keepExisting: boolean,
+): void {
+  const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+  const officers = people
+    .filter(personIsDutyOfficer)
+    .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  if (!officers.length) return;
+
+  for (const mission of missions) {
+    if (mission.mission_type !== "guards") continue;
+    const scheduling = schedulingFor(mission);
+    const slots = flattenMissionSlots(mission)
+      .filter((s) => s.positionKind === "officer_duty")
+      .sort((a, b) => a.sortKey - b.sortKey);
+
+    const assignments = state.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+
+    const usedOfficers = new Set<string>();
+    for (const slot of slots) {
+      const row = [...(assignments[slot.slotId] || [])];
+      for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+        const existing = row[seatIndex];
+        if (existing && keepExisting) {
+          if (personIsDutyOfficer(peopleByName[existing])) {
+            usedOfficers.add(existing);
+            continue;
+          }
+          unplacePerson(existing, slot, mission.id, state.tracker, rules, scheduling);
+          row[seatIndex] = "";
+        }
+        if (existing && !keepExisting) {
+          unplacePerson(existing, slot, mission.id, state.tracker, rules, scheduling);
+          row[seatIndex] = "";
+        }
+
+        const sibling =
+          siblingDutyOfficerAssignee(mission, slot, assignments) ??
+          ([...usedOfficers][0] as string | undefined);
+
+        const mates = row.filter((n, idx) => n && idx !== seatIndex);
+        const pick =
+          (sibling
+            ? officers.find(
+                (o) =>
+                  o.name !== sibling &&
+                  !mates.includes(o.name) &&
+                  fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
+              )
+            : undefined) ??
+          officers.find(
+            (o) =>
+              !usedOfficers.has(o.name) &&
+              !mates.includes(o.name) &&
+              fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
+          ) ??
+          officers.find(
+            (o) =>
+              !mates.includes(o.name) &&
+              fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
+          );
+
+        if (!pick) continue;
+
+        row[seatIndex] = pick.name;
+        usedOfficers.add(pick.name);
+        placePerson(
+          pick.name,
+          slot,
+          mission.id,
+          state.tracker,
+          rules,
+          scheduling,
+          slot.seatCount,
+          mission.mission_type,
+        );
+        state.assignedUnitIds.add(`${mission.id}:${slot.slotId}:${seatIndex}`);
+      }
+      assignments[slot.slotId] = row;
+    }
   }
 }
 
@@ -524,7 +756,15 @@ function solveGreedy(input: {
   };
 
   for (;;) {
-    const unit = pickNextUnit(input.units, state, input.people, input.issues, peopleByName);
+    const unit = pickNextUnit(
+      input.units,
+      state,
+      input.people,
+      input.issues,
+      peopleByName,
+      input.rules,
+      input.meanPrior,
+    );
     if (!unit) break;
 
     const choice: CandidateChoice | null =
@@ -542,20 +782,32 @@ function solveGreedy(input: {
             )[0];
             return group ? { kind: "carmel", group } : null;
           })()
-        : (() => {
-            const person = listSeatCandidates(
-              unit,
-              state,
-              input.people,
-              input.issues,
-              input.rules,
-              input.meanPrior,
-              peopleByName,
-              input.seed,
-              input.units,
-            )[0];
-            return person ? { kind: "seat", person } : null;
-          })();
+        : unit.kind === "basework"
+          ? (() => {
+              const names = computeBaseworkNames(
+                unit,
+                state,
+                input.people,
+                input.issues,
+                input.rules,
+                input.meanPrior,
+              );
+              return names.length ? { kind: "basework", names } : null;
+            })()
+          : (() => {
+              const person = listSeatCandidates(
+                unit,
+                state,
+                input.people,
+                input.issues,
+                input.rules,
+                input.meanPrior,
+                peopleByName,
+                input.seed,
+                input.units,
+              )[0];
+              return person ? { kind: "seat", person } : null;
+            })();
 
     if (!choice) {
       state.assignedUnitIds.add(unit.id);
@@ -616,7 +868,15 @@ function solveBacktracking(input: {
       return;
     }
 
-    const unit = pickNextUnit(input.units, state, input.people, input.issues, peopleByName);
+    const unit = pickNextUnit(
+      input.units,
+      state,
+      input.people,
+      input.issues,
+      peopleByName,
+      input.rules,
+      input.meanPrior,
+    );
     if (!unit) return;
 
     const choices: CandidateChoice[] =
@@ -631,19 +891,31 @@ function solveBacktracking(input: {
             peopleByName,
             input.seed,
           ).map((group) => ({ kind: "carmel", group }))
-        : listSeatCandidates(
-            unit,
-            state,
-            input.people,
-            input.issues,
-            input.rules,
-            input.meanPrior,
-            peopleByName,
-            input.seed,
-            input.units,
-          )
-            .slice(0, MAX_SEAT_BRANCH)
-            .map((person) => ({ kind: "seat", person }));
+        : unit.kind === "basework"
+          ? (() => {
+              const names = computeBaseworkNames(
+                unit,
+                state,
+                input.people,
+                input.issues,
+                input.rules,
+                input.meanPrior,
+              );
+              return names.length ? [{ kind: "basework" as const, names }] : [];
+            })()
+          : listSeatCandidates(
+              unit,
+              state,
+              input.people,
+              input.issues,
+              input.rules,
+              input.meanPrior,
+              peopleByName,
+              input.seed,
+              input.units,
+            )
+              .slice(0, MAX_SEAT_BRANCH)
+              .map((person) => ({ kind: "seat", person }));
 
     if (!choices.length) {
       const score = evaluateLex(input.units, state);
@@ -725,15 +997,24 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     assignmentsByMission: initAssignments(missions),
     assignedUnitIds: new Set(
       units.filter((u) => {
-        if (u.kind === "carmel") {
-          const seats = missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
+        const seats =
+          missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
+        if (u.kind === "carmel" || u.kind === "basework") {
           return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
         }
-        const seats = missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
         return keepExisting && Boolean(seats[u.seatIndex]);
       }).map((u) => u.id),
     ),
   };
+
+  seedOfficerDutyInState(
+    missions,
+    input.people,
+    input.issues,
+    input.rules,
+    initialState,
+    keepExisting,
+  );
 
   let bestResult: { state: SolverState; nodes: number; score: number[]; timedOut: boolean } | null = null;
   let totalNodes = 0;

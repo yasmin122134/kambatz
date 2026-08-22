@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
@@ -225,10 +226,9 @@ export async function autoAssignMission(
 
   if (!people.length) throw new Error("אין צוערים פעילים במאגר");
 
-  const scopeMissions =
-    !includeSameDay
-      ? [mission]
-      : sameDayMissionScope(mission, allMissions);
+  const scopeMissions = includeSameDay
+    ? sameDayMissionScope(mission, allMissions)
+    : linkedGuardDayAssignScope(mission, allMissions);
 
   const dayResult = await smartAssignScope({
     scopeMissions,

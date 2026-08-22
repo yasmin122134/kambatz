@@ -85,6 +85,8 @@ export function defaultPositionKind(
   const n = name.trim();
   if (/כרמל\s*א/.test(n)) return "standby_carmel_a";
   if (/כרמל\s*ב/.test(n)) return "standby_carmel_b";
+  if (missionType === "guards" && /קצין\s*תורן/.test(n)) return "officer_duty";
+  if (missionType === "guards" && /עתודה/.test(n)) return "duty";
   if (missionType === "kitchen") return "kitchen";
   if (missionType === "base_work") return "duty";
   return "guard";
