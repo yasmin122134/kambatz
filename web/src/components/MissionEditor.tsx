@@ -31,6 +31,7 @@ import {
   guardPositionHint,
   summarizeGuardSlots,
 } from "@/lib/mission-templates";
+import { isBaseWorkPosition } from "@/lib/mission-utils";
 
 function uid() {
   return crypto.randomUUID();
@@ -847,6 +848,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             {pos.slots.map((slot) => {
               const allowZeroSeats =
                 missionType === "guards" && pos.name.includes("רגלי");
+              const isBaseWorkSlot =
+                missionType === "base_work" || isBaseWorkPosition(pos);
+              const seatMax =
+                missionType === "kitchen" ? 60 : isBaseWorkSlot ? 15 : 10;
               return (
               <div
                 key={slot.id}
@@ -877,19 +882,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   <input
                     type="number"
                     min={allowZeroSeats ? 0 : 1}
-                    max={
-                      missionType === "kitchen"
-                        ? 60
-                        : missionType === "base_work"
-                          ? 15
-                          : 10
-                    }
+                    max={seatMax}
                     value={slot.seat_count}
                     onChange={(e) =>
                       updateSlot(pos.id, slot.id, {
-                        seat_count: Math.max(
-                          allowZeroSeats ? 0 : 1,
-                          +e.target.value || (allowZeroSeats ? 0 : 1),
+                        seat_count: Math.min(
+                          seatMax,
+                          Math.max(
+                            allowZeroSeats ? 0 : 1,
+                            +e.target.value || (allowZeroSeats ? 0 : 1),
+                          ),
                         ),
                       })
                     }
