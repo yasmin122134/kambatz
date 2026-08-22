@@ -39,7 +39,7 @@ function guardsScheduling(
   const board = effectiveBoardStartLabel({
     starts_at: guardStartsAt,
     positions,
-    scheduling_rules: extra,
+    scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, ...extra },
   });
   return {
     ...DEFAULT_MISSION_SCHEDULING_RULES,

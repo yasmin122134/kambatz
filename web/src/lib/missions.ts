@@ -1,6 +1,11 @@
 import { createClient } from "@/lib/supabase/server";
+import { loadApprovedIssues } from "@/lib/issues";
 import { findAssignmentConflicts } from "@/lib/scheduling-engine";
 import { fetchActivePeople } from "@/lib/people";
+import {
+  deleteFairnessPointsForMission,
+  syncPublishedFairnessPoints,
+} from "@/lib/fairness-persistence";
 import type { MissionDay, Person } from "@/lib/types";
 import {
   emptyAssignments,
@@ -112,13 +117,15 @@ export async function saveMissionDay(
       updated_at: "",
     };
     let peopleByName: Record<string, Person> | undefined;
+    let issues: Awaited<ReturnType<typeof loadApprovedIssues>> = [];
     try {
       const people = await fetchActivePeople(supabase);
       peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+      issues = await loadApprovedIssues();
     } catch {
       // עמודת is_officer עדיין לא קיימת — בדיקת חפיפות בלבד
     }
-    const conflicts = findAssignmentConflicts(draft, peopleByName);
+    const conflicts = findAssignmentConflicts(draft, peopleByName, issues);
     if (validateAssignments && conflicts.length) {
       throw new Error(`שיבוץ לא תקין:\n${conflicts.join("\n")}`);
     }
@@ -148,7 +155,9 @@ export async function saveMissionDay(
       .select("*")
       .single();
     if (error) throw new Error(error.message);
-    return rowFromDb(data);
+    const saved = rowFromDb(data);
+    await afterMissionSave(saved);
+    return saved;
   }
 
   const { data, error } = await supabase
@@ -157,13 +166,32 @@ export async function saveMissionDay(
     .select("*")
     .single();
   if (error) throw new Error(error.message);
-  return rowFromDb(data);
+  const saved = rowFromDb(data);
+  await afterMissionSave(saved);
+  return saved;
+}
+
+async function afterMissionSave(mission: MissionDay): Promise<void> {
+  try {
+    if (mission.status !== "published") {
+      await deleteFairnessPointsForMission(mission.id);
+    }
+    await syncPublishedFairnessPoints();
+  } catch {
+    // טבלת fairness_assignment_points עדיין לא קיימת — לא חוסם שמירה
+  }
 }
 
 export async function deleteMissionDay(id: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("mission_days").delete().eq("id", id);
   if (error) throw new Error(error.message);
+  try {
+    await deleteFairnessPointsForMission(id);
+    await syncPublishedFairnessPoints();
+  } catch {
+    // טבלת fairness_assignment_points עדיין לא קיימת
+  }
 }
 
 export { newPosition as createDefaultPosition };

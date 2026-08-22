@@ -53,21 +53,7 @@ async function loadPeople(): Promise<Person[]> {
   return fetchActivePeople(supabase);
 }
 
-async function loadApprovedIssues(): Promise<Issue[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("issues")
-    .select("*")
-    .eq("status", "approved");
-
-  if (error) {
-    if (error.code === "PGRST205") return [];
-    throw new Error(error.message);
-  }
-  return (data || []) as Issue[];
-}
-
-function sameDayMissionScope(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
+import { loadApprovedIssues } from "@/lib/issues";(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
   const date = mission.mission_date.slice(0, 10);
   return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
 }

@@ -17,7 +17,15 @@ import {
 } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
-const FLAG_KEYS = Object.keys(PERSONAL_FLAG_LABELS) as (keyof PersonalFlags)[];
+function fairnessHistoryLabel(h: PersonFairnessStats["history"][0]): string {
+  if (h.burdenBase != null) {
+    const kind = h.burdenIsSolo ? "סולו" : "זוג";
+    const rest =
+      h.burdenRest && h.burdenRest > 0 ? ` +${h.burdenRest} מנוחה` : "";
+    return `טבלת שעות · ${kind}${rest}`;
+  }
+  return FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "");
+}
 
 const EMPTY_FLAGS: PersonalFlags = {
   no_guard: false,
@@ -48,6 +56,8 @@ function flagsFromRequest(r: ProfileRequest): PersonalFlags {
     no_kitchen: r.no_kitchen,
   };
 }
+
+const FLAG_KEYS = Object.keys(PERSONAL_FLAG_LABELS) as (keyof PersonalFlags)[];
 
 function activeFlagsList(flags: PersonalFlags): string[] {
   return FLAG_KEYS.filter((k) => flags[k]).map((k) => PERSONAL_FLAG_LABELS[k]);
@@ -230,8 +240,14 @@ export default function ProfilePage() {
                     <span className="mono text-xs">{h.timeLabel}</span>
                     <span>{h.positionName}</span>
                     <span className="text-ink2 text-xs">
-                      {MISSION_TYPE_LABELS[h.missionType]} ·{" "}
-                      {FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "")}
+                      {MISSION_TYPE_LABELS[h.missionType]} · {fairnessHistoryLabel(h)}
+                      {h.burdenBase != null && (
+                        <span className="text-ink3">
+                          {" "}
+                          ({h.burdenBase}
+                          {h.burdenRest ? `+${h.burdenRest}` : ""})
+                        </span>
+                      )}
                     </span>
                     <span className="mr-auto font-semibold text-accent">
                       +{h.points}

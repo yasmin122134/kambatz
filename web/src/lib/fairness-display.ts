@@ -12,12 +12,12 @@ import {
 } from "@/lib/types";
 
 /** Buckets that affect scoring and appear in the «הצעת שינוי» form. */
-export const EDITABLE_FAIRNESS_BUCKETS: FairnessBucket[] = [
+export const EDITABLE_FAIRNESS_BUCKETS = [
   "standby_a",
   "standby_b",
   "duty",
   "kitchen",
-];
+] as const satisfies readonly FairnessBucket[];
 
 /** הסבר מדויק לדלי «ניתן לעריכה» — לא תלוי ב-types הישנים. */
 export const FAIRNESS_EDITABLE_HELP: Record<

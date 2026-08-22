@@ -15,7 +15,8 @@ import {
   syncAssignmentSeats,
 } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
-import { canAssignKind } from "@/lib/scheduling-engine";
+import { loadApprovedIssues } from "@/lib/issues";
+import { canAssignKind, blockedByIssue, issueBlockMessage } from "@/lib/scheduling-engine";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
@@ -42,6 +43,7 @@ function assertCanAssign(
   person: Person | undefined,
   slot: ReturnType<typeof flattenMissionSlots>[0] | undefined,
   personName: string,
+  issues: Awaited<ReturnType<typeof loadApprovedIssues>>,
 ): string | null {
   if (!slot) return "משמרת לא נמצאה";
   if (!person) return `${personName}: לא נמצא במחזור`;
@@ -53,6 +55,9 @@ function assertCanAssign(
       return `${personName}: רק קצין תורן יכול לשמש בתפקיד זה`;
     }
     return `${personName}: לא זכאי לתפקיד זה`;
+  }
+  if (blockedByIssue(personName, slot, issues)) {
+    return issueBlockMessage(personName, slot);
   }
   return null;
 }
@@ -186,12 +191,13 @@ export async function PATCH(request: Request, { params }: Params) {
   const admin = await isAdmin();
   const personName = session.person.name;
   const peopleByName = await peopleByNameMap();
+  const issues = await loadApprovedIssues();
 
   let updated = mission;
 
   if (action === "take") {
     const slot = slotById(mission, slot_id);
-    const err = assertCanAssign(session.person, slot, personName);
+    const err = assertCanAssign(session.person, slot, personName, issues);
     if (err) {
       return NextResponse.json({ error: err }, { status: 400 });
     }
@@ -217,11 +223,11 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!dstName) {
       return NextResponse.json({ error: "אין עם מי להחליף" }, { status: 400 });
     }
-    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot, dstName);
+    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot, dstName, issues);
     if (srcErr) {
       return NextResponse.json({ error: srcErr }, { status: 400 });
     }
-    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot, srcName);
+    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot, srcName, issues);
     if (dstErr) {
       return NextResponse.json({ error: dstErr }, { status: 400 });
     }
@@ -239,7 +245,7 @@ export async function PATCH(request: Request, { params }: Params) {
     const slot = slotById(mission, slot_id);
     const nextName = String(name || "").trim();
     if (nextName) {
-      const err = assertCanAssign(peopleByName[nextName], slot, nextName);
+      const err = assertCanAssign(peopleByName[nextName], slot, nextName, issues);
       if (err) {
         return NextResponse.json({ error: err }, { status: 400 });
       }

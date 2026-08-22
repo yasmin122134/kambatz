@@ -124,7 +124,7 @@ function needsDutyGuardGap(
   return (aBase && bGuard) || (aGuard && bBase);
 }
 
-function blockedByIssue(
+export function blockedByIssue(
   personName: string,
   slot: FlatSlot,
   issues: Issue[],
@@ -145,6 +145,13 @@ function blockedByIssue(
     if (cyclicOverlap(ia, idur, a, slot.durationMinutes)) return true;
   }
   return false;
+}
+
+export function issueBlockMessage(
+  personName: string,
+  slot: Pick<FlatSlot, "positionName" | "timeLabel">,
+): string {
+  return `${personName}: אילוץ מאושר חוסם ${slot.positionName} ${slot.timeLabel}`;
 }
 
 export function canGuardPerson(person: Person): boolean {
@@ -1641,10 +1648,11 @@ function blockLabel(block: BusyBlock): string {
       : block.positionKind;
 }
 
-/** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים, זכאות לתפקיד) */
+/** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים, זכאות לתפקיד, אילוצים) */
 export function findAssignmentConflicts(
   mission: MissionDay,
   peopleByName?: Record<string, Person>,
+  issues: Issue[] = [],
 ): string[] {
   const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
   const slots = flattenMissionSlots(mission);
@@ -1698,6 +1706,10 @@ export function findAssignmentConflicts(
         } else if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
           messages.push(ineligibilityMessage(person, slot));
         }
+      }
+
+      if (blockedByIssue(name, slot, issues)) {
+        messages.push(issueBlockMessage(name, slot));
       }
 
       if (overlapsSlot(name, slot, tracker, scheduling)) {
@@ -1843,7 +1855,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
           messages.push(ineligibilityMessage(person, slot));
         }
         if (blockedByIssue(name, slot, issues)) {
-          messages.push(`${name}: blocked by approved issue during ${slot.timeLabel}`);
+          messages.push(issueBlockMessage(name, slot));
         }
         if (overlapsSlot(name, slot, tracker, scheduling)) {
           messages.push(`${name}: illegal overlap at ${slot.positionName} ${slot.timeLabel}`);

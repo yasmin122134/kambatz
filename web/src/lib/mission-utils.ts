@@ -70,12 +70,7 @@ function timeLabel(start: string, end: string) {
 }
 
 export { isBaseWorkPosition, isBaseWorkPositionName } from "@/lib/base-work-template";
-
-export function parseTimeMinutes(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
-  if (!m) return null;
-  return +m[1] * 60 + +m[2];
-}
+export { parseTimeMinutes } from "@/lib/time-interval";
 
 export function slotDurationMinutes(start: string, end: string): number {
   const a = parseTimeMinutes(start);
