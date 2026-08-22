@@ -85,6 +85,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   const standaloneGuards = searchParams.get("standalone") === "1";
   const createInitDone = useRef(false);
   const templateFixDone = useRef(false);
+  const loadedTimesRef = useRef<{ startsAt: string; endsAt: string } | null>(null);
   const [loading, setLoading] = useState(!!missionId);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -168,6 +169,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setMissionDate(m.mission_date);
     setStartsAt(formatDatetimeLocal(m.starts_at));
     setEndsAt(formatDatetimeLocal(m.ends_at));
+    loadedTimesRef.current = { startsAt: m.starts_at, endsAt: m.ends_at };
     setStatus(m.status);
     setSchedulingRules(rules);
     setPositions(positions);
@@ -236,6 +238,12 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           }
         : schedulingRules;
 
+    const missionTimesChanged =
+      missionType === "guards" &&
+      loadedTimesRef.current != null &&
+      (loadedTimesRef.current.startsAt !== isoStart ||
+        loadedTimesRef.current.endsAt !== isoEnd);
+
     const payload = {
       title: title || `${missionDate} · ${MISSION_TYPE_LABELS[missionType]}`,
       mission_type: missionType,
@@ -246,7 +254,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       positions,
       scheduling_rules,
       notes: notes || null,
-      regenerate_structure: false,
+      regenerate_structure: missionTimesChanged,
       standalone: missionType === "guards" && standaloneGuards,
     };
 
@@ -267,7 +275,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       setPositions(data.positions ?? positions);
     }
 
-    setMsg("נשמר");
+    loadedTimesRef.current = { startsAt: isoStart, endsAt: isoEnd };
+    setMsg(missionTimesChanged ? "נשמר — מבנה המשמרות סונכרן לשעות החדשות" : "נשמר");
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }

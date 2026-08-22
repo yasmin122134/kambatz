@@ -14,6 +14,7 @@ import {
   fmtTimeLabel,
   intervalsOverlap,
   missionInterval,
+  missionWallMinutes,
   parseIsoMs,
 } from "@/lib/time-interval";
 import {
@@ -31,7 +32,8 @@ function missionWindow(
   startMin = 0,
   durationHours = 24,
 ): { startsAt: string; endsAt: string } {
-  const startsAt = `${date}T${String(startHour).padStart(2, "0")}:${String(startMin).padStart(2, "0")}:00`;
+  const tz = date.includes("-08-") || date.includes("-07-") ? "+03:00" : "+02:00";
+  const startsAt = `${date}T${String(startHour).padStart(2, "0")}:${String(startMin).padStart(2, "0")}:00${tz}`;
   const startMs = parseIsoMs(startsAt)!;
   const endsAt = new Date(startMs + durationHours * 3_600_000).toISOString();
   return { startsAt, endsAt };
@@ -51,10 +53,9 @@ function slotSeatsAtMid(
 ) {
   return slots.map((s) => {
     const mid = s.startMs + (s.endMs - s.startMs) / 2;
-    const d = new Date(mid);
-    const wall = d.getHours() * 60 + d.getMinutes();
+    const wall = missionWallMinutes(mid);
     return {
-      start: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`,
+      start: fmtTimeLabel(mid),
       seats: s.requiredSeats,
       expected: getRequiredSeatsAtWallMinute(profile, wall),
     };
@@ -158,7 +159,7 @@ describe("foot patrol slot generation", () => {
       expect(slots.every((s) => s.requiredSeats === 1)).toBe(true);
       for (const s of slots) {
         const mid = s.startMs + (s.endMs - s.startMs) / 2;
-        const wall = new Date(mid).getHours() * 60 + new Date(mid).getMinutes();
+        const wall = missionWallMinutes(mid);
         expect(wall).toBeGreaterThanOrEqual(6 * 60);
         expect(wall).toBeLessThan(19 * 60);
       }

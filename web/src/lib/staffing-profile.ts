@@ -1,5 +1,6 @@
 import {
-  fmtTimeLabel,
+  fmtMissionTimeLabel,
+  missionWallMinutes,
   parseTimeMinutes,
   wallClockTimesInMission,
 } from "@/lib/time-interval";
@@ -25,8 +26,7 @@ function ruleContainsWallMinute(rule: DailyStaffingRule, wallMin: number): boole
 
 /** Canonical seat count at an absolute datetime (uses local wall-clock time-of-day). */
 export function getRequiredSeats(profile: StaffingProfile, datetimeMs: number): number {
-  const d = new Date(datetimeMs);
-  const wallMin = d.getHours() * 60 + d.getMinutes();
+  const wallMin = missionWallMinutes(datetimeMs);
   for (const rule of profile) {
     if (ruleContainsWallMinute(rule, wallMin)) return rule.seats;
   }
@@ -113,5 +113,5 @@ export function formatSlotDebugLine(
   endMs: number,
   seats: number,
 ): string {
-  return `${positionName}\n${fmtTimeLabel(startMs)}–${fmtTimeLabel(endMs)} | seats=${seats}`;
+  return `${positionName}\n${fmtMissionTimeLabel(startMs)}–${fmtMissionTimeLabel(endMs)} | seats=${seats}`;
 }

@@ -30,10 +30,35 @@ export function parseTimeMinutes(s: string): number | null {
   return h * 60 + min;
 }
 
-export function fmtTimeLabel(ms: number): string {
-  const d = new Date(ms);
-  const m = d.getHours() * 60 + d.getMinutes();
-  return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+export function fmtTimeLabel(ms: number, timeZone = MISSION_WALL_TZ): string {
+  return fmtMissionTimeLabel(ms, timeZone);
+}
+
+export function missionWallMinutes(ms: number, timeZone = MISSION_WALL_TZ): number {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date(ms));
+  const h = +(parts.find((p) => p.type === "hour")?.value ?? 0);
+  const min = +(parts.find((p) => p.type === "minute")?.value ?? 0);
+  return h * 60 + min;
+}
+
+/** Add minutes on the mission wall clock (always Israel local time). */
+export function addWallClockMinutes(
+  ms: number,
+  minutes: number,
+  timeZone = MISSION_WALL_TZ,
+): number {
+  const midnight = localMissionMidnightMs(ms, timeZone);
+  const dayOffset = Math.floor((ms - midnight) / 86_400_000);
+  const wallMin = missionWallMinutes(ms, timeZone);
+  const total = wallMin + minutes;
+  const extraDays = Math.floor(total / 1440);
+  const normalized = ((total % 1440) + 1440) % 1440;
+  return midnight + (dayOffset + extraDays) * 86_400_000 + normalized * 60_000;
 }
 
 export function fmtMissionTimeLabel(ms: number, timeZone = MISSION_WALL_TZ): string {
@@ -233,22 +258,22 @@ export function wallClockTimesInMission(
   wallMin: number,
   missionStartMs: number,
   missionEndMs: number,
+  timeZone = MISSION_WALL_TZ,
 ): number[] {
   const out: number[] = [];
-  const baseDate = new Date(missionStartMs);
-  baseDate.setHours(0, 0, 0, 0);
-  const baseMs = baseDate.getTime();
+  const startMidnight = localMissionMidnightMs(missionStartMs, timeZone);
   const daySpan = Math.ceil((missionEndMs - missionStartMs) / 86_400_000) + 2;
 
   for (let dayOffset = -1; dayOffset <= daySpan; dayOffset++) {
-    const t = baseMs + dayOffset * 86_400_000 + wallMin * 60_000;
+    const midnight = startMidnight + dayOffset * 86_400_000;
+    const t = midnight + wallMin * 60_000;
     if (t > missionStartMs && t < missionEndMs) out.push(t);
   }
   return out;
 }
 
 /** Add minutes using local wall-clock arithmetic (handles DST correctly). */
-export function addWallClockMinutes(ms: number, minutes: number): number {
+export function addWallClockMinutesLegacyLocal(ms: number, minutes: number): number {
   const d = new Date(ms);
   d.setMinutes(d.getMinutes() + minutes);
   return d.getTime();

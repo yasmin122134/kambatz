@@ -179,6 +179,23 @@ function slotsForStaffingSegment(
   }));
 }
 
+function alignSlotsToMissionStart(
+  slots: GeneratedPositionSlot[],
+  profile: StaffingProfile,
+  missionStartMs: number,
+): GeneratedPositionSlot[] {
+  if (getRequiredSeats(profile, missionStartMs) <= 0) return slots;
+  const first = [...slots]
+    .filter((s) => s.requiredSeats > 0)
+    .sort((a, b) => a.startMs - b.startMs)[0];
+  if (!first || first.startMs <= missionStartMs) return slots;
+  return slots.map((s) =>
+    s.startMs === first.startMs && s.endMs === first.endMs && s.requiredSeats === first.requiredSeats
+      ? { ...s, startMs: missionStartMs }
+      : s,
+  );
+}
+
 /**
  * Canonical per-position slot generator.
  * Each position gets its own intervals — staffing boundaries are hard, nominal cadence is preferred.
@@ -220,7 +237,7 @@ export function generatePositionSlots(input: GeneratePositionSlotsInput): Genera
     );
   }
 
-  return slots;
+  return alignSlotsToMissionStart(slots, staffingProfile, missionStartMs);
 }
 
 export function slotStructuralKey(positionId: string, startMs: number, endMs: number): string {

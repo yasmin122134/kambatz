@@ -17,6 +17,7 @@ import {
 } from "@/lib/mission-slot-structure";
 import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
+import { loadApprovedIssues } from "@/lib/issues";
 import type { Issue, MissionDay, Person } from "@/lib/types";
 
 export type AutoAssignResult = {
@@ -53,7 +54,7 @@ async function loadPeople(): Promise<Person[]> {
   return fetchActivePeople(supabase);
 }
 
-import { loadApprovedIssues } from "@/lib/issues";(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
+function sameDayMissionScope(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
   const date = mission.mission_date.slice(0, 10);
   return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
 }
