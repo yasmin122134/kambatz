@@ -1,4 +1,8 @@
-import { defaultBaseWorkPositions } from "@/lib/base-work-template";
+import {
+  defaultBaseWorkPositions,
+  isBaseWorkPosition,
+  materializeBaseWorkPositions,
+} from "@/lib/base-work-template";
 import {
   buildGuardDayPositions,
   footPatrolSlotsValid,
@@ -61,6 +65,7 @@ export function defaultSchedulingForType(
   const base = { ...DEFAULT_MISSION_SCHEDULING_RULES };
   if (missionType === "guards" && startsAt) {
     base.board_start = boardStartFromMissionStart(startsAt);
+    base.base_work = { ...DEFAULT_BASE_WORK_SCHEDULING_RULES };
   }
   if (missionType === "kitchen") {
     base.kitchen = { ...DEFAULT_KITCHEN_SCHEDULING_RULES };
@@ -91,6 +96,7 @@ export function standardMissionPositions(input: StandardMissionInput): MissionPo
       season: input.season ?? "summer",
       missionStartsAt: input.startsAt,
       missionEndsAt: input.endsAt,
+      baseWorkSeatsPerShift: scheduling.base_work?.seats_per_shift,
     });
   }
 
@@ -116,13 +122,27 @@ export function finalizeGuardMissionPositions(
   },
 ): MissionPosition[] {
   if (!positions?.length) return positions;
-  return syncGuardShiftSlots(positions, {
+  const baseWorkPositions = positions.filter((p) => isBaseWorkPosition(p));
+  const guardPositions = positions.filter((p) => !isBaseWorkPosition(p));
+  const synced = syncGuardShiftSlots(guardPositions, {
     shiftHours: input.scheduling?.shift_hours,
     boardStart: input.scheduling?.board_start,
     season: input.season ?? "summer",
     missionStartsAt: input.startsAt,
     missionEndsAt: input.endsAt,
+    baseWorkSeatsPerShift: input.scheduling?.base_work?.seats_per_shift,
   });
+  const baseWork =
+    baseWorkPositions.length > 0
+      ? materializeBaseWorkPositions(baseWorkPositions, input.startsAt, input.endsAt)
+      : materializeBaseWorkPositions(
+          defaultBaseWorkPositions({
+            seatsPerShift: input.scheduling?.base_work?.seats_per_shift,
+          }),
+          input.startsAt,
+          input.endsAt,
+        );
+  return [...synced, ...baseWork];
 }
 
 /** Operation A — regenerate guard slot structure from mission window + rules. */
@@ -205,6 +225,7 @@ export function missionTemplateComplete(
       "בונקר",
       "כוח עתודה",
       "קצין תורן",
+      "עבודות בסיס",
     ];
     const names = new Set(positions.map((p) => p.name));
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
@@ -213,7 +234,7 @@ export function missionTemplateComplete(
     const startsAt = opts?.startsAt ?? "2026-01-01T20:00:00";
     const endsAt = opts?.endsAt ?? "2026-01-02T20:00:00";
     return (
-      positions.length >= 12 &&
+      positions.length >= 13 &&
       required.every((n) => names.has(n)) &&
       guardSlotIdsUnique(positions) &&
       (!rear || rearVehicleSlotsValid(rear.slots, "06:00", "18:00", startsAt, endsAt)) &&

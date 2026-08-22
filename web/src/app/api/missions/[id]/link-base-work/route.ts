@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
-import { ensureLinkedBaseWork } from "@/lib/guard-day-bundle";
+import { consolidateGuardDayMission } from "@/lib/guard-day-bundle";
 import { getMissionDay } from "@/lib/missions";
 
 export async function POST(
@@ -17,18 +17,12 @@ export async function POST(
     return NextResponse.json({ error: "יום משימה לא נמצא" }, { status: 404 });
   }
   if (guards.mission_type !== "guards") {
-    return NextResponse.json({ error: "רק יום שמירות יכול לקבל עב״ס מקושר" }, { status: 400 });
+    return NextResponse.json({ error: "רק יום שמירות יכול לכלול עב״ס" }, { status: 400 });
   }
 
   try {
-    const result = await ensureLinkedBaseWork(guards);
-    if (!result) {
-      return NextResponse.json({ error: "לא ניתן ליצור עב״ס" }, { status: 400 });
-    }
-    return NextResponse.json({
-      guards: result.guards,
-      base_work: result.baseWork,
-    });
+    const consolidated = await consolidateGuardDayMission(guards);
+    return NextResponse.json({ guards: consolidated });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

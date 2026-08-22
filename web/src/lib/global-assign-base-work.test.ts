@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
+import { virtualBaseWorkMission } from "@/lib/mission-utils";
 import { runGlobalAssign } from "@/lib/global-assign";
+import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
+import { standardMissionPositions } from "@/lib/mission-templates";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import type { MissionDay, Person } from "@/lib/types";
 
@@ -23,8 +26,8 @@ function person(id: string, name: string, squad = 1): Person {
   };
 }
 
-describe("linkedGuardDayAssignScope", () => {
-  it("includes linked base_work with guards", () => {
+describe("embedded base work in guards mission", () => {
+  it("scope is single guards mission", () => {
     const guards = {
       id: "g1",
       title: "שמירות",
@@ -32,88 +35,73 @@ describe("linkedGuardDayAssignScope", () => {
       notes: "",
       mission_type: "guards" as const,
       mission_date: "2026-08-21",
-      starts_at: "2026-08-21T06:00:00Z",
-      ends_at: "2026-08-22T06:00:00Z",
-      positions: [],
-      assignments: {},
-      created_at: "",
-      updated_at: "",
-      scheduling_rules: {
-        ...DEFAULT_MISSION_SCHEDULING_RULES,
-        linked_mission_id: "b1",
-        guard_day_bundle_id: "bundle-1",
-      },
-    } satisfies MissionDay;
-    const base = {
-      id: "b1",
-      title: "עב״ס",
-      status: "draft" as const,
-      notes: "",
-      mission_type: "base_work" as const,
-      mission_date: "2026-08-21",
-      starts_at: "2026-08-21T05:30:00Z",
-      ends_at: "2026-08-21T17:00:00Z",
-      positions: [],
-      assignments: {},
-      created_at: "",
-      updated_at: "",
-      scheduling_rules: {
-        ...DEFAULT_MISSION_SCHEDULING_RULES,
-        linked_mission_id: "g1",
-        guard_day_bundle_id: "bundle-1",
-      },
-    } satisfies MissionDay;
-    const kitchen = {
-      id: "k1",
-      title: "מטבח",
-      status: "draft" as const,
-      notes: "",
-      mission_type: "kitchen" as const,
-      mission_date: "2026-08-21",
-      starts_at: "2026-08-21T04:00:00Z",
-      ends_at: "2026-08-22T04:00:00Z",
+      starts_at: "2026-08-21T20:00:00+03:00",
+      ends_at: "2026-08-22T20:00:00+03:00",
       positions: [],
       assignments: {},
       created_at: "",
       updated_at: "",
       scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
     } satisfies MissionDay;
-    const scope = linkedGuardDayAssignScope(guards, [guards, base, kitchen]);
-    expect(scope.map((m) => m.id)).toEqual(["b1", "g1"]);
+    expect(linkedGuardDayAssignScope(guards, [guards]).map((m) => m.id)).toEqual(["g1"]);
   });
-});
 
-describe("runGlobalAssign base_work units", () => {
-  it("creates basework shift units instead of per-seat units", () => {
+  it("validates base work slots inside guard mission window", () => {
+    const positions = standardMissionPositions({
+      missionType: "guards",
+      startsAt: "2026-08-21T20:00:00+03:00",
+      endsAt: "2026-08-22T20:00:00+03:00",
+      scheduling: DEFAULT_MISSION_SCHEDULING_RULES,
+    });
     const mission = {
-      id: "b1",
-      title: "עב״ס",
+      id: "g1",
+      title: "שמירות",
       status: "draft" as const,
       notes: "",
-      mission_type: "base_work" as const,
+      mission_type: "guards" as const,
       mission_date: "2026-08-21",
-      starts_at: "2026-08-21T05:30:00Z",
-      ends_at: "2026-08-21T17:00:00Z",
-      positions: [
-        {
-          id: "p1",
-          name: "עב״ס",
-          kind: "duty" as const,
-          slots: [
-            {
-              id: "s1",
-              start_time: "08:30",
-              end_time: "11:30",
-              seat_count: 14,
-            },
-          ],
-        },
-      ],
-      assignments: { s1: Array(14).fill("") },
+      starts_at: "2026-08-21T20:00:00+03:00",
+      ends_at: "2026-08-22T20:00:00+03:00",
+      positions,
+      assignments: {},
       created_at: "",
       updated_at: "",
       scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
     } satisfies MissionDay;
+    expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+    expect(virtualBaseWorkMission(mission)?.positions.length).toBeGreaterThan(0);
+  });
+
+  it("assigns base work shift units in guards mission", () => {
+    const positions = standardMissionPositions({
+      missionType: "guards",
+      startsAt: "2026-08-21T20:00:00+03:00",
+      endsAt: "2026-08-22T20:00:00+03:00",
+      scheduling: DEFAULT_MISSION_SCHEDULING_RULES,
+    });
+    const basePos = positions.find((p) => p.name.includes("עבודות בסיס"));
+    expect(basePos).toBeTruthy();
+    const assignments: Record<string, string[]> = {};
+    for (const slot of basePos!.slots) {
+      assignments[slot.id] = Array(slot.seat_count).fill("");
+    }
+
+    const mission = {
+      id: "g1",
+      title: "שמירות",
+      status: "draft" as const,
+      notes: "",
+      mission_type: "guards" as const,
+      mission_date: "2026-08-21",
+      starts_at: "2026-08-21T20:00:00+03:00",
+      ends_at: "2026-08-22T20:00:00+03:00",
+      positions,
+      assignments,
+      created_at: "",
+      updated_at: "",
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
+    } satisfies MissionDay;
+
     const people = Array.from({ length: 56 }, (_, i) =>
       person(`p${i}`, `צוער ${i + 1}`, (i % 4) + 1),
     );
@@ -125,7 +113,8 @@ describe("runGlobalAssign base_work units", () => {
       meanPrior: 0,
       keepExisting: false,
     });
-    const seats = output.assignmentsByMission.get("b1")?.s1 || [];
+    const baseSlotId = basePos!.slots[0].id;
+    const seats = output.assignmentsByMission.get("g1")?.[baseSlotId] || [];
     expect(seats.filter(Boolean).length).toBeGreaterThanOrEqual(13);
   });
 });

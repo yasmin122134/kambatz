@@ -249,11 +249,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       setPositions(data.positions ?? positions);
     }
 
-    setMsg(
-      data.linked_base_work_id
-        ? "נשמר — נוצר גם יום עב״ס מקושר (מופיע בלוח תחת «עבודות בסיס»)"
-        : "נשמר",
-    );
+    setMsg("נשמר");
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }
@@ -271,12 +267,12 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
     await load();
-    setMsg("נוצר יום עב״ס מקושר — ערכו אותו מהקישור למטה או מהלוח");
+    setMsg("עב״ס נוסף כעמדות ביום השמירות — «סנכרן מבנה משמרות» ואז «שמור»");
   }
 
   async function runAutoAssign() {
     if (!missionId) return;
-    if (!confirm("ליצור שיבוץ חכם לשמירות ועב״ס המקושרים? משבצות שכבר מלאות יישארו.")) return;
+    if (!confirm("ליצור שיבוץ חכם לשמירות ועב״ס? משבצות שכבר מלאות יישארו.")) return;
     setAutoAssigning(true);
     setErr("");
     setMsg("");
@@ -492,29 +488,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         <h4 className="font-display text-base">כללי שיבוץ ליום זה</h4>
         <p className="hint text-sm">
           משמשים בשיבוץ החכם — מנוחה, כלל 4-8, אורך משמרת. כרמל א/ב בטבלת הצדק.
-          {schedulingRules.guard_day_bundle_id && (
-            <> · יום מאוחד שמירות+עב״ס — השיבוץ מונע חפיפות (מלבד כרמל ב׳).</>
+          {missionType === "guards" && (
+            <> · עב״ס הוא עמדה ביום השמירות — השיבוץ מונע חפיפות (מלבד כרמל ב׳).</>
           )}
         </p>
-        {schedulingRules.linked_mission_id && (
-          <p className="hint text-sm">
-            משימה מקושרת:{" "}
-            <Link
-              href={`/admin/missions/${schedulingRules.linked_mission_id}`}
-              className="underline"
-            >
-              {missionType === "guards" ? "עריכת עב״ס" : "עריכת שמירות"}
-            </Link>
-          </p>
-        )}
         {missionType === "guards" &&
           missionId &&
-          !schedulingRules.linked_mission_id &&
-          !schedulingRules.guard_day_bundle_id && (
+          !positions.some((p) => p.name.includes("עבודות בסיס") || p.name.includes("עב״ס")) && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
               <p className="mb-2">
-                ליום זה אין עב״ס מקושר. עב״ס נוצר אוטומטית עם שמירות חדשות — ליום קיים
-                אפשר ליצור אותו כאן.
+                ליום זה חסרות עמדות עב״ס. לחצו כדי להוסיף אותן ליום השמירות (לא משימה נפרדת).
               </p>
               <button
                 type="button"
@@ -522,7 +505,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 disabled={linkingBaseWork}
                 onClick={createLinkedBaseWork}
               >
-                {linkingBaseWork ? "יוצר…" : "+ צור עב״ס ליום זה"}
+                {linkingBaseWork ? "מוסיף…" : "+ הוסף עב״ס ליום זה"}
               </button>
             </div>
           )}
@@ -714,7 +697,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             </button>
           </>
         )}
-        {missionType === "base_work" && (
+        {(missionType === "guards" || missionType === "base_work") && (
           <>
             <ul className="hint text-sm list-disc pr-5 space-y-1">
               {STANDARD_BASE_WORK_SUMMARY.map((line) => (
@@ -783,6 +766,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               className="btn-sm"
               onClick={() => {
                 if (!confirm("לטעון מחדש חלונות עב״ס מהפקודה?")) return;
+                if (missionType === "guards") {
+                  regenerateGuardStructure();
+                  return;
+                }
                 applyStandardTemplate(
                   "base_work",
                   { missionDate, startsAt, endsAt },

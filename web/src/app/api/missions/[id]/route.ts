@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { consolidateGuardDayMission } from "@/lib/guard-day-bundle";
 import { isAdmin } from "@/lib/auth";
 import {
   defaultSchedulingForType,
@@ -59,11 +60,18 @@ function assertCanAssign(
 export async function GET(_request: Request, { params }: Params) {
   const { id } = await params;
   try {
-    const mission = await getMissionDay(id);
+    let mission = await getMissionDay(id);
     if (!mission) {
       return NextResponse.json({ error: "לא נמצא" }, { status: 404 });
     }
     const admin = await isAdmin();
+    if (
+      admin &&
+      mission.mission_type === "guards" &&
+      mission.scheduling_rules?.linked_mission_id
+    ) {
+      mission = await consolidateGuardDayMission(mission);
+    }
     if (mission.status !== "published" && !admin) {
       return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
     }
@@ -130,7 +138,11 @@ export async function PUT(request: Request, { params }: Params) {
       scheduling_rules,
       notes: body.notes ?? existing.notes,
     });
-    return NextResponse.json(saved);
+    const out =
+      mission_type === "guards"
+        ? await consolidateGuardDayMission(saved)
+        : saved;
+    return NextResponse.json(out);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

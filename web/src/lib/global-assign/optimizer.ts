@@ -95,7 +95,9 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
 
       if (!emptyIndices.length) continue;
 
-      if (mission.mission_type === "base_work") {
+      const slotIsBaseWork = slot.missionType === "base_work";
+
+      if (slotIsBaseWork) {
         const fixedNames = keepExisting ? seats.filter(Boolean) : [];
         units.push({
           kind: "basework",

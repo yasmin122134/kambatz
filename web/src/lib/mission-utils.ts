@@ -16,6 +16,11 @@ import {
   type BaseWorkSchedulingRules,
   type KitchenSchedulingRules,
 } from "@/lib/types";
+import {
+  isBaseWorkPosition,
+  isBaseWorkPositionName,
+  materializeBaseWorkPositions,
+} from "@/lib/base-work-template";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
 export type FlatSlot = {
@@ -63,6 +68,8 @@ function timeLabel(start: string, end: string) {
   return `${start}–${end}`;
 }
 
+export { isBaseWorkPosition, isBaseWorkPositionName } from "@/lib/base-work-template";
+
 export function parseTimeMinutes(s: string): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
   if (!m) return null;
@@ -87,6 +94,7 @@ export function defaultPositionKind(
   if (/כרמל\s*ב/.test(n)) return "standby_carmel_b";
   if (missionType === "guards" && /קצין\s*תורן/.test(n)) return "officer_duty";
   if (missionType === "guards" && /עתודה/.test(n)) return "duty";
+  if (isBaseWorkPositionName(n)) return "duty";
   if (missionType === "kitchen") return "kitchen";
   if (missionType === "base_work") return "duty";
   return "guard";
@@ -230,7 +238,9 @@ export function flattenMissionSlots(
       const startMin = parseTimeMinutes(slot.start_time) ?? 0;
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
-      const isBaseWorkSlot = mission.mission_type === "base_work";
+      const isBaseWorkSlot =
+        mission.mission_type === "base_work" || isBaseWorkPosition(pos);
+      const slotMissionType: MissionType = isBaseWorkSlot ? "base_work" : mission.mission_type;
       const abs = resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;
       const startAtMs = abs.startMs;
@@ -246,7 +256,7 @@ export function flattenMissionSlots(
         positionKind: kind,
         sameRoom,
         sameGender,
-        missionType: mission.mission_type,
+        missionType: slotMissionType,
         startTime: slot.start_time,
         endTime: slot.end_time,
         timeLabel: timeLabel(slot.start_time, slot.end_time),
@@ -321,6 +331,22 @@ export function syncAssignmentSeats(
     }
   }
   return out;
+}
+
+/** תצוגת עב״ס מהעמדות המוטמעות ביום שמירות (ללוח). */
+export function virtualBaseWorkMission(guards: MissionDay): MissionDay | null {
+  const positions = (guards.positions || []).filter((p) => isBaseWorkPosition(p));
+  if (!positions.length) return null;
+  return {
+    ...guards,
+    title: `${guards.mission_date} · עב״ס`,
+    mission_type: "base_work",
+    positions: materializeBaseWorkPositions(
+      positions,
+      guards.starts_at,
+      guards.ends_at,
+    ),
+  };
 }
 
 const MISSION_TYPE_SHORT: Record<MissionType, string> = {

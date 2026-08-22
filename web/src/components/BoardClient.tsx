@@ -16,6 +16,7 @@ import {
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
+import { virtualBaseWorkMission } from "@/lib/mission-utils";
 import { boardStartFromMissionStart } from "@/lib/mission-templates";
 import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules, parseTimeMinutes } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
@@ -76,7 +77,11 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   );
 
   const guardsMission = dayMissions.find((m) => m.mission_type === "guards");
-  const baseMission = dayMissions.find((m) => m.mission_type === "base_work");
+  const baseMission =
+    (guardsMission && virtualBaseWorkMission(guardsMission)) ||
+    dayMissions.find((m) => m.mission_type === "base_work") ||
+    null;
+  const baseWorkMissionId = guardsMission?.id ?? baseMission?.id;
   const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
 
   const mySlots = useMemo(() => {
@@ -439,8 +444,8 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
           )}
         </PanelSection>
 
-        <PanelSection title="עבודות בסיס" mission={baseMission} empty="אין עב״ס ביום זה">
-          {baseMission && (
+        <PanelSection title="עבודות בסיס" mission={baseMission ?? undefined} empty="אין עב״ס ביום זה">
+          {baseMission && baseWorkMissionId && (
             <MissionPanel
               mission={baseMission}
               personName={personName}
@@ -450,7 +455,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
               swapMode={swapMode}
               onStartSwap={(slotId, seatIndex, label) => {
                 setSwapTarget({
-                  missionId: baseMission.id,
+                  missionId: baseWorkMissionId,
                   slotId,
                   seatIndex,
                   label,
@@ -459,12 +464,12 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
               }}
               onSwapMode={setSwapMode}
               onTake={(slotId, seatIndex) =>
-                handleTake(baseMission.id, slotId, seatIndex)
+                handleTake(baseWorkMissionId, slotId, seatIndex)
               }
               onSwap={(toSlotId, toSeatIndex) => {
                 if (!swapTarget) return;
                 handleSwap(
-                  baseMission.id,
+                  baseWorkMissionId,
                   { slotId: swapTarget.slotId, seatIndex: swapTarget.seatIndex },
                   { slotId: toSlotId, seatIndex: toSeatIndex },
                 );

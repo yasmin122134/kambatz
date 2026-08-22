@@ -1,3 +1,8 @@
+import {
+  defaultBaseWorkPositions,
+  isBaseWorkPosition,
+  materializeBaseWorkPositions,
+} from "@/lib/base-work-template";
 import type { MissionPosition, MissionPositionKind, MissionSlot } from "@/lib/types";
 import {
   debugFormatPositionSlots,
@@ -350,6 +355,7 @@ export type BuildGuardDayOptions = {
   missionStartsAt?: string;
   missionEndsAt?: string;
   carmelSeats?: number;
+  baseWorkSeatsPerShift?: number;
 };
 
 type GuardDayContext = {
@@ -511,6 +517,14 @@ export function syncGuardShiftSlots(
 
   return ensureUniqueSlotIds(
     positions.map((pos) => {
+      if (isBaseWorkPosition(pos)) {
+        return {
+          ...pos,
+          slots: materializeBaseWorkPositions([pos], ctx.missionStartsAt, ctx.missionEndsAt)[0]
+            .slots,
+        };
+      }
+
       if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") {
         const carmel = carmelSlotFromMission(
           ctx.missionStartsAt,
@@ -557,7 +571,17 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     guardPosition("קצין תורן", [], "officer_duty"),
   ];
 
-  return syncGuardShiftSlots(positions, options);
+  const synced = syncGuardShiftSlots(positions, options);
+  const hasBaseWork = synced.some((p) => isBaseWorkPosition(p));
+  if (hasBaseWork) return synced;
+
+  const baseWork = defaultBaseWorkPositions({
+    seatsPerShift: options?.baseWorkSeatsPerShift,
+  });
+  return [
+    ...synced,
+    ...materializeBaseWorkPositions(baseWork, ctx.missionStartsAt, ctx.missionEndsAt),
+  ];
 }
 
 export function defaultGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
@@ -576,6 +600,9 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "duty":
       if (pos.name.includes("עתודה")) {
         return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
+      }
+      if (pos.name.includes("עבודות בסיס") || pos.name.includes("עב״ס")) {
+        return "3 חלונות (בוקר/צהריים/ערב) — צוות שלם 13–15 בכל חלון, צוות אחד במנוחה.";
       }
       return null;
     default:

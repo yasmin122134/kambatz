@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
-import { ensureLinkedBaseWork } from "@/lib/guard-day-bundle";
+import { consolidateGuardDayMission } from "@/lib/guard-day-bundle";
 import {
   defaultSchedulingForType,
   resolveMissionPositions,
@@ -84,16 +84,8 @@ export async function POST(request: Request) {
     });
 
     if (mission_type === "guards" && body.standalone !== true) {
-      const linked = await ensureLinkedBaseWork(saved);
-      if (linked) {
-        return NextResponse.json(
-          {
-            ...linked.guards,
-            linked_base_work_id: linked.baseWork.id,
-          },
-          { status: 201 },
-        );
-      }
+      const consolidated = await consolidateGuardDayMission(saved);
+      return NextResponse.json(consolidated, { status: 201 });
     }
 
     return NextResponse.json(saved, { status: 201 });

@@ -1,10 +1,22 @@
 import {
+  defaultBaseWorkPositions,
+  isBaseWorkPosition,
+  materializeBaseWorkPositions,
+} from "@/lib/base-work-template";
+import {
   boardStartFromMissionStart,
   defaultMissionWindow,
   defaultSchedulingForType,
+  finalizeGuardMissionPositions,
   standardMissionPositions,
 } from "@/lib/mission-templates";
-import { emptyAssignments, getMissionDay, saveMissionDay } from "@/lib/missions";
+import {
+  deleteMissionDay,
+  emptyAssignments,
+  getMissionDay,
+  saveMissionDay,
+  syncAssignmentSeats,
+} from "@/lib/missions";
 import type { MissionDay, MissionSchedulingRules } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
@@ -12,7 +24,6 @@ export const DEFAULT_DUTY_GUARD_GAP_MINUTES = 90;
 
 export type GuardDayBundleInput = {
   mission_date: string;
-  /** התחלת יום שמירות (ISO). ברירת מחדל: 20:00 באותו תאריך */
   guard_starts_at?: string;
   guard_ends_at?: string;
   title?: string;
@@ -20,9 +31,8 @@ export type GuardDayBundleInput = {
   scheduling?: Partial<MissionSchedulingRules>;
 };
 
-function sharedScheduling(
+function guardsScheduling(
   guardStartsAt: string,
-  bundleId: string,
   extra?: Partial<MissionSchedulingRules>,
 ): MissionSchedulingRules {
   const board = boardStartFromMissionStart(guardStartsAt);
@@ -31,136 +41,124 @@ function sharedScheduling(
     ...defaultSchedulingForType("guards", guardStartsAt),
     ...extra,
     board_start: board,
-    guard_day_bundle_id: bundleId,
     duty_guard_gap_minutes:
       extra?.duty_guard_gap_minutes ?? DEFAULT_DUTY_GUARD_GAP_MINUTES,
   };
 }
 
-/** יוצר זוג משימות: שמירות + עב״ס — מקושרים, rules משותפים, board_start אחיד */
+/** יוצר יום שמירות אחד — כולל עמדות עב״ס (לא משימה נפרדת). */
 export async function createGuardDayBundle(
   input: GuardDayBundleInput,
-): Promise<{ guards: MissionDay; baseWork: MissionDay; bundleId: string }> {
+): Promise<{ guards: MissionDay; bundleId: string }> {
   const mission_date = input.mission_date.slice(0, 10);
   const guardWindow = defaultMissionWindow("guards", mission_date);
   const guardStartsAt = input.guard_starts_at ?? guardWindow.startsAt;
   const guardEndsAt = input.guard_ends_at ?? guardWindow.endsAt;
-  const baseWindow = defaultMissionWindow("base_work", mission_date);
   const bundleId = crypto.randomUUID();
   const status = input.status ?? "draft";
+  const scheduling = {
+    ...guardsScheduling(guardStartsAt, input.scheduling),
+    guard_day_bundle_id: bundleId,
+  };
 
-  const scheduling = sharedScheduling(guardStartsAt, bundleId, input.scheduling);
-
-  const guardPositions = standardMissionPositions({
+  const positions = standardMissionPositions({
     missionType: "guards",
     startsAt: guardStartsAt,
     endsAt: guardEndsAt,
     scheduling,
   });
 
-  const basePositions = standardMissionPositions({
-    missionType: "base_work",
-    startsAt: baseWindow.startsAt,
-    endsAt: baseWindow.endsAt,
-    scheduling,
-  });
-
   const guards = await saveMissionDay({
-    title: input.title?.trim() || `${mission_date} · שמירות`,
+    title: input.title?.trim() || `${mission_date} · שמירות+עב״ס`,
     mission_type: "guards",
     mission_date,
     starts_at: guardStartsAt,
     ends_at: guardEndsAt,
     status,
-    positions: guardPositions,
-    assignments: emptyAssignments(guardPositions),
-    scheduling_rules: {
-      ...scheduling,
-      guard_day_bundle_id: bundleId,
-    },
-    notes: "חלק מיום שמירות+עב״ס מאוחד",
+    positions,
+    assignments: emptyAssignments(positions),
+    scheduling_rules: scheduling,
+    notes: "יום שמירות — כולל עבודות בסיס כעמדות",
   });
 
-  const baseWork = await saveMissionDay({
-    title: `${mission_date} · עב״ס`,
-    mission_type: "base_work",
-    mission_date,
-    starts_at: baseWindow.startsAt,
-    ends_at: baseWindow.endsAt,
-    status,
-    positions: basePositions,
-    assignments: emptyAssignments(basePositions),
-    scheduling_rules: {
-      ...scheduling,
-      linked_mission_id: guards.id,
-      guard_day_bundle_id: bundleId,
-    },
-    notes: "חלק מיום שמירות+עב״ס מאוחד — לא לשבץ חופף לשמירות (מלבד כרמל ב׳)",
-  });
-
-  const guardsLinked = await saveMissionDay({
-    ...guards,
-    scheduling_rules: {
-      ...scheduling,
-      linked_mission_id: baseWork.id,
-      guard_day_bundle_id: bundleId,
-    },
-  });
-
-  return { guards: guardsLinked, baseWork, bundleId };
+  return { guards, bundleId };
 }
 
-/** מוסיף משימת עב״ס מקושרת ליום שמירות קיים (אם עדיין אין). */
+/** ממזג עב״ס מקושר (משימה נפרדת ישנה) לתוך יום השמירות. */
+export async function consolidateGuardDayMission(
+  guards: MissionDay,
+): Promise<MissionDay> {
+  if (guards.mission_type !== "guards") return guards;
+
+  let positions = [...(guards.positions || [])];
+  let assignments = { ...guards.assignments };
+  const linkedId = guards.scheduling_rules?.linked_mission_id;
+  let linked: MissionDay | null = null;
+  if (linkedId) {
+    linked = await getMissionDay(linkedId);
+  }
+
+  const hasEmbeddedBaseWork = positions.some((p) => isBaseWorkPosition(p));
+  if (!hasEmbeddedBaseWork) {
+    if (linked?.mission_type === "base_work") {
+      positions.push(...linked.positions.filter((p) => isBaseWorkPosition(p)));
+      assignments = { ...assignments, ...linked.assignments };
+    } else {
+      positions.push(
+        ...defaultBaseWorkPositions({
+          seatsPerShift: guards.scheduling_rules?.base_work?.seats_per_shift,
+        }),
+      );
+    }
+  } else if (linked?.mission_type === "base_work") {
+    for (const pos of linked.positions.filter((p) => isBaseWorkPosition(p))) {
+      const existing = positions.find((p) => isBaseWorkPosition(p));
+      if (existing) {
+        for (const [slotId, seats] of Object.entries(linked.assignments)) {
+          if (!assignments[slotId]?.some(Boolean)) {
+            assignments[slotId] = seats;
+          }
+        }
+      }
+    }
+  }
+
+  positions = finalizeGuardMissionPositions(positions, {
+    startsAt: guards.starts_at,
+    endsAt: guards.ends_at,
+    scheduling: guards.scheduling_rules,
+  });
+  assignments = syncAssignmentSeats(positions, assignments);
+
+  const scheduling = { ...guards.scheduling_rules };
+  delete scheduling.linked_mission_id;
+
+  const saved = await saveMissionDay({
+    ...guards,
+    positions,
+    assignments,
+    scheduling_rules: scheduling,
+    notes: guards.notes?.includes("עב״ס") ? guards.notes : "יום שמירות — כולל עבודות בסיס כעמדות",
+  });
+
+  if (linked?.mission_type === "base_work") {
+    try {
+      await deleteMissionDay(linked.id);
+    } catch {
+      // ignore — orphan row is harmless
+    }
+  }
+
+  return saved;
+}
+
+/** @deprecated Use consolidateGuardDayMission — kept for API compatibility */
 export async function ensureLinkedBaseWork(
   guards: MissionDay,
 ): Promise<{ guards: MissionDay; baseWork: MissionDay } | null> {
   if (guards.mission_type !== "guards") return null;
-  if (guards.scheduling_rules?.linked_mission_id) {
-    const existing = await getMissionDay(guards.scheduling_rules.linked_mission_id);
-    if (existing) return { guards, baseWork: existing };
-  }
-
-  const bundleId = guards.scheduling_rules?.guard_day_bundle_id ?? crypto.randomUUID();
-  const scheduling = sharedScheduling(
-    guards.starts_at,
-    bundleId,
-    guards.scheduling_rules,
-  );
-  const baseWindow = defaultMissionWindow("base_work", guards.mission_date);
-  const basePositions = standardMissionPositions({
-    missionType: "base_work",
-    startsAt: baseWindow.startsAt,
-    endsAt: baseWindow.endsAt,
-    scheduling,
-  });
-
-  const baseWork = await saveMissionDay({
-    title: `${guards.mission_date} · עב״ס`,
-    mission_type: "base_work",
-    mission_date: guards.mission_date,
-    starts_at: baseWindow.startsAt,
-    ends_at: baseWindow.endsAt,
-    status: guards.status,
-    positions: basePositions,
-    assignments: emptyAssignments(basePositions),
-    scheduling_rules: {
-      ...scheduling,
-      linked_mission_id: guards.id,
-      guard_day_bundle_id: bundleId,
-    },
-    notes: "חלק מיום שמירות+עב״ס מאוחד — לא לשבץ חופף לשמירות (מלבד כרמל ב׳)",
-  });
-
-  const guardsLinked = await saveMissionDay({
-    ...guards,
-    scheduling_rules: {
-      ...scheduling,
-      linked_mission_id: baseWork.id,
-      guard_day_bundle_id: bundleId,
-    },
-  });
-
-  return { guards: guardsLinked, baseWork };
+  const consolidated = await consolidateGuardDayMission(guards);
+  return { guards: consolidated, baseWork: consolidated };
 }
 
 export function missionsInBundle(
@@ -172,27 +170,19 @@ export function missionsInBundle(
   return missions.filter((m) => m.scheduling_rules?.guard_day_bundle_id === bundleId);
 }
 
-/** שמירות + עב״ס מקושרים — לשיבוץ חכם (לא כולל מטבח/משימות אחרות באותו תאריך). */
+/** Scope for smart assign — guards mission includes embedded base work. */
 export function linkedGuardDayAssignScope(
   mission: MissionDay,
   allMissions: MissionDay[],
 ): MissionDay[] {
+  if (mission.mission_type === "guards") return [mission];
   const bundle = missionsInBundle(allMissions, mission);
-  if (bundle.length > 1) {
-    return sortAssignScope(bundle);
-  }
+  const guards = bundle.find((m) => m.mission_type === "guards");
+  if (guards) return [guards];
   const linkedId = mission.scheduling_rules?.linked_mission_id;
-  if (!linkedId) return [mission];
-  const linked = allMissions.find((m) => m.id === linkedId);
-  if (!linked) return [mission];
-  return sortAssignScope([mission, linked]);
-}
-
-function sortAssignScope(missions: MissionDay[]): MissionDay[] {
-  const order: Record<string, number> = { kitchen: 0, base_work: 1, guards: 2 };
-  return [...missions].sort(
-    (a, b) =>
-      (order[a.mission_type] ?? 9) - (order[b.mission_type] ?? 9) ||
-      a.starts_at.localeCompare(b.starts_at),
-  );
+  if (linkedId) {
+    const linked = allMissions.find((m) => m.id === linkedId);
+    if (linked?.mission_type === "guards") return [linked];
+  }
+  return [mission];
 }

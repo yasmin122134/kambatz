@@ -27,7 +27,6 @@ export async function POST(request: Request) {
       {
         bundle_id: result.bundleId,
         guards: result.guards,
-        base_work: result.baseWork,
       },
       { status: 201 },
     );
