@@ -51,9 +51,21 @@ export default async function HomePage() {
               </ul>
             )}
 
-            <Link href="/board" className="btn-pri w-full text-center block">
+            <Link href="/board" className="btn-pri w-full text-center block mb-3">
               לרשימה המלאה
             </Link>
+
+            <a
+              href="/api/me/calendar"
+              className="btn w-full text-center block"
+              download
+            >
+              הוסף את המשמרות שלי ליומן (Google / Apple)
+            </a>
+            <p className="hint text-xs mt-2 text-center">
+              אחרי הורדה — פתחו את הקובץ או ייבאו ל-Google Calendar. חזרו לכאן
+              אחרי כל פרסום לוח מעודכן.
+            </p>
           </section>
         )}
       </main>

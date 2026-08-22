@@ -331,6 +331,9 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
           <button type="button" className="btn-sm" onClick={loadMissions}>
             רענון
           </button>
+          <a href="/api/me/calendar" className="btn-sm" download>
+            יומן שלי
+          </a>
           {isAdminUser && (
             <>
               <button

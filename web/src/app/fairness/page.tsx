@@ -4,16 +4,23 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import {
+  EDITABLE_FAIRNESS_BUCKETS,
+  editableBucketHelp,
+  editableBucketLabel,
+  FAIRNESS_OVERVIEW,
+  guardBandRows,
+  GUARD_SCORING_EXPLANATION,
+  mergeProposedFairnessRules,
+  MISSION_TO_BUCKET,
+  REST_PENALTY_EXPLANATION,
+  SOLO_PAIR_DEFINITION,
+  SQUAD_EXPLANATION,
+} from "@/lib/fairness-display";
+import { REST_PENALTY_TIERS } from "@/lib/guard-burden";
+import {
   DEFAULT_FAIRNESS_RULES,
-  FAIRNESS_BUCKET_HELP,
-  FAIRNESS_BUCKET_LABELS,
-  ISSUE_STATUS_LABELS,
-  SCHEDULER_FAIRNESS_EXPLANATION,
-  type FairnessBucket,
   type FairnessRules,
 } from "@/lib/types";
-
-const BUCKETS = Object.keys(FAIRNESS_BUCKET_LABELS) as FairnessBucket[];
 
 export default function FairnessPage() {
   const [rules, setRules] = useState<FairnessRules>(DEFAULT_FAIRNESS_RULES);
@@ -48,7 +55,10 @@ export default function FairnessPage() {
     const res = await fetch("/api/fairness/requests", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proposed_rules: proposed, note }),
+      body: JSON.stringify({
+        proposed_rules: mergeProposedFairnessRules(rules, proposed),
+        note,
+      }),
     });
     const data = await res.json();
     setSaving(false);
@@ -65,50 +75,141 @@ export default function FairnessPage() {
   if (loading) {
     return (
       <AppShell title="טבלת צדק">
-        <main className="mx-auto max-w-lg px-5 py-8">
+        <main className="mx-auto max-w-3xl px-5 py-8">
           <p className="hint">טוען…</p>
         </main>
       </AppShell>
     );
   }
 
+  const guardBands = guardBandRows();
+
   return (
     <AppShell title="טבלת צדק">
-      <main className="mx-auto max-w-2xl px-5 py-8 space-y-6">
+      <main className="mx-auto max-w-3xl px-5 py-8 space-y-6">
         <div className="card">
-          <h2 className="font-display text-xl mb-2">טבלת צדק</h2>
-          <p className="lede mb-4">
-            נקודות לשעת משימה — כך המחולל מאזן שיבוצים. כולם רואים את הטבלה;
-            שינוי דורש הצעה ואישור מפקד.
+          <h2 className="font-display text-xl mb-2">איך מחושב עומס?</h2>
+          <p className="lede mb-3">
+            השיבוץ החכם בוחר את מי שציון העומס שלו הכי נמוך. הציון משקף את מה שכבר
+            שובץ בתקופה, בתוספת התאמה מהניקוד הקודם של הצוער.
           </p>
-          <ul className="text-sm text-ink2 space-y-1 mb-4 list-disc list-inside">
-            {SCHEDULER_FAIRNESS_EXPLANATION.map((line) => (
+          <p className="text-sm font-medium mb-1">
+            ציון לשיבוץ = עומס בתקופה + (ניקוד_קודם − ממוצע) × {rules.hist}
+          </p>
+          <ul className="text-sm text-ink2 space-y-1 list-disc list-inside">
+            {FAIRNESS_OVERVIEW.map((line) => (
               <li key={line}>{line}</li>
             ))}
           </ul>
+        </div>
+
+        <div className="card space-y-4">
+          <div>
+            <h3 className="font-display text-lg mb-1">שמירות — טבלת שעות</h3>
+            <p className="text-sm text-ink2 mb-2">
+              קבועה בקוד (לא ניתנת לעריכה דרך הטבלה). זו הטבלה שבאמת קובעת עומס
+              שמירה.
+            </p>
+            <ul className="text-sm text-ink2 space-y-1 list-disc list-inside mb-3">
+              {GUARD_SCORING_EXPLANATION.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </div>
+
+          <div className="text-sm bg-surface2 rounded-lg p-3 space-y-1">
+            <p>
+              <span className="font-medium">סולו:</span> {SOLO_PAIR_DEFINITION.solo}
+            </p>
+            <p>
+              <span className="font-medium">זוג+:</span> {SOLO_PAIR_DEFINITION.pair}
+            </p>
+          </div>
 
           <div className="schedule-table-wrap overflow-x-auto">
             <table className="schedule-table w-full text-sm">
               <thead>
                 <tr>
-                  <th>סוג משימה</th>
-                  <th>נקודות לשעה</th>
+                  <th>רצועת 4 שעות</th>
+                  <th>סולו (נק׳)</th>
+                  <th>זוג+ (נק׳)</th>
+                  <th>הערה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {guardBands.map((row) => (
+                  <tr key={row.label}>
+                    <td className="font-medium mono">{row.label}</td>
+                    <td className="mono font-bold text-accent">{row.solo}</td>
+                    <td className="mono font-bold">{row.pair}</td>
+                    <td className="text-ink2 text-xs">{row.help}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card space-y-3">
+          <h3 className="font-display text-lg">עונש מנוחה בין משימות (שמירות)</h3>
+          <ul className="text-sm text-ink2 space-y-1 list-disc list-inside">
+            {REST_PENALTY_EXPLANATION.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>פער מנוחה בין משימות</th>
+                  <th>עונש (נק׳)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {REST_PENALTY_TIERS.map((tier) => (
+                  <tr key={tier.restHoursLabel}>
+                    <td>{tier.restHoursLabel}</td>
+                    <td className="mono font-bold text-accent">+{tier.penalty}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card space-y-3">
+          <h3 className="font-display text-lg">משימות אחרות — נקודות לשעה / למשמרת</h3>
+          <p className="text-sm text-ink2">
+            ערכים אלה ניתנים להצעת שינוי (לאחר אישור מפקד). ברירת המחדל מוצגת
+            בעמודה «נוכחי».
+          </p>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>סוג</th>
+                  <th>איך מחושב</th>
+                  <th>נוכחי</th>
                   <th>הסבר</th>
                 </tr>
               </thead>
               <tbody>
-                {BUCKETS.map((bucket) => (
+                {EDITABLE_FAIRNESS_BUCKETS.map((bucket) => (
                   <tr key={bucket}>
-                    <td className="font-medium">{FAIRNESS_BUCKET_LABELS[bucket]}</td>
+                    <td className="font-medium">{editableBucketLabel(bucket)}</td>
+                    <td className="text-ink2 text-xs">
+                      {bucket === "kitchen" ? "קבוע לכל משמרת" : "× שעות המשמרת"}
+                    </td>
                     <td className="mono font-bold text-accent">{rules[bucket]}</td>
-                    <td className="text-ink2 text-xs">{FAIRNESS_BUCKET_HELP[bucket]}</td>
+                    <td className="text-ink2 text-xs">{editableBucketHelp(bucket)}</td>
                   </tr>
                 ))}
                 <tr>
-                  <td className="font-medium">משקל ניקוד קודם</td>
-                  <td className="mono">{rules.hist}</td>
+                  <td className="font-medium">משקל ניקוד קודם (hist)</td>
+                  <td className="text-ink2 text-xs">× (ניקוד_קודם − ממוצע)</td>
+                  <td className="mono font-bold text-accent">{rules.hist}</td>
                   <td className="text-ink2 text-xs">
-                    כמה לספור נקודות מימים קודמים באיזון
+                    כמה לספור נקודות מימים/תקופות קודמות באיזון השיבוץ
                   </td>
                 </tr>
               </tbody>
@@ -116,18 +217,52 @@ export default function FairnessPage() {
           </div>
         </div>
 
+        <div className="card space-y-3">
+          <h3 className="font-display text-lg">מיפוי משימה → חישוב</h3>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>משימה</th>
+                  <th>איך נמדד עומס</th>
+                  <th>ניתן לערוך?</th>
+                </tr>
+              </thead>
+              <tbody>
+                {MISSION_TO_BUCKET.map((row) => (
+                  <tr key={row.mission}>
+                    <td className="font-medium">{row.mission}</td>
+                    <td>{row.scoring}</td>
+                    <td>{row.editable ? "כן — בטבלה למעלה" : "לא — קבוע בקוד"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card space-y-2">
+          <h3 className="font-display text-lg">חלוקה לצוותים (1–4)</h3>
+          <ul className="text-sm text-ink2 space-y-1 list-disc list-inside">
+            {SQUAD_EXPLANATION.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        </div>
+
         {loggedIn ? (
           <form onSubmit={submit} className="card space-y-4">
-            <h3 className="font-display text-base">הצעת שינוי לטבלה</h3>
+            <h3 className="font-display text-base">הצעת שינוי לערכים הניתנים לעריכה</h3>
             <p className="hint text-sm">
-              ערכו את הערכים המוצעים והסבירו למה — כמו בדיווח אילוץ.
+              ניתן לערוך רק כרמל א/ב, עב״ס/עתודה, מטבch ומשקל hist. טבלת השעות
+              לשמירות ועונש המנוחה קבועים בקוד.
             </p>
 
             <div className="space-y-3">
-              {BUCKETS.map((bucket) => (
+              {EDITABLE_FAIRNESS_BUCKETS.map((bucket) => (
                 <div key={bucket} className="rowf items-end">
                   <div className="field flex-[2]">
-                    <label>{FAIRNESS_BUCKET_LABELS[bucket]}</label>
+                    <label>{editableBucketLabel(bucket)}</label>
                     <input
                       type="number"
                       step="0.05"
@@ -141,9 +276,7 @@ export default function FairnessPage() {
                       }
                     />
                   </div>
-                  <p className="hint text-xs flex-1 pb-2">
-                    נוכחי: {rules[bucket]}
-                  </p>
+                  <p className="hint text-xs flex-1 pb-2">נוכחי: {rules[bucket]}</p>
                 </div>
               ))}
               <div className="field">
@@ -160,6 +293,7 @@ export default function FairnessPage() {
                     }))
                   }
                 />
+                <p className="hint text-xs mt-1">נוכחי: {rules.hist}</p>
               </div>
             </div>
 
@@ -171,7 +305,7 @@ export default function FairnessPage() {
                 required
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="למשל: שמירה בזוג קשה יותר — להעלות ל-1.2"
+                placeholder="למשל: להעלות כרמל א׳ ל-0.5 כי הכוננות קשה יותר"
               />
             </div>
 

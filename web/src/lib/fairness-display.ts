@@ -19,6 +19,17 @@ export const EDITABLE_FAIRNESS_BUCKETS: FairnessBucket[] = [
   "kitchen",
 ];
 
+/** הסבר מדויק לדלי «ניתן לעריכה» — לא תלוי ב-types הישנים. */
+export const FAIRNESS_EDITABLE_HELP: Record<
+  (typeof EDITABLE_FAIRNESS_BUCKETS)[number],
+  string
+> = {
+  standby_a: "כרמל א׳ — יום כוננות מלא, 3 צוערים; נקודות × שעות (לא צורך מנוחה)",
+  standby_b: "כרמל ב׳ — כוננות; נקודות × שעות (מותר במקביל לעב״ס)",
+  duty: "עבודות בסיס (~14 בחלון) וכוח עתודה (3) — נקודות × שעות",
+  kitchen: "35 צוערים למשמרת — נקודה קבועה לכל משמרת (לא × שעות)",
+};
+
 export const FAIRNESS_OVERVIEW = [
   "בשיבוץ חכם נבחר מי שציון העומס שלו הכי נמוך.",
   "ציון = עומס בתקופה הנוכחית + התאמת ניקוד קודם (hist).",
@@ -77,6 +88,9 @@ export function editableBucketLabel(bucket: FairnessBucket): string {
 }
 
 export function editableBucketHelp(bucket: FairnessBucket): string {
+  if (bucket in FAIRNESS_EDITABLE_HELP) {
+    return FAIRNESS_EDITABLE_HELP[bucket as keyof typeof FAIRNESS_EDITABLE_HELP];
+  }
   return FAIRNESS_BUCKET_HELP[bucket];
 }
 
