@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { baseWorkWallClockInterval } from "@/lib/base-work-template";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
 import { carmelSlotFromMission } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
@@ -127,6 +128,80 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
           name: "קצין תורן",
           kind: "officer_duty",
           slots: [{ id: "o1", start_time: "21:00", end_time: "09:00", seat_count: 1 }],
+        },
+      ],
+      assignments: {},
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+  });
+});
+
+describe("base work fixed wall-clock on mission_date", () => {
+  it("always anchors 08:30–11:30 to mission_date regardless of guard window", () => {
+    const iv = baseWorkWallClockInterval("2026-08-21", "08:30", "11:30");
+    expect(iv).not.toBeNull();
+    expect(new Date(iv!.startMs).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe("08:30");
+    expect(new Date(iv!.endMs).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe("11:30");
+  });
+
+  it("validates all standard windows on a 20:00 guard day", () => {
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: "2026-08-21T20:00:00+03:00",
+      ends_at: "2026-08-22T20:00:00+03:00",
+      status: "draft",
+      positions: [
+        {
+          id: "bw",
+          name: "עבודות בסיס",
+          kind: "duty",
+          slots: [
+            { id: "b1", start_time: "08:30", end_time: "11:30", seat_count: 14 },
+            { id: "b2", start_time: "13:30", end_time: "17:30", seat_count: 14 },
+            { id: "b3", start_time: "18:30", end_time: "20:00", seat_count: 14 },
+          ],
+        },
+      ],
+      assignments: {},
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+  });
+});
+
+describe("base work on 09:00 guard day", () => {
+  const startsAt = "2026-08-21T09:00:00+03:00";
+  const endsAt = "2026-08-22T09:00:00+03:00";
+
+  it("validates standard base work windows on mission_date", () => {
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: startsAt,
+      ends_at: endsAt,
+      status: "draft",
+      positions: [
+        {
+          id: "bw",
+          name: "עבודות בסיס",
+          kind: "duty",
+          slots: [
+            { id: "b1", start_time: "08:30", end_time: "11:30", seat_count: 14 },
+            { id: "b2", start_time: "13:30", end_time: "17:30", seat_count: 14 },
+            { id: "b3", start_time: "18:30", end_time: "20:00", seat_count: 14 },
+          ],
         },
       ],
       assignments: {},

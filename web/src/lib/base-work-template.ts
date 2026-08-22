@@ -1,8 +1,14 @@
 import type { MissionPosition, MissionSlot } from "@/lib/types";
 import { DEFAULT_BASE_WORK_SCHEDULING_RULES } from "@/lib/types";
 import {
+  localMissionMidnightMs,
   materializeSlotAbsoluteBounds,
+  normalizeTimeLabel,
+  parseIsoMs,
+  parseTimeMinutes,
   resolveCanonicalSlotInterval,
+  slotDurationMinutes,
+  type TimeInterval,
 } from "@/lib/time-interval";
 
 function uid() {
@@ -23,18 +29,65 @@ export function isBaseWorkPosition(pos: Pick<MissionPosition, "name">): boolean 
   return isBaseWorkPositionName(pos.name);
 }
 
-/** Materialize ISO bounds on base-work slots so validation works inside guard mission window. */
+export const BASE_WORK_SLOT_WINDOWS = [
+  ["08:30", "11:30"],
+  ["13:30", "17:30"],
+  ["18:30", "20:00"],
+] as const;
+
+/** שעות קבועות על תאריך mission_date (שעון ישראל) — לא תלוי בחלון השמירות. */
+export function baseWorkWallClockInterval(
+  missionDate: string,
+  startTime: string,
+  endTime: string,
+): TimeInterval | null {
+  const startMin = parseTimeMinutes(normalizeTimeLabel(startTime));
+  const durMin = slotDurationMinutes(startTime, endTime);
+  if (startMin === null || durMin <= 0) return null;
+
+  const date = missionDate.slice(0, 10);
+  const anchor = parseIsoMs(`${date}T12:00:00+03:00`);
+  if (anchor === null) return null;
+
+  const midnight = localMissionMidnightMs(anchor);
+  const startMs = midnight + startMin * 60_000;
+  const endMs = startMs + durMin * 60_000;
+  if (endMs <= startMs) return null;
+  return { startMs, endMs };
+}
+
+/** עב״ס — תמיד mission_date + שעות הקיר מהמשמרת (08:30, 13:30, 18:30…). */
+export function resolveBaseWorkSlotInterval(
+  missionDate: string,
+  missionStartsAt: string,
+  missionEndsAt: string,
+  slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
+): TimeInterval | null {
+  const fixed = baseWorkWallClockInterval(missionDate, slot.start_time, slot.end_time);
+  if (fixed) return fixed;
+
+  // legacy standalone base_work mission — fall back to mission window
+  return resolveCanonicalSlotInterval(
+    { starts_at: missionStartsAt, ends_at: missionEndsAt },
+    slot,
+  );
+}
 export function materializeBaseWorkSlots(
   slots: MissionSlot[],
   missionStartsAt: string,
   missionEndsAt: string,
+  missionDate?: string,
 ): MissionSlot[] {
   return slots.map((slot) => {
-    const interval = resolveCanonicalSlotInterval(
-      { starts_at: missionStartsAt, ends_at: missionEndsAt },
-      slot,
-    );
-    if (!interval) return slot;
+    const interval = missionDate
+      ? resolveBaseWorkSlotInterval(missionDate, missionStartsAt, missionEndsAt, slot)
+      : resolveCanonicalSlotInterval(
+          { starts_at: missionStartsAt, ends_at: missionEndsAt },
+          slot,
+        );
+    if (!interval) {
+      return { ...slot, starts_at: undefined, ends_at: undefined };
+    }
     return { ...slot, ...materializeSlotAbsoluteBounds(slot, interval) };
   });
 }
@@ -43,10 +96,19 @@ export function materializeBaseWorkPositions(
   positions: MissionPosition[],
   missionStartsAt: string,
   missionEndsAt: string,
+  missionDate?: string,
 ): MissionPosition[] {
   return positions.map((pos) =>
     isBaseWorkPosition(pos)
-      ? { ...pos, slots: materializeBaseWorkSlots(pos.slots, missionStartsAt, missionEndsAt) }
+      ? {
+          ...pos,
+          slots: materializeBaseWorkSlots(
+            pos.slots,
+            missionStartsAt,
+            missionEndsAt,
+            missionDate,
+          ),
+        }
       : pos,
   );
 }

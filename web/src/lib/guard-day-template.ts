@@ -354,6 +354,7 @@ export type BuildGuardDayOptions = {
   boardStart?: string;
   missionStartsAt?: string;
   missionEndsAt?: string;
+  missionDate?: string;
   carmelSeats?: number;
   baseWorkSeatsPerShift?: number;
 };
@@ -366,6 +367,7 @@ type GuardDayContext = {
   season: "summer" | "winter";
   missionStartsAt: string;
   missionEndsAt: string;
+  missionDate?: string;
   carmelSeats: number;
   rearProfile: StaffingProfile;
   footProfile: StaffingProfile;
@@ -401,6 +403,7 @@ function resolveGuardDayContext(options?: BuildGuardDayOptions): GuardDayContext
     season,
     missionStartsAt,
     missionEndsAt,
+    missionDate: options?.missionDate,
     carmelSeats: options?.carmelSeats ?? 3,
     rearProfile: season === "winter" ? REAR_GATE_STAFFING_WINTER : REAR_GATE_STAFFING_SUMMER,
     footProfile: season === "winter" ? FOOT_PATROL_STAFFING_WINTER : FOOT_PATROL_STAFFING_SUMMER,
@@ -520,7 +523,7 @@ export function syncGuardShiftSlots(
       if (isBaseWorkPosition(pos)) {
         return {
           ...pos,
-          slots: materializeBaseWorkPositions([pos], ctx.missionStartsAt, ctx.missionEndsAt)[0]
+          slots: materializeBaseWorkPositions([pos], ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate)[0]
             .slots,
         };
       }
@@ -580,7 +583,7 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
   });
   return [
     ...synced,
-    ...materializeBaseWorkPositions(baseWork, ctx.missionStartsAt, ctx.missionEndsAt),
+    ...materializeBaseWorkPositions(baseWork, ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate),
   ];
 }
 

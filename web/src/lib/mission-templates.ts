@@ -115,6 +115,7 @@ export function standardMissionPositions(input: StandardMissionInput): MissionPo
 export function finalizeGuardMissionPositions(
   positions: MissionPosition[],
   input: {
+    missionDate?: string;
     startsAt: string;
     endsAt: string;
     scheduling?: MissionSchedulingRules;
@@ -134,13 +135,19 @@ export function finalizeGuardMissionPositions(
   });
   const baseWork =
     baseWorkPositions.length > 0
-      ? materializeBaseWorkPositions(baseWorkPositions, input.startsAt, input.endsAt)
+      ? materializeBaseWorkPositions(
+          baseWorkPositions,
+          input.startsAt,
+          input.endsAt,
+          input.missionDate,
+        )
       : materializeBaseWorkPositions(
           defaultBaseWorkPositions({
             seatsPerShift: input.scheduling?.base_work?.seats_per_shift,
           }),
           input.startsAt,
           input.endsAt,
+          input.missionDate,
         );
   return [...synced, ...baseWork];
 }
@@ -149,6 +156,7 @@ export function finalizeGuardMissionPositions(
 export function generateGuardMissionStructure(
   positions: MissionPosition[],
   input: {
+    missionDate?: string;
     startsAt: string;
     endsAt: string;
     scheduling?: MissionSchedulingRules;

@@ -124,6 +124,7 @@ export async function consolidateGuardDayMission(
   }
 
   positions = finalizeGuardMissionPositions(positions, {
+    missionDate: guards.mission_date,
     startsAt: guards.starts_at,
     endsAt: guards.ends_at,
     scheduling: guards.scheduling_rules,

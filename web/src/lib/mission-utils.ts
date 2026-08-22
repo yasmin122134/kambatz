@@ -20,6 +20,7 @@ import {
   isBaseWorkPosition,
   isBaseWorkPositionName,
   materializeBaseWorkPositions,
+  resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
@@ -241,7 +242,14 @@ export function flattenMissionSlots(
       const isBaseWorkSlot =
         mission.mission_type === "base_work" || isBaseWorkPosition(pos);
       const slotMissionType: MissionType = isBaseWorkSlot ? "base_work" : mission.mission_type;
-      const abs = resolveCanonicalSlotInterval(mission, slot);
+      const abs = isBaseWorkSlot
+        ? resolveBaseWorkSlotInterval(
+            mission.mission_date,
+            mission.starts_at,
+            mission.ends_at,
+            slot,
+          )
+        : resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;
       const startAtMs = abs.startMs;
       const endAtMs = abs.endMs;
@@ -345,6 +353,7 @@ export function virtualBaseWorkMission(guards: MissionDay): MissionDay | null {
       positions,
       guards.starts_at,
       guards.ends_at,
+      guards.mission_date,
     ),
   };
 }

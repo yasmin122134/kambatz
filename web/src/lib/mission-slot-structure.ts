@@ -9,6 +9,7 @@
  */
 
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
+import { isBaseWorkPosition, resolveBaseWorkSlotInterval } from "@/lib/base-work-template";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
 export type MissionStructureSnapshot = {
@@ -95,7 +96,14 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
         messages.push(`${pos.name} ${slot.start_time}–${slot.end_time}: seat_count must be >= 1`);
       }
 
-      const interval = resolveCanonicalSlotInterval(mission, slot);
+      const interval = isBaseWorkPosition(pos)
+        ? resolveBaseWorkSlotInterval(
+            mission.mission_date,
+            mission.starts_at,
+            mission.ends_at,
+            slot,
+          )
+        : resolveCanonicalSlotInterval(mission, slot);
       if (!interval) {
         messages.push(
           `${pos.name} ${slot.start_time}–${slot.end_time}: cannot resolve absolute interval within mission window`,
@@ -106,10 +114,12 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
       if (interval.startMs >= interval.endMs) {
         messages.push(`${pos.name} ${slot.start_time}–${slot.end_time}: start >= end`);
       }
-      if (interval.startMs < missionStartMs || interval.endMs > missionEndMs) {
-        messages.push(
-          `${pos.name} ${slot.start_time}–${slot.end_time}: outside mission interval`,
-        );
+      if (!isBaseWorkPosition(pos)) {
+        if (interval.startMs < missionStartMs || interval.endMs > missionEndMs) {
+          messages.push(
+            `${pos.name} ${slot.start_time}–${slot.end_time}: outside mission interval`,
+          );
+        }
       }
     }
   }

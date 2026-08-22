@@ -205,6 +205,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     }
     setPositions(
       generateGuardMissionStructure(positions, {
+        missionDate,
         startsAt: new Date(startsAt).toISOString(),
         endsAt: new Date(endsAt).toISOString(),
         scheduling: schedulingRules,
