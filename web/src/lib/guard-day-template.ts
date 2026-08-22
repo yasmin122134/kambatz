@@ -25,6 +25,7 @@ import {
   fmtTimeLabel,
   materializeSlotAbsoluteBounds,
   missionInterval,
+  normalizeTimeLabel,
   parseIsoMs,
   parseTimeMinutes,
   resolveSlotAbsoluteInterval,
@@ -211,20 +212,22 @@ export function mergeAdjacentGuardSlots(
 
 /** קצין תורן — שתי משמרות בלבד, חצי מחזור יום השמירות כל אחת */
 function officerDutySlots(missionStartMs: number, missionEndMs: number): MissionSlot[] {
-  const mid = missionStartMs + Math.floor((missionEndMs - missionStartMs) / 2);
+  const span = missionEndMs - missionStartMs;
+  if (span <= 0) return [];
+  const mid = missionStartMs + Math.floor(span / 2);
   return [
     {
       id: uid(),
-      start_time: fmtTimeLabel(missionStartMs),
-      end_time: fmtTimeLabel(mid),
+      start_time: fmtMissionTimeLabel(missionStartMs),
+      end_time: fmtMissionTimeLabel(mid),
       seat_count: 1,
       starts_at: new Date(missionStartMs).toISOString(),
       ends_at: new Date(mid).toISOString(),
     },
     {
       id: uid(),
-      start_time: fmtTimeLabel(mid),
-      end_time: fmtTimeLabel(missionEndMs),
+      start_time: fmtMissionTimeLabel(mid),
+      end_time: fmtMissionTimeLabel(missionEndMs),
       seat_count: 1,
       starts_at: new Date(mid).toISOString(),
       ends_at: new Date(missionEndMs).toISOString(),
@@ -232,9 +235,44 @@ function officerDutySlots(missionStartMs: number, missionEndMs: number): Mission
   ];
 }
 
-/** האם מבנה קצין תורן תקין (בדיוק 2 משמרות) */
-export function officerDutySlotsValid(slots: MissionSlot[]): boolean {
-  return slots.length === 2 && slots.every((s) => s.seat_count >= 1);
+function sortOfficerDutySlots(slots: MissionSlot[]): MissionSlot[] {
+  return [...slots].sort((a, b) => {
+    const as = parseIsoMs(a.starts_at);
+    const bs = parseIsoMs(b.starts_at);
+    if (as !== null && bs !== null) return as - bs;
+    return a.start_time.localeCompare(b.start_time);
+  });
+}
+
+/** האם מבנה קצין תורן תקין — בדיוק 2 משמרות, כל אחת חצי מחזור המשימה */
+export function officerDutySlotsValid(
+  slots: MissionSlot[],
+  missionStartsAt: string,
+  missionEndsAt: string,
+): boolean {
+  const iv = missionInterval(missionStartsAt, missionEndsAt);
+  if (!iv) return false;
+  if (slots.length !== 2 || !slots.every((s) => s.seat_count >= 1)) return false;
+
+  const expected = officerDutySlots(iv.startMs, iv.endMs);
+  const sorted = sortOfficerDutySlots(slots);
+  const sortedExpected = sortOfficerDutySlots(expected);
+
+  for (let i = 0; i < 2; i++) {
+    const got = sorted[i];
+    const exp = sortedExpected[i];
+    const gotStart = parseIsoMs(got.starts_at);
+    const gotEnd = parseIsoMs(got.ends_at);
+    const expStart = parseIsoMs(exp.starts_at);
+    const expEnd = parseIsoMs(exp.ends_at);
+    if (gotStart !== null && gotEnd !== null && expStart !== null && expEnd !== null) {
+      if (gotStart !== expStart || gotEnd !== expEnd) return false;
+      continue;
+    }
+    if (normalizeTimeLabel(got.start_time) !== normalizeTimeLabel(exp.start_time)) return false;
+    if (normalizeTimeLabel(got.end_time) !== normalizeTimeLabel(exp.end_time)) return false;
+  }
+  return true;
 }
 
 /**
@@ -440,6 +478,14 @@ function generatedSlotsToMissionSlots(
   );
 }
 
+function mergeOfficerDutySlotsByIndex(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
+  const sortedPrev = sortOfficerDutySlots(prev);
+  return sortOfficerDutySlots(next).map((slot, i) => ({
+    ...slot,
+    id: sortedPrev[i]?.id ?? slot.id,
+  }));
+}
+
 function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
   const usedPrevIds = new Set<string>();
   const byKey = new Map(prev.map((s) => [slotWindowKey(s), s]));
@@ -540,6 +586,9 @@ export function syncGuardShiftSlots(
 
       const next = guardSlotsForPosition(pos, ctx);
       if (!next) return pos;
+      if (pos.kind === "officer_duty") {
+        return { ...pos, slots: mergeOfficerDutySlotsByIndex(pos.slots, next) };
+      }
       return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, next) };
     }),
   );

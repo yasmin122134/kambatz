@@ -15,9 +15,10 @@ import {
   isStandbyKind,
   normalizeSchedulingRules,
   syncAssignmentSeats,
+  type FlatSlot,
 } from "@/lib/mission-utils";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
-import { personIsDutyOfficer } from "@/lib/officers";
+import { DUTY_OFFICER_NAMES, personIsDutyOfficer } from "@/lib/officers";
 import { enumerateCarmelGroups, hasCarmelGroupCandidates, summarizeCarmelRooms } from "./carmel-groups";
 import {
   buildUnresolvedRequirements,
@@ -624,6 +625,42 @@ function revertChoice(
 }
 
 /** ממלא קצין תורן — תמיד רני/יסמין, משמרת אחת לכל אחד כשאפשר */
+function dutyOfficersFromPeople(people: Person[]): Person[] {
+  const byName = Object.fromEntries(people.map((p) => [p.name, p]));
+  const ordered: Person[] = [];
+  for (const name of DUTY_OFFICER_NAMES) {
+    const person = byName[name];
+    if (person && personIsDutyOfficer(person)) ordered.push(person);
+  }
+  for (const person of people.filter(personIsDutyOfficer)) {
+    if (!ordered.some((o) => o.name === person.name)) ordered.push(person);
+  }
+  return ordered;
+}
+
+function pickDutyOfficerForSeed(
+  officers: Person[],
+  sibling: string | undefined,
+  mates: string[],
+  slot: FlatSlot,
+  state: SolverState,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  peopleByName: Record<string, Person>,
+): Person | undefined {
+  const pool = sibling ? officers.filter((o) => o.name !== sibling) : officers;
+
+  const preferred = pool.find(
+    (o) =>
+      !mates.includes(o.name) &&
+      fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
+  );
+  if (preferred) return preferred;
+
+  // קצין תורן — תמיד רני/יסמין גם אם מנוחה/4-8 היו חוסמים בשיבוץ רגיל.
+  return pool.find((o) => !mates.includes(o.name) && personIsDutyOfficer(o));
+}
+
 function seedOfficerDutyInState(
   missions: MissionDay[],
   people: Person[],
@@ -633,9 +670,7 @@ function seedOfficerDutyInState(
   keepExisting: boolean,
 ): void {
   const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
-  const officers = people
-    .filter(personIsDutyOfficer)
-    .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  const officers = dutyOfficersFromPeople(people);
   if (!officers.length) return;
 
   for (const mission of missions) {
@@ -671,26 +706,16 @@ function seedOfficerDutyInState(
           ([...usedOfficers][0] as string | undefined);
 
         const mates = row.filter((n, idx) => n && idx !== seatIndex);
-        const pick =
-          (sibling
-            ? officers.find(
-                (o) =>
-                  o.name !== sibling &&
-                  !mates.includes(o.name) &&
-                  fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
-              )
-            : undefined) ??
-          officers.find(
-            (o) =>
-              !usedOfficers.has(o.name) &&
-              !mates.includes(o.name) &&
-              fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
-          ) ??
-          officers.find(
-            (o) =>
-              !mates.includes(o.name) &&
-              fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
-          );
+        const pick = pickDutyOfficerForSeed(
+          officers,
+          sibling,
+          mates,
+          slot,
+          state,
+          issues,
+          scheduling,
+          peopleByName,
+        );
 
         if (!pick) continue;
 

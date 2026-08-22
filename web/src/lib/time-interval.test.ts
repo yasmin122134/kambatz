@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { baseWorkWallClockInterval } from "@/lib/base-work-template";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
-import { carmelSlotFromMission } from "@/lib/guard-day-template";
+import { buildGuardDayPositions, carmelSlotFromMission } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -31,6 +31,27 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
     expect(officer!.endMs - officer!.startMs).toBe(12 * 3_600_000);
   });
 
+  it("officer duty 09:00–21:00 resolves on 09:00 guard day (naive ISO)", () => {
+    const startsAt = "2026-03-01T09:00:00";
+    const endsAt = "2026-03-02T09:00:00";
+    const iv = resolveSlotAbsoluteInterval(startsAt, endsAt, "09:00", "21:00");
+    expect(iv).not.toBeNull();
+    expect(iv!.startMs).toBeGreaterThanOrEqual(Date.parse(startsAt));
+    expect(iv!.endMs).toBeLessThanOrEqual(Date.parse(endsAt));
+    expect(iv!.endMs - iv!.startMs).toBeGreaterThan(0);
+  });
+
+  it("officer duty 09:00–21:00 full twelve hours with +03:00 ISO", () => {
+    const iv = resolveSlotAbsoluteInterval(
+      "2026-03-01T09:00:00+03:00",
+      "2026-03-02T09:00:00+03:00",
+      "09:00",
+      "21:00",
+    );
+    expect(iv).not.toBeNull();
+    expect(iv!.endMs - iv!.startMs).toBe(12 * 3_600_000);
+  });
+
   it("officer duty 21:00–09:00 ends at mission end", () => {
     const iv = resolveSlotAbsoluteInterval(startsAt, endsAt, "21:00", "09:00");
     expect(iv).not.toBeNull();
@@ -47,6 +68,11 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
 
   it("passes mission structure validation for carmel + officer", () => {
     const carmel = carmelSlotFromMission(startsAt, endsAt, "09:00", 3);
+    const officer = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      boardStart: "09:00",
+    }).find((p) => p.kind === "officer_duty")!;
     const mission: MissionDay = {
       id: "g1",
       title: "test",
@@ -76,14 +102,7 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
           id: "off",
           name: "קצין תורן",
           kind: "officer_duty",
-          slots: [
-            {
-              id: "o1",
-              start_time: "21:00",
-              end_time: "09:00",
-              seat_count: 1,
-            },
-          ],
+          slots: officer.slots,
         },
       ],
       assignments: {},
@@ -96,6 +115,11 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
   });
 
   it("passes validation with UTC mission bounds and stale slot ISO", () => {
+    const officer = buildGuardDayPositions({
+      missionStartsAt: startsAtUtc,
+      missionEndsAt: endsAtUtc,
+      boardStart: "09:00",
+    }).find((p) => p.kind === "officer_duty")!;
     const mission: MissionDay = {
       id: "g2",
       title: "utc",
@@ -127,7 +151,7 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
           id: "off",
           name: "קצין תורן",
           kind: "officer_duty",
-          slots: [{ id: "o1", start_time: "21:00", end_time: "09:00", seat_count: 1 }],
+          slots: officer.slots,
         },
       ],
       assignments: {},

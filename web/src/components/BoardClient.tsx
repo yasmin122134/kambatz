@@ -16,9 +16,7 @@ import {
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
-import { virtualBaseWorkMission } from "@/lib/mission-utils";
-import { boardStartFromMissionStart } from "@/lib/mission-templates";
-import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules, parseTimeMinutes } from "@/lib/mission-utils";
+import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
 
@@ -643,12 +641,7 @@ function ConstraintsPanel({
 }
 
 function missionBoardStartMin(mission: MissionDay): number {
-  const fromMissionStart = parseTimeMinutes(
-    boardStartFromMissionStart(mission.starts_at),
-  );
-  if (fromMissionStart !== null) return fromMissionStart;
-  const rules = normalizeSchedulingRules(mission.scheduling_rules);
-  return parseTimeMinutes(rules.board_start) ?? 20 * 60;
+  return effectiveBoardStartMin(mission);
 }
 
 const TIMELINE_CYCLE_MIN = 1440;

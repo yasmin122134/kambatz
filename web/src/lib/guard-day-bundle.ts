@@ -4,12 +4,12 @@ import {
   materializeBaseWorkPositions,
 } from "@/lib/base-work-template";
 import {
-  boardStartFromMissionStart,
   defaultMissionWindow,
   defaultSchedulingForType,
   finalizeGuardMissionPositions,
   standardMissionPositions,
 } from "@/lib/mission-templates";
+import { effectiveBoardStartLabel } from "@/lib/mission-utils";
 import {
   deleteMissionDay,
   emptyAssignments,
@@ -33,9 +33,14 @@ export type GuardDayBundleInput = {
 
 function guardsScheduling(
   guardStartsAt: string,
+  positions: MissionDay["positions"],
   extra?: Partial<MissionSchedulingRules>,
 ): MissionSchedulingRules {
-  const board = boardStartFromMissionStart(guardStartsAt);
+  const board = effectiveBoardStartLabel({
+    starts_at: guardStartsAt,
+    positions,
+    scheduling_rules: extra,
+  });
   return {
     ...DEFAULT_MISSION_SCHEDULING_RULES,
     ...defaultSchedulingForType("guards", guardStartsAt),
@@ -56,17 +61,20 @@ export async function createGuardDayBundle(
   const guardEndsAt = input.guard_ends_at ?? guardWindow.endsAt;
   const bundleId = crypto.randomUUID();
   const status = input.status ?? "draft";
-  const scheduling = {
-    ...guardsScheduling(guardStartsAt, input.scheduling),
-    guard_day_bundle_id: bundleId,
+  const preliminary = {
+    ...defaultSchedulingForType("guards", guardStartsAt),
+    ...input.scheduling,
   };
-
   const positions = standardMissionPositions({
     missionType: "guards",
     startsAt: guardStartsAt,
     endsAt: guardEndsAt,
-    scheduling,
+    scheduling: preliminary,
   });
+  const scheduling = {
+    ...guardsScheduling(guardStartsAt, positions, input.scheduling),
+    guard_day_bundle_id: bundleId,
+  };
 
   const guards = await saveMissionDay({
     title: input.title?.trim() || `${mission_date} · שמירות+עב״ס`,
@@ -131,7 +139,14 @@ export async function consolidateGuardDayMission(
   });
   assignments = syncAssignmentSeats(positions, assignments);
 
-  const scheduling = { ...guards.scheduling_rules };
+  const scheduling = {
+    ...guards.scheduling_rules,
+    board_start: effectiveBoardStartLabel({
+      starts_at: guards.starts_at,
+      positions,
+      scheduling_rules: guards.scheduling_rules,
+    }),
+  };
   delete scheduling.linked_mission_id;
 
   const saved = await saveMissionDay({

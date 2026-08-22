@@ -21,10 +21,12 @@ import {
   DEFAULT_MISSION_SCHEDULING_RULES,
 } from "@/lib/types";
 
+import { fmtMissionTimeLabel, parseIsoMs } from "@/lib/time-interval";
+
 export function boardStartFromMissionStart(startsAt: string): string {
-  const d = new Date(startsAt);
-  if (Number.isNaN(d.getTime())) return "20:00";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const ms = parseIsoMs(startsAt);
+  if (ms === null) return "20:00";
+  return fmtMissionTimeLabel(ms);
 }
 
 /** שעות ברירת מחדל ליום משימה לפי סוג */
@@ -247,7 +249,8 @@ export function missionTemplateComplete(
       guardSlotIdsUnique(positions) &&
       (!rear || rearVehicleSlotsValid(rear.slots, "06:00", "18:00", startsAt, endsAt)) &&
       (!foot || footPatrolSlotsValid(foot.slots, "06:00", "19:00", startsAt, endsAt)) &&
-      (!officer || officerDutySlotsValid(officer.slots))
+      (!officer ||
+        officerDutySlotsValid(officer.slots, startsAt, endsAt))
     );
   }
   if (missionType === "kitchen") {

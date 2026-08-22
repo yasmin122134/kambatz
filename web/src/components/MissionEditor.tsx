@@ -18,7 +18,6 @@ import {
   type MissionType,
 } from "@/lib/types";
 import {
-  boardStartFromMissionStart,
   defaultMissionWindow,
   defaultSchedulingForType,
   missionTemplateComplete,
@@ -31,7 +30,7 @@ import {
   guardPositionHint,
   summarizeGuardSlots,
 } from "@/lib/mission-templates";
-import { isBaseWorkPosition } from "@/lib/mission-utils";
+import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-utils";
 
 function uid() {
   return crypto.randomUUID();
@@ -113,10 +112,20 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     const isoStart = new Date(window.startsAt).toISOString();
     const isoEnd = new Date(window.endsAt).toISOString();
     let scheduling = rules ?? defaultSchedulingForType(type, isoStart);
+    const nextPositions = standardMissionPositions({
+      missionType: type,
+      startsAt: isoStart,
+      endsAt: isoEnd,
+      scheduling,
+    });
     if (type === "guards") {
       scheduling = {
         ...scheduling,
-        board_start: boardStartFromMissionStart(isoStart),
+        board_start: effectiveBoardStartLabel({
+          starts_at: isoStart,
+          positions: nextPositions,
+          scheduling_rules: scheduling,
+        }),
       };
     }
     setMissionType(type);
@@ -124,14 +133,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setStartsAt(window.startsAt);
     setEndsAt(window.endsAt);
     setSchedulingRules(scheduling);
-    setPositions(
-      standardMissionPositions({
-        missionType: type,
-        startsAt: isoStart,
-        endsAt: isoEnd,
-        scheduling,
-      }),
-    );
+    setPositions(nextPositions);
   }
 
   const load = useCallback(async () => {
@@ -220,15 +222,29 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setMsg("");
     setErr("");
 
+    const isoStart = new Date(startsAt).toISOString();
+    const isoEnd = new Date(endsAt).toISOString();
+    const scheduling_rules =
+      missionType === "guards"
+        ? {
+            ...schedulingRules,
+            board_start: effectiveBoardStartLabel({
+              starts_at: isoStart,
+              positions,
+              scheduling_rules: schedulingRules,
+            }),
+          }
+        : schedulingRules;
+
     const payload = {
       title: title || `${missionDate} · ${MISSION_TYPE_LABELS[missionType]}`,
       mission_type: missionType,
       mission_date: missionDate,
-      starts_at: new Date(startsAt).toISOString(),
-      ends_at: new Date(endsAt).toISOString(),
+      starts_at: isoStart,
+      ends_at: isoEnd,
       status,
       positions,
-      scheduling_rules: schedulingRules,
+      scheduling_rules,
       notes: notes || null,
       regenerate_structure: false,
       standalone: missionType === "guards" && standaloneGuards,
@@ -459,11 +475,14 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 const value = e.target.value;
                 setStartsAt(value);
                 if (missionType === "guards" && value) {
+                  const iso = new Date(value).toISOString();
                   setSchedulingRules((r) => ({
                     ...r,
-                    board_start: boardStartFromMissionStart(
-                      new Date(value).toISOString(),
-                    ),
+                    board_start: effectiveBoardStartLabel({
+                      starts_at: iso,
+                      positions,
+                      scheduling_rules: r,
+                    }),
                   }));
                 }
               }}

@@ -3,9 +3,55 @@ import {
   buildGuardDayPositions,
   buildPureFourHourShiftWindows,
   mergeAdjacentGuardSlots,
+  officerDutySlotsValid,
   syncGuardShiftSlots,
 } from "@/lib/guard-day-template";
 import { resolveMissionPositions } from "@/lib/mission-templates";
+
+describe("officer duty half-mission shifts", () => {
+  const startsAt = "2026-08-21T09:00:00+03:00";
+  const endsAt = "2026-08-22T09:00:00+03:00";
+
+  it("splits 09:00→09:00 mission into 09:00–21:00 and 21:00–09:00", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "09:00",
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+    });
+    const officer = positions.find((p) => p.kind === "officer_duty")!;
+    expect(officer.slots).toHaveLength(2);
+    expect(officer.slots[0].start_time).toBe("09:00");
+    expect(officer.slots[0].end_time).toBe("21:00");
+    expect(officer.slots[1].start_time).toBe("21:00");
+    expect(officer.slots[1].end_time).toBe("09:00");
+    expect(officerDutySlotsValid(officer.slots, startsAt, endsAt)).toBe(true);
+  });
+
+  it("resync fixes stale officer windows to match mission span", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "20:00",
+      missionStartsAt: "2026-08-21T20:00:00+03:00",
+      missionEndsAt: "2026-08-22T20:00:00+03:00",
+    });
+    const officer = positions.find((p) => p.kind === "officer_duty")!;
+    officer.slots = [
+      { id: "old-a", start_time: "09:00", end_time: "21:00", seat_count: 1 },
+      { id: "old-b", start_time: "21:00", end_time: "09:00", seat_count: 1 },
+    ];
+    const synced = syncGuardShiftSlots(positions, {
+      boardStart: "20:00",
+      missionStartsAt: "2026-08-21T20:00:00+03:00",
+      missionEndsAt: "2026-08-22T20:00:00+03:00",
+    });
+    const next = synced.find((p) => p.kind === "officer_duty")!.slots;
+    expect(next[0].start_time).toBe("20:00");
+    expect(next[0].end_time).toBe("08:00");
+    expect(next[1].start_time).toBe("08:00");
+    expect(next[1].end_time).toBe("20:00");
+    expect(next[0].id).toBe("old-a");
+    expect(next[1].id).toBe("old-b");
+  });
+});
 
 describe("merge adjacent guard slots", () => {
   it("merges 06:00–08:00 + 08:00–09:00 when same seats and total ≤ 4h", () => {

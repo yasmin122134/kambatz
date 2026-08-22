@@ -152,6 +152,37 @@ export function getRestPenalty(restHours: number): number {
   return 12;
 }
 
+/** Tiers shown on the fairness page — mirrors getRestPenalty(). */
+export const REST_PENALTY_TIERS = [
+  { restHoursLabel: "16 שעות ומעלה", penalty: 0 },
+  { restHoursLabel: "12–16 שעות", penalty: 1 },
+  { restHoursLabel: "10–12 שעות", penalty: 2 },
+  { restHoursLabel: "8–10 שעות", penalty: 3 },
+  { restHoursLabel: "7–8 שעות", penalty: 4 },
+  { restHoursLabel: "6–7 שעות", penalty: 5 },
+  { restHoursLabel: "5–6 שעות", penalty: 7 },
+  { restHoursLabel: "4–5 שעות", penalty: 9 },
+  { restHoursLabel: "פחות מ-4 שעות", penalty: 12 },
+] as const;
+
+export const GUARD_TIME_BAND_LABELS = [
+  "00:00–04:00",
+  "04:00–08:00",
+  "08:00–12:00",
+  "12:00–16:00",
+  "16:00–20:00",
+  "20:00–00:00",
+] as const;
+
+export const GUARD_TIME_BAND_HELP = [
+  "לילה מאוחר — הכי קשה",
+  "לפנות בוקר",
+  "בוקר — הקלה יחסית",
+  "צהריים",
+  "אחר הצהריים",
+  "ערב",
+] as const;
+
 /** Wall-clock rest hours between end of `prev` and start of `next`. */
 export function getRestHoursBetween(
   prev: BurdenTimelineBlock,

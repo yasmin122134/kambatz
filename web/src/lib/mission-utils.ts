@@ -22,7 +22,7 @@ import {
   materializeBaseWorkPositions,
   resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
-import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -213,15 +213,55 @@ export function cyclicPos(minute: number, boardStart: number): number {
   return ((minute - boardStart) % 1440 + 1440) % 1440;
 }
 
+/** מוקדם ביותר בין חלונות עב״ס המוטמעים (08:30 וכו׳). */
+export function earliestEmbeddedBaseWorkWallMin(
+  mission: Pick<MissionDay, "positions">,
+): number | null {
+  let earliest: number | null = null;
+  for (const pos of mission.positions || []) {
+    if (!isBaseWorkPosition(pos)) continue;
+    for (const slot of pos.slots || []) {
+      const m = parseTimeMinutes(slot.start_time);
+      if (m === null) continue;
+      if (earliest === null || m < earliest) earliest = m;
+    }
+  }
+  return earliest;
+}
+
+/**
+ * תחילת לוח יום השמירות — מוקדמת לעב״ס בבוקר (למשל 08:30) כשהיא לפני שעת תחילת השמירות.
+ */
+export function effectiveBoardStartMin(
+  mission: Pick<MissionDay, "starts_at" | "scheduling_rules" | "positions">,
+): number {
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const fromRules = parseTimeMinutes(rules.board_start);
+  const startMs = parseIsoMs(mission.starts_at);
+  const fromMission =
+    startMs !== null ? parseTimeMinutes(fmtMissionTimeLabel(startMs)) : null;
+  let board = fromMission ?? fromRules ?? 20 * 60;
+
+  const earliestBase = earliestEmbeddedBaseWorkWallMin(mission);
+  if (earliestBase !== null && earliestBase < board) {
+    board = earliestBase;
+  }
+  return board;
+}
+
+export function effectiveBoardStartLabel(
+  mission: Pick<MissionDay, "starts_at" | "scheduling_rules" | "positions">,
+): string {
+  const min = effectiveBoardStartMin(mission);
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
+
 export function flattenMissionSlots(
   mission: MissionDay,
   boardStart?: number,
 ): FlatSlot[] {
   const rules = normalizeSchedulingRules(mission.scheduling_rules);
-  const t0 =
-    boardStart ??
-    parseTimeMinutes(rules.board_start) ??
-    20 * 60;
+  const t0 = boardStart ?? effectiveBoardStartMin(mission);
   const missionDateMidnight = new Date(mission.starts_at);
   missionDateMidnight.setHours(0, 0, 0, 0);
   const missionDateMidnightMs = missionDateMidnight.getTime();

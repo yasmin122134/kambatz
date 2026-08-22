@@ -179,6 +179,14 @@ export function resolveSlotAbsoluteInterval(
   const missionStartLabel = fmtMissionTimeLabel(missionStartMs);
   const missionEndLabel = fmtMissionTimeLabel(missionEndMs);
 
+  // Day shift anchored at mission start (officer duty first half, etc.).
+  if (startLabel === missionStartLabel && endLabel !== missionEndLabel) {
+    const candidateEnd = missionStartMs + durMin * 60_000;
+    if (candidateEnd <= missionEndMs) {
+      return { startMs: missionStartMs, endMs: candidateEnd };
+    }
+  }
+
   // Full mission span when wall labels match mission boundaries (e.g. 09:00→09:00 next day).
   if (
     startLabel === missionStartLabel &&
@@ -200,15 +208,24 @@ export function resolveSlotAbsoluteInterval(
   const baseMs = localMissionMidnightMs(missionStartMs);
   const daySpan = Math.ceil((missionEndMs - missionStartMs) / 86_400_000) + 2;
 
+  let clipped: TimeInterval | null = null;
   for (let dayOffset = -1; dayOffset <= daySpan; dayOffset++) {
     const candidateStart = baseMs + dayOffset * 86_400_000 + startMin * 60_000;
     const candidateEnd = candidateStart + durMin * 60_000;
+    if (candidateEnd <= missionStartMs || candidateStart >= missionEndMs) continue;
     if (candidateStart >= missionStartMs && candidateEnd <= missionEndMs) {
       return { startMs: candidateStart, endMs: candidateEnd };
     }
+    if (!clipped) {
+      const clippedStart = Math.max(candidateStart, missionStartMs);
+      const clippedEnd = Math.min(candidateEnd, missionEndMs);
+      if (clippedEnd > clippedStart) {
+        clipped = { startMs: clippedStart, endMs: clippedEnd };
+      }
+    }
   }
 
-  return null;
+  return clipped;
 }
 
 /** All calendar-day occurrences of a wall-clock minute within (start, end). */

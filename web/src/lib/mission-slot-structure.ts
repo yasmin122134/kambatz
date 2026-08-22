@@ -10,6 +10,7 @@
 
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
 import { isBaseWorkPosition, resolveBaseWorkSlotInterval } from "@/lib/base-work-template";
+import { officerDutySlotsValid } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
 export type MissionStructureSnapshot = {
@@ -85,6 +86,11 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
     if (!pos.slots?.length) {
       messages.push(`${pos.name}: position has no slots`);
       continue;
+    }
+    if (pos.kind === "officer_duty" && !officerDutySlotsValid(pos.slots, mission.starts_at, mission.ends_at)) {
+      messages.push(
+        `${pos.name}: שתי משמרות בדיוק — כל אחת חצי מחזור המשימה (${mission.starts_at} → ${mission.ends_at})`,
+      );
     }
     for (const slot of pos.slots) {
       if (slotIds.has(slot.id)) {
