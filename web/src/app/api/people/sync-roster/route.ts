@@ -48,9 +48,18 @@ export async function POST() {
 
   let updated = 0;
   let inserted = 0;
+  let deleted = 0;
   const errors: string[] = [];
 
-  for (const entry of roster as RosterEntry[]) {
+  const rosterEntries = roster as RosterEntry[];
+  const rosterEmails = new Set(
+    rosterEntries.map((e) => e.email.trim().toLowerCase()),
+  );
+  const rosterNames = new Set(
+    rosterEntries.flatMap((e) => [e.name, e.db_name].filter(Boolean) as string[]),
+  );
+
+  for (const entry of rosterEntries) {
     const email = entry.email.trim().toLowerCase();
     const isDutyOfficer = (DUTY_OFFICER_EMAILS as readonly string[]).includes(email);
     let row =
@@ -105,11 +114,26 @@ export async function POST() {
     byEmail.set(email, data);
   }
 
+  for (const person of existing || []) {
+    const email = person.email ? String(person.email).toLowerCase() : "";
+    const inRoster =
+      (email && rosterEmails.has(email)) || rosterNames.has(person.name);
+    if (inRoster) continue;
+
+    const { error } = await supabase.from("people").delete().eq("id", person.id);
+    if (error) {
+      errors.push(`${person.name} (מחיקה): ${error.message}`);
+      continue;
+    }
+    deleted += 1;
+  }
+
   return NextResponse.json({
     ok: errors.length === 0,
-    total: (roster as RosterEntry[]).length,
+    total: rosterEntries.length,
     updated,
     inserted,
+    deleted,
     errors,
   });
 }

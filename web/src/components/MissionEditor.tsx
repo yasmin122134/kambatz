@@ -507,7 +507,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               type="date"
               required
               value={missionDate}
-              onChange={(e) => setMissionDate(e.target.value)}
+              onChange={(e) => {
+                const newDate = e.target.value;
+                setMissionDate(newDate);
+                if (missionType === "kitchen" || missionType === "base_work") {
+                  const window = defaultMissionWindow(missionType, newDate);
+                  setStartsAt(formatDatetimeLocal(window.startsAt));
+                  setEndsAt(formatDatetimeLocal(window.endsAt));
+                  structureDirtyRef.current = true;
+                }
+              }}
             />
           </div>
           <div className="field">

@@ -500,7 +500,6 @@ function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): Miss
       (p) =>
         p.start_time === slot.start_time &&
         p.end_time === slot.end_time &&
-        p.seat_count === slot.seat_count &&
         !usedPrevIds.has(p.id),
     );
     if (sameStart) {

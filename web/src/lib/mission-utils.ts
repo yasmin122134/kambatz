@@ -22,6 +22,7 @@ import {
   materializeBaseWorkPositions,
   resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
+import { resolveKitchenSlotInterval } from "@/lib/kitchen-day-template";
 import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
 
 export type FlatSlot = {
@@ -284,7 +285,14 @@ export function flattenMissionSlots(
             mission.ends_at,
             slot,
           )
-        : resolveCanonicalSlotInterval(mission, slot);
+        : isKitchenSlot
+          ? resolveKitchenSlotInterval(
+              mission.mission_date,
+              mission.starts_at,
+              mission.ends_at,
+              slot,
+            )
+          : resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;
       const startAtMs = abs.startMs;
       const endAtMs = abs.endMs;
