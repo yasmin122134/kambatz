@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 import {
   canAssignPersonToSlot,
+  canSwapReplacementAssignments,
   findReplacements,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
@@ -133,5 +134,49 @@ describe("findReplacements", () => {
     expect(options.map((o) => o.personName)).toContain("Bob");
     expect(options.map((o) => o.personName)).not.toContain("Alex");
     expect(options.map((o) => o.personName)).not.toContain("Carl");
+  });
+
+  it("suggests valid head-to-head swaps", () => {
+    const mission = guardMission(
+      [
+        { id: "g1", start: "08:00", end: "12:00" },
+        { id: "g2", start: "16:00", end: "20:00" },
+      ],
+      { g1: ["Alex"], g2: ["Bob"] },
+    );
+    const people = [person("Alex"), person("Bob")];
+
+    const options = findReplacements({
+      missions: [mission],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "Alex",
+      mode: "swap",
+    });
+
+    expect(options).toHaveLength(1);
+    expect(options[0].swapMissionId).toBe(mission.id);
+    expect(options[0].swapSlotId).toBe("g2");
+    expect(options[0].swapSeatIndex).toBe(0);
+    expect(
+      canSwapReplacementAssignments({
+        missions: [mission],
+        rules,
+        missionId: mission.id,
+        slot: flattenMissionSlots(mission)[0],
+        seatIndex: 0,
+        removeName: "Alex",
+        swapMissionId: mission.id,
+        swapSlot: flattenMissionSlots(mission)[1],
+        swapSeatIndex: 0,
+        swapPerson: people[1],
+        issues: [],
+        peopleByName: Object.fromEntries(people.map((p) => [p.name, p])),
+      }).ok,
+    ).toBe(true);
   });
 });

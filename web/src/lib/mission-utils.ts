@@ -19,6 +19,7 @@ import {
 import {
   isBaseWorkPosition,
   isBaseWorkPositionName,
+  isBaseWorkShiftSlot,
   materializeBaseWorkPositions,
   resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
@@ -275,7 +276,9 @@ export function flattenMissionSlots(
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
       const isBaseWorkSlot =
-        mission.mission_type === "base_work" || isBaseWorkPosition(pos);
+        mission.mission_type === "base_work" ||
+        isBaseWorkPosition(pos) ||
+        (kind === "duty" && isBaseWorkShiftSlot(slot.start_time, slot.end_time));
       const slotMissionType: MissionType = isBaseWorkSlot ? "base_work" : mission.mission_type;
       const abs = isBaseWorkSlot
         ? resolveBaseWorkSlotInterval(

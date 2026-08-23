@@ -21,6 +21,10 @@ import {
   resolvePositionKind,
   slotDurationMinutes,
 } from "@/lib/mission-utils";
+import {
+  isBaseWorkPositionName,
+  isBaseWorkShiftSlot,
+} from "@/lib/base-work-template";
 import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
@@ -60,7 +64,28 @@ type BusyBlock = BurdenTimelineBlock & {
   missionId: string;
   startAtMs: number;
   endAtMs: number;
+  positionName?: string;
 };
+
+type AssignmentOverlapMeta = {
+  positionName?: string;
+  startTime?: string;
+  endTime?: string;
+};
+
+function isBaseWorkAssignment(
+  kind: MissionPositionKind,
+  type: MissionType,
+  meta?: AssignmentOverlapMeta,
+): boolean {
+  if (type === "base_work" && kind === "duty") return true;
+  if (kind !== "duty") return false;
+  if (meta?.positionName && isBaseWorkPositionName(meta.positionName)) return true;
+  if (meta?.startTime && meta?.endTime && isBaseWorkShiftSlot(meta.startTime, meta.endTime)) {
+    return true;
+  }
+  return false;
+}
 
 function busyToBurdenBlocks(blocks: BusyBlock[]): BurdenTimelineBlock[] {
   return blocks;
@@ -110,6 +135,7 @@ export type ReplacementOption = {
   personName: string;
   cost: number;
   label: string;
+  swapMissionId?: string;
   swapSlotId?: string;
   swapSeatIndex?: number;
   swapLabel?: string;
@@ -169,11 +195,13 @@ export function allowsParallelAssignmentOverlap(
   typeA: MissionType,
   kindB: MissionPositionKind,
   typeB: MissionType,
+  metaA?: AssignmentOverlapMeta,
+  metaB?: AssignmentOverlapMeta,
 ): boolean {
   const aCarmelB = kindA === "standby_carmel_b";
   const bCarmelB = kindB === "standby_carmel_b";
-  const aBaseWork = typeA === "base_work" && kindA === "duty";
-  const bBaseWork = typeB === "base_work" && kindB === "duty";
+  const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
+  const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
   return (aCarmelB && bBaseWork) || (bCarmelB && aBaseWork);
 }
 
@@ -186,6 +214,16 @@ function parallelOverlapAllowed(
     slot.missionType,
     block.positionKind,
     block.missionType,
+    {
+      positionName: slot.positionName,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    },
+    {
+      positionName: block.positionName,
+      startTime: block.startTime,
+      endTime: block.endTime,
+    },
   );
 }
 
@@ -824,6 +862,7 @@ export function placePerson(
     missionId,
     startAtMs: slot.startAtMs,
     endAtMs: slot.endAtMs,
+    positionName: slot.positionName,
   };
   tracker.busy[personName] = [...(tracker.busy[personName] || []), block];
   if (isGuardKind(slot.positionKind)) {
@@ -2239,40 +2278,42 @@ export function findReplacements(input: {
         if (oi < 0) continue;
         if (arr.includes(input.removeName)) continue;
 
-        const perRemove = buildTrackerFromMissions(input.missions, input.rules);
-        const perPerson = peopleByName[p.name];
-        const perRemovePerson = peopleByName[input.removeName];
-        if (!perPerson || !perRemovePerson) continue;
+        const swapPerson = peopleByName[p.name];
+        if (!swapPerson) continue;
 
-        const matesOther = arr.filter((_, i) => i !== oi);
-        if (
-          !fitsPerson(
-            perRemovePerson,
-            otherSlot,
-            perRemove,
-            input.issues,
-            normalizeSchedulingRules(otherMission.scheduling_rules),
-            matesOther,
-            peopleByName,
-            otherSlot.slotId,
-          )
-        ) {
-          continue;
-        }
-        if (
-          !fitsPerson(
-            perPerson,
-            target,
-            perRemove,
-            input.issues,
-            scheduling,
-            mates,
-            peopleByName,
-            input.slotId,
-          )
-        ) {
-          continue;
-        }
+        const check = canSwapReplacementAssignments({
+          missions: input.missions,
+          rules: input.rules,
+          missionId: input.missionId,
+          slot: target,
+          seatIndex: input.seatIndex,
+          removeName: input.removeName,
+          swapMissionId: otherMission.id,
+          swapSlot: otherSlot,
+          swapSeatIndex: oi,
+          swapPerson,
+          issues: input.issues,
+          peopleByName,
+        });
+        if (!check.ok) continue;
+
+        const perRemove = buildTrackerFromMissions(input.missions, input.rules);
+        unplacePerson(
+          input.removeName,
+          target,
+          input.missionId,
+          perRemove,
+          input.rules,
+          scheduling,
+        );
+        unplacePerson(
+          swapPerson.name,
+          otherSlot,
+          otherMission.id,
+          perRemove,
+          input.rules,
+          normalizeSchedulingRules(otherMission.scheduling_rules),
+        );
 
         const durDiff =
           Math.abs(otherSlot.durationMinutes - target.durationMinutes) / 60;
@@ -2281,13 +2322,14 @@ export function findReplacements(input: {
         const cost =
           durDiff +
           kindPenalty +
-          workScore(perPerson, perRemove, input.rules, meanPrior) / 100;
+          workScore(swapPerson, perRemove, input.rules, meanPrior) / 100;
 
         options.push({
           type: "swap",
           personName: p.name,
           cost,
           label: `${p.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel}`,
+          swapMissionId: otherMission.id,
           swapSlotId: otherSlot.slotId,
           swapSeatIndex: oi,
           swapLabel: `${otherSlot.positionName} ${otherSlot.timeLabel}`,
@@ -2303,7 +2345,15 @@ export function findReplacements(input: {
 function blockLabel(block: BusyBlock): string {
   if (block.positionKind === "standby_carmel_a") return "כרמל א׳";
   if (block.positionKind === "standby_carmel_b") return "כרמל ב׳";
-  if (block.missionType === "base_work" && block.positionKind === "duty") return "עב״ס";
+  if (
+    isBaseWorkAssignment(block.positionKind, block.missionType, {
+      positionName: block.positionName,
+      startTime: block.startTime,
+      endTime: block.endTime,
+    })
+  ) {
+    return block.positionName?.includes("עב") ? block.positionName : "עב״ס";
+  }
   return block.positionKind;
 }
 
@@ -2518,6 +2568,9 @@ type TrackedAssignment = {
   missionId: string;
   positionKind: MissionPositionKind;
   missionType: MissionType;
+  positionName: string;
+  startTime: string;
+  endTime: string;
 };
 
 /** Global validator — every person must have zero overlapping assignment pairs. */
@@ -2538,6 +2591,9 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
           missionId: mission.id,
           positionKind: slot.positionKind,
           missionType: slot.missionType,
+          positionName: slot.positionName,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
         });
         byPerson.set(name, list);
       }
@@ -2558,6 +2614,16 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
             a.missionType,
             b.positionKind,
             b.missionType,
+            {
+              positionName: a.positionName,
+              startTime: a.startTime,
+              endTime: a.endTime,
+            },
+            {
+              positionName: b.positionName,
+              startTime: b.startTime,
+              endTime: b.endTime,
+            },
           )
         ) {
           continue;

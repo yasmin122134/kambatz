@@ -20,8 +20,9 @@ import { formatFairnessRulesDiff } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
+import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
-import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
+import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
 
@@ -34,6 +35,17 @@ type Props = {
 };
 
 type SwapMode = "take" | "swap" | null;
+
+/** Skip legacy linked base_work mission when ABAS is already embedded in the guard day. */
+function missionsForRosterWarnings(missions: MissionDay[]): MissionDay[] {
+  const guardsWithEmbeddedAbas = missions.find(
+    (m) => m.mission_type === "guards" && (m.positions || []).some(isBaseWorkPosition),
+  );
+  if (!guardsWithEmbeddedAbas) return missions;
+  const linkedId = guardsWithEmbeddedAbas.scheduling_rules?.linked_mission_id;
+  if (!linkedId) return missions;
+  return missions.filter((m) => m.id !== linkedId);
+}
 
 function peopleByNameFromList(people: Person[]): Record<string, Person> {
   return Object.fromEntries(people.map((person) => [person.name, person]));
@@ -109,7 +121,7 @@ export function BoardClient({
     if (!isAdminUser || !dayMissions.length) return [];
     if (Object.keys(peopleByName).length === 0) return [];
     return collectRosterWarnings({
-      missions: dayMissions,
+      missions: missionsForRosterWarnings(dayMissions),
       peopleByName,
       issues: approvedIssues,
     });
@@ -234,6 +246,38 @@ export function BoardClient({
     setSwapMode(null);
   }
 
+  async function applyReplacement(
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    removeName: string,
+    option: ReplacementApplyOption,
+  ) {
+    setMsg("");
+    const res = await fetch(`/api/missions/${missionId}/replacements/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        seat_index: seatIndex,
+        remove_name: removeName,
+        option,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMsg(data.error || "שגיאה בשמירת החלפה");
+      return;
+    }
+    const saved: MissionDay[] = data.missions || [];
+    if (saved.length) {
+      setMissions((prev) => {
+        const byId = new Map(saved.map((m) => [m.id, m]));
+        return prev.map((m) => byId.get(m.id) ?? m);
+      });
+    }
+  }
+
   async function adminSetName(
     missionId: string,
     slotId: string,
@@ -245,22 +289,6 @@ export function BoardClient({
       slot_id: slotId,
       seat_index: seatIndex,
       name,
-    });
-  }
-
-  async function adminReplacementSwap(
-    missionId: string,
-    slotId: string,
-    seatIndex: number,
-    targetSlotId: string,
-    targetSeatIndex: number,
-  ) {
-    await patchAssignment(missionId, {
-      action: "swap",
-      slot_id: slotId,
-      seat_index: seatIndex,
-      target_slot_id: targetSlotId,
-      target_seat_index: targetSeatIndex,
     });
   }
 
@@ -494,7 +522,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -535,7 +563,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -576,7 +604,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -765,7 +793,7 @@ function GuardTimeline({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -783,12 +811,12 @@ function GuardTimeline({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetSlotId: string,
-    targetSeatIndex: number,
+    removeName: string,
+    option: ReplacementApplyOption,
   ) => void;
   onCancelSwap: () => void;
 }) {
@@ -851,7 +879,7 @@ function GuardTimeline({
                         onTake={onTake}
                         onSwap={onSwap}
                         onAdminSet={onAdminSet}
-                        onAdminReplacementSwap={onAdminReplacementSwap}
+                        onApplyReplacement={onApplyReplacement}
                         onCancelSwap={onCancelSwap}
                       />
                     </div>
@@ -880,7 +908,7 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -896,12 +924,12 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetSlotId: string,
-    targetSeatIndex: number,
+    removeName: string,
+    option: ReplacementApplyOption,
   ) => void;
   onCancelSwap: () => void;
 }) {
@@ -926,7 +954,7 @@ function MissionPanel({
         onTake={onTake}
         onSwap={onSwap}
         onAdminSet={onAdminSet}
-        onAdminReplacementSwap={onAdminReplacementSwap}
+        onApplyReplacement={onApplyReplacement}
         onCancelSwap={onCancelSwap}
       />
     );
@@ -951,7 +979,7 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
-            onAdminReplacementSwap={onAdminReplacementSwap}
+            onApplyReplacement={onApplyReplacement}
             onCancelSwap={onCancelSwap}
           />
         ))}
@@ -964,15 +992,13 @@ function ReplacementPicker({
   slotId,
   seatIndex,
   currentName,
-  onDirect,
-  onSwap,
+  onApply,
 }: {
   missionId: string;
   slotId: string;
   seatIndex: number;
   currentName: string;
-  onDirect: (name: string) => void;
-  onSwap: (targetSlotId: string, targetSeatIndex: number) => void;
+  onApply: (option: ReplacementApplyOption) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap">("replace");
@@ -982,6 +1008,7 @@ function ReplacementPicker({
       type: "direct" | "swap";
       personName: string;
       label: string;
+      swapMissionId?: string;
       swapSlotId?: string;
       swapSeatIndex?: number;
     }[]
@@ -1050,9 +1077,19 @@ function ReplacementPicker({
                     type="button"
                     className="btn-sm w-full text-right"
                     onClick={() => {
-                      if (o.type === "direct") onDirect(o.personName);
-                      else if (o.swapSlotId != null && o.swapSeatIndex != null) {
-                        onSwap(o.swapSlotId, o.swapSeatIndex);
+                      if (o.type === "direct") {
+                        onApply({ type: "direct", personName: o.personName });
+                      } else if (
+                        o.swapMissionId &&
+                        o.swapSlotId != null &&
+                        o.swapSeatIndex != null
+                      ) {
+                        onApply({
+                          type: "swap",
+                          swapMissionId: o.swapMissionId,
+                          swapSlotId: o.swapSlotId,
+                          swapSeatIndex: o.swapSeatIndex,
+                        });
                       }
                       setOpen(false);
                     }}
@@ -1086,7 +1123,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -1105,12 +1142,12 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetSlotId: string,
-    targetSeatIndex: number,
+    removeName: string,
+    option: ReplacementApplyOption,
   ) => void;
   onCancelSwap: () => void;
 }) {
@@ -1149,15 +1186,8 @@ function SlotCard({
                     slotId={slot.slotId}
                     seatIndex={seatIndex}
                     currentName={name}
-                    onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
-                    onSwap={(targetSlotId, targetSeatIndex) =>
-                      onAdminReplacementSwap(
-                        missionId,
-                        slot.slotId,
-                        seatIndex,
-                        targetSlotId,
-                        targetSeatIndex,
-                      )
+                    onApply={(option) =>
+                      onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
                     }
                   />
                 )}

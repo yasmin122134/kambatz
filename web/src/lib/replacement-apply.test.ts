@@ -88,4 +88,44 @@ describe("applyReplacementAssignment", () => {
     expect(result.missions[0].assignments.g1).toEqual(["Bob"]);
     expect(result.missions[0].assignments.g2).toEqual(["Alex"]);
   });
+
+  it("direct replace unplaces current assignee before validating", async () => {
+    const mission = guardMission({ g1: ["Alex"], g2: ["Bob"] });
+    const people = [person("Alex"), person("Bob"), person("Carl")];
+    const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+
+    const result = await applyReplacementAssignment({
+      sourceMission: mission,
+      sameDayMissions: [mission],
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "Alex",
+      option: { type: "direct", personName: "Carl" },
+      peopleByName,
+      issues: [],
+      rules,
+    });
+
+    expect(result.missions[0].assignments.g1).toEqual(["Carl"]);
+    expect(result.missions[0].assignments.g2).toEqual(["Bob"]);
+  });
+
+  it("rejects stale remove_name", async () => {
+    const mission = guardMission({ g1: ["Bob"], g2: [""] });
+    const peopleByName = { Bob: person("Bob"), Carl: person("Carl") };
+
+    await expect(
+      applyReplacementAssignment({
+        sourceMission: mission,
+        sameDayMissions: [mission],
+        slotId: "g1",
+        seatIndex: 0,
+        removeName: "Alex",
+        option: { type: "direct", personName: "Carl" },
+        peopleByName,
+        issues: [],
+        rules,
+      }),
+    ).rejects.toThrow(/השיבוץ השתנה/);
+  });
 });

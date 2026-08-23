@@ -35,6 +35,12 @@ export const BASE_WORK_SLOT_WINDOWS = [
   ["18:30", "20:00"],
 ] as const;
 
+export function isBaseWorkShiftSlot(startTime: string, endTime: string): boolean {
+  const start = normalizeTimeLabel(startTime);
+  const end = normalizeTimeLabel(endTime);
+  return BASE_WORK_SLOT_WINDOWS.some(([s, e]) => s === start && e === end);
+}
+
 /** שעות קבועות על תאריך mission_date (שעון ישראל) — לא תלוי בחלון השמירות. */
 export function baseWorkWallClockInterval(
   missionDate: string,

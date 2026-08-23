@@ -6,16 +6,25 @@ import {
   resolveMissionPositions,
   shouldRegenerateGuardStructure,
 } from "@/lib/mission-templates";
+import { getFairnessRules } from "@/lib/fairness";
 import {
   deleteMissionDay,
   getMissionDay,
+  listMissionDays,
   normalizeSchedulingRules,
   saveMissionDay,
   syncAssignmentSeats,
 } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { loadApprovedIssues } from "@/lib/issues";
-import { canAssignKind, blockedByIssue, issueBlockMessage } from "@/lib/scheduling-engine";
+import {
+  canAssignKind,
+  blockedByIssue,
+  issueBlockMessage,
+  canAssignPersonToSlot,
+  canSwapReplacementAssignments,
+} from "@/lib/scheduling-engine";
+import { sameDayMissionsFor } from "@/lib/replacement-apply";
 import { flattenMissionSlots, reconcileAssignmentsOnStructureChange } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
@@ -226,16 +235,34 @@ export async function PATCH(request: Request, { params }: Params) {
     if (srcName !== personName && !admin) {
       return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
     }
-    if (!dstName) {
+    if (!dstName || !srcName) {
       return NextResponse.json({ error: "אין עם מי להחליף" }, { status: 400 });
     }
-    const srcErr = assertCanAssign(peopleByName[dstName], srcSlot, dstName, issues);
-    if (srcErr) {
-      return NextResponse.json({ error: srcErr }, { status: 400 });
+    const swapPerson = peopleByName[dstName];
+    if (!srcSlot || !dstSlot || !swapPerson) {
+      return NextResponse.json({ error: "משמרת או צוער לא נמצאו" }, { status: 400 });
     }
-    const dstErr = assertCanAssign(peopleByName[srcName], dstSlot, srcName, issues);
-    if (dstErr) {
-      return NextResponse.json({ error: dstErr }, { status: 400 });
+    const [allMissions, rules] = await Promise.all([
+      listMissionDays(false),
+      getFairnessRules(),
+    ]);
+    const sameDay = sameDayMissionsFor(mission, allMissions);
+    const swapCheck = canSwapReplacementAssignments({
+      missions: sameDay,
+      rules,
+      missionId: mission.id,
+      slot: srcSlot,
+      seatIndex: seat_index,
+      removeName: srcName,
+      swapMissionId: mission.id,
+      swapSlot: dstSlot,
+      swapSeatIndex: target_seat_index,
+      swapPerson,
+      issues,
+      peopleByName,
+    });
+    if (!swapCheck.ok) {
+      return NextResponse.json({ error: swapCheck.reason }, { status: 400 });
     }
     src[seat_index] = dstName;
     dst[target_seat_index] = srcName;
@@ -249,11 +276,34 @@ export async function PATCH(request: Request, { params }: Params) {
     };
   } else if (action === "admin_set" && admin) {
     const slot = slotById(mission, slot_id);
+    if (!slot) {
+      return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
+    }
     const nextName = String(name || "").trim();
+    const currentName = String((mission.assignments[slot_id] || [])[seat_index] || "").trim();
     if (nextName) {
-      const err = assertCanAssign(peopleByName[nextName], slot, nextName, issues);
-      if (err) {
-        return NextResponse.json({ error: err }, { status: 400 });
+      const person = peopleByName[nextName];
+      if (!person) {
+        return NextResponse.json({ error: `${nextName}: לא נמצא במחזור` }, { status: 400 });
+      }
+      const [allMissions, rules] = await Promise.all([
+        listMissionDays(false),
+        getFairnessRules(),
+      ]);
+      const sameDay = sameDayMissionsFor(mission, allMissions);
+      const check = canAssignPersonToSlot({
+        missions: sameDay,
+        rules,
+        missionId: mission.id,
+        slot,
+        seatIndex: seat_index,
+        person,
+        issues,
+        peopleByName,
+        replaceName: currentName || null,
+      });
+      if (!check.ok) {
+        return NextResponse.json({ error: check.reason }, { status: 400 });
       }
     }
     const seats = [...(mission.assignments[slot_id] || [])];
