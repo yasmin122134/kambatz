@@ -1,12 +1,16 @@
 import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
+  compareByFairnessThenBurden,
+  rosterBurdenSpread,
+  spreadAfterGroupAssign,
+} from "@/lib/scheduling-engine";
+import {
   assignBaseWorkShift,
   buildTrackerFromMissions,
   fitsPerson,
   placePerson,
   siblingDutyOfficerAssignee,
   unplacePerson,
-  workScore,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
 import {
@@ -449,9 +453,18 @@ function listSeatCandidates(
     const eligibleA = scarcity.get(a.name) ?? 0;
     const eligibleB = scarcity.get(b.name) ?? 0;
     if (eligibleA !== eligibleB) return eligibleA - eligibleB;
-    const wa = workScore(a, state.tracker, rules, meanPrior);
-    const wb = workScore(b, state.tracker, rules, meanPrior);
-    if (wa !== wb) return wa - wb;
+    const fairnessCmp = compareByFairnessThenBurden(
+      a,
+      b,
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+      unit.slot.seatCount,
+    );
+    if (fairnessCmp !== 0) return fairnessCmp;
     const tie = (a.name.charCodeAt(0) + seed) % 7;
     const tie2 = (b.name.charCodeAt(0) + seed) % 7;
     if (tie !== tie2) return tie - tie2;
@@ -482,12 +495,25 @@ function listCarmelCandidates(
   });
 
   return groups.sort((a, b) => {
-    const avg = (g: CarmelGroupCandidate) =>
-      g.people.reduce((s, p) => s + workScore(p, state.tracker, rules, meanPrior), 0) /
-      g.people.length;
-    const da = avg(a);
-    const db = avg(b);
-    if (da !== db) return da - db;
+    const spreadA = spreadAfterGroupAssign(
+      a.people,
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+    );
+    const spreadB = spreadAfterGroupAssign(
+      b.people,
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+    );
+    if (spreadA !== spreadB) return spreadA - spreadB;
     const tie = (a.room.charCodeAt(0) + seed) % 5;
     const tie2 = (b.room.charCodeAt(0) + seed) % 5;
     if (tie !== tie2) return tie - tie2;
@@ -741,20 +767,24 @@ function seedOfficerDutyInState(
 function evaluateLex(
   units: AssignmentUnit[],
   state: SolverState,
+  people: Person[],
+  rules: FairnessRules,
+  meanPrior: number,
 ): number[] {
   const filled = countFilledSeats(units, state.assignmentsByMission);
   const required = countRequiredSeats(units);
   let carmelFilled = 0;
-  let carmelRequired = 0;
   for (const unit of units) {
     if (unit.kind !== "carmel") continue;
-    carmelRequired += unit.need;
     const seats = state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
     carmelFilled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
   }
-  const burdens = Object.values(state.tracker.periodPoints);
-  const fairnessSpread =
-    burdens.length > 1 ? Math.max(...burdens) - Math.min(...burdens) : 0;
+  const fairnessSpread = rosterBurdenSpread(
+    people,
+    state.tracker,
+    rules,
+    meanPrior,
+  );
   return [filled, filled >= required ? 1 : 0, carmelFilled, -fairnessSpread];
 }
 
@@ -863,7 +893,13 @@ function solveBacktracking(input: {
   let nodes = 0;
   let timedOut = false;
   let bestState = cloneState(input.initialState);
-  let bestScore = evaluateLex(input.units, bestState);
+  let bestScore = evaluateLex(
+    input.units,
+    bestState,
+    input.people,
+    input.rules,
+    input.meanPrior,
+  );
 
   function cloneState(state: SolverState): SolverState {
     return {
@@ -887,7 +923,13 @@ function solveBacktracking(input: {
     nodes += 1;
 
     if (state.assignedUnitIds.size === input.units.length) {
-      const score = evaluateLex(input.units, state);
+      const score = evaluateLex(
+        input.units,
+        state,
+        input.people,
+        input.rules,
+        input.meanPrior,
+      );
       if (lexBetter(score, bestScore)) {
         bestScore = score;
         bestState = cloneState(state);
@@ -945,7 +987,13 @@ function solveBacktracking(input: {
               .map((person) => ({ kind: "seat", person }));
 
     if (!choices.length) {
-      const score = evaluateLex(input.units, state);
+      const score = evaluateLex(
+        input.units,
+        state,
+        input.people,
+        input.rules,
+        input.meanPrior,
+      );
       if (lexBetter(score, bestScore)) {
         bestScore = score;
         bestState = cloneState(state);
@@ -1059,7 +1107,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   bestResult = {
     state: greedyState,
     nodes: 0,
-    score: evaluateLex(units, greedyState),
+    score: evaluateLex(units, greedyState, input.people, input.rules, input.meanPrior),
     timedOut: false,
   };
 
@@ -1132,9 +1180,12 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     carmelFilled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
   }
 
-  const burdens = Object.values(finalState.tracker.periodPoints);
-  const fairnessSpread =
-    burdens.length > 1 ? Math.max(...burdens) - Math.min(...burdens) : 0;
+  const fairnessSpread = rosterBurdenSpread(
+    input.people,
+    finalState.tracker,
+    input.rules,
+    input.meanPrior,
+  );
 
   const status = deriveStatus(filled, requiredSeats, []);
 

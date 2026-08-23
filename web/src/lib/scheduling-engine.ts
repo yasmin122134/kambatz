@@ -1,4 +1,5 @@
 import { slotDurationHours } from "@/lib/fairness-math";
+import { spreadWithOverrides } from "@/lib/fairness-spread";
 import {
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
@@ -435,10 +436,20 @@ export function workScore(
   scheduling?: MissionSchedulingRules,
 ): number {
   const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
-  const burden =
-    tracker.periodPoints[person.name] ??
-    calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling).totalBurden;
+  const burden = periodBurdenOnly(person, tracker, rules, scheduling);
   return burden + priorAdj;
+}
+
+export function periodBurdenOnly(
+  person: Person,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+): number {
+  return (
+    tracker.periodPoints[person.name] ??
+    calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling).totalBurden
+  );
 }
 
 export function personBurdenBreakdown(
@@ -469,6 +480,177 @@ export function projectedGuardCandidateScore(
   );
   const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
   return projected + priorAdj;
+}
+
+export function activeRosterMembers(people: Person[]): Person[] {
+  return people.filter((p) => p.active);
+}
+
+export function rosterBurdenByName(
+  roster: Person[],
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  _meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const person of activeRosterMembers(roster)) {
+    map.set(person.name, periodBurdenOnly(person, tracker, rules, scheduling));
+  }
+  return map;
+}
+
+export function rosterBurdenSpread(
+  roster: Person[],
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+  overrides?: Map<string, number>,
+): number {
+  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const names = activeRosterMembers(roster).map((p) => p.name);
+  return spreadWithOverrides(base, names, overrides ?? new Map());
+}
+
+export function projectedPeriodBurdenForSlot(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+  seatCount?: number,
+): number {
+  if (isGuardKind(slot.positionKind)) {
+    return calculateProjectedCandidateBurden(
+      person.name,
+      slot,
+      busyToBurdenBlocks(tracker.busy[person.name] || []),
+      rules,
+      scheduling,
+      seatCount,
+    );
+  }
+  const base = periodBurdenOnly(person, tracker, rules, scheduling);
+  const increment = pointsForSlot(slot, seatCount ?? slot.seatCount, rules, {
+    missionType: slot.missionType,
+    scheduling,
+  });
+  return Math.round((base + increment) * 100) / 100;
+}
+
+export function projectedBurdenForSlot(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+  seatCount?: number,
+): number {
+  if (isGuardKind(slot.positionKind)) {
+    return projectedGuardCandidateScore(
+      person,
+      slot,
+      tracker,
+      rules,
+      meanPrior,
+      scheduling,
+      seatCount,
+    );
+  }
+  const period = projectedPeriodBurdenForSlot(
+    person,
+    slot,
+    tracker,
+    rules,
+    scheduling,
+    seatCount,
+  );
+  const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
+  return Math.round((period + priorAdj) * 100) / 100;
+}
+
+export function compareByFairnessThenBurden(
+  a: Person,
+  b: Person,
+  slot: FlatSlot,
+  roster: Person[],
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+  seatCount?: number,
+  preferHigh = false,
+): number {
+  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const names = activeRosterMembers(roster).map((p) => p.name);
+  const burdenA = projectedPeriodBurdenForSlot(
+    a,
+    slot,
+    tracker,
+    rules,
+    scheduling,
+    seatCount,
+  );
+  const burdenB = projectedPeriodBurdenForSlot(
+    b,
+    slot,
+    tracker,
+    rules,
+    scheduling,
+    seatCount,
+  );
+  const spreadA = spreadWithOverrides(base, names, new Map([[a.name, burdenA]]));
+  const spreadB = spreadWithOverrides(base, names, new Map([[b.name, burdenB]]));
+  if (spreadA !== spreadB) return spreadA - spreadB;
+  const scoreA = projectedBurdenForSlot(
+    a,
+    slot,
+    tracker,
+    rules,
+    meanPrior,
+    scheduling,
+    seatCount,
+  );
+  const scoreB = projectedBurdenForSlot(
+    b,
+    slot,
+    tracker,
+    rules,
+    meanPrior,
+    scheduling,
+    seatCount,
+  );
+  return preferHigh ? scoreB - scoreA : scoreA - scoreB;
+}
+
+export function spreadAfterGroupAssign(
+  group: Person[],
+  slot: FlatSlot,
+  roster: Person[],
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling?: MissionSchedulingRules,
+): number {
+  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const names = activeRosterMembers(roster).map((p) => p.name);
+  const overrides = new Map<string, number>();
+  for (const person of group) {
+    overrides.set(
+      person.name,
+      projectedPeriodBurdenForSlot(
+        person,
+        slot,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+      ),
+    );
+  }
+  return spreadWithOverrides(base, names, overrides);
 }
 
 /** Whether two assignment kinds require minimum spacing (not overlap — e.g. guard↔base work). */
@@ -632,6 +814,7 @@ export function repairGuardAssignmentGaps(input: {
           input.meanPrior,
           {
             scheduling: input.scheduling,
+            roster: input.people,
             dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
               input.mission,
               slot,
@@ -717,7 +900,7 @@ export function repairGuardAssignmentGaps(input: {
               input.tracker,
               input.rules,
               input.meanPrior,
-              { scheduling: input.scheduling },
+              { scheduling: input.scheduling, roster: input.people },
             );
 
             if (!replacement) {
@@ -878,7 +1061,7 @@ export function pickRelaxedCandidate(
   rules: FairnessRules,
   meanPrior: number,
   exclude: Set<string>,
-  pickOptions?: { dutyOfficerAlreadyAssigned?: string },
+  pickOptions?: { dutyOfficerAlreadyAssigned?: string; roster?: Person[] },
 ): Person | null {
   const candidates = people.filter((p) => {
     if (exclude.has(p.name) || mates.includes(p.name)) return false;
@@ -891,6 +1074,7 @@ export function pickRelaxedCandidate(
   });
   return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
     scheduling,
+    roster: pickOptions?.roster ?? people,
     dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
   });
 }
@@ -945,6 +1129,7 @@ export function forceFillEmptySeats(input: {
           input.meanPrior,
           {
             scheduling: input.scheduling,
+            roster: input.people,
             dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
               input.mission,
               slot,
@@ -964,6 +1149,7 @@ export function forceFillEmptySeats(input: {
           input.meanPrior,
           inSlot,
           {
+            roster: input.people,
             dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
               input.mission,
               slot,
@@ -1080,6 +1266,8 @@ export function pickBestCandidate(
     scheduling?: MissionSchedulingRules;
     /** משמרת קצין תורן אחרת באותו יום — העדפת הקצין השני */
     dutyOfficerAlreadyAssigned?: string;
+    /** Full active roster — enables spread-aware fairness when provided */
+    roster?: Person[];
   },
 ): Person | null {
   if (!candidates.length) return null;
@@ -1089,20 +1277,37 @@ export function pickBestCandidate(
   const useGuardBurden = isGuardKind(slot.positionKind);
   const scheduling = options?.scheduling;
   const siblingOfficer = options?.dutyOfficerAlreadyAssigned;
+  const roster = options?.roster;
 
   const sorted = [...candidates].sort((a, b) => {
     if (slot.positionKind === "officer_duty" && siblingOfficer) {
       if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
       if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
     }
-    const wa = useGuardBurden
-      ? projectedGuardCandidateScore(a, slot, tracker, rules, meanPrior, scheduling)
-      : workScore(a, tracker, rules, meanPrior, scheduling);
-    const wb = useGuardBurden
-      ? projectedGuardCandidateScore(b, slot, tracker, rules, meanPrior, scheduling)
-      : workScore(b, tracker, rules, meanPrior, scheduling);
-    let sc = preferHigh ? wb - wa : wa - wb;
-    if (sc !== 0) return sc;
+    if (roster?.length) {
+      const spreadCmp = compareByFairnessThenBurden(
+        a,
+        b,
+        slot,
+        roster,
+        tracker,
+        rules,
+        meanPrior,
+        scheduling,
+        slot.seatCount,
+        preferHigh,
+      );
+      if (spreadCmp !== 0) return spreadCmp;
+    } else {
+      const wa = useGuardBurden
+        ? projectedGuardCandidateScore(a, slot, tracker, rules, meanPrior, scheduling)
+        : workScore(a, tracker, rules, meanPrior, scheduling);
+      const wb = useGuardBurden
+        ? projectedGuardCandidateScore(b, slot, tracker, rules, meanPrior, scheduling)
+        : workScore(b, tracker, rules, meanPrior, scheduling);
+      const sc = preferHigh ? wb - wa : wa - wb;
+      if (sc !== 0) return sc;
+    }
     if (useGuardBurden) {
       const ga = personBurdenBreakdown(a.name, tracker, rules, scheduling).guardAssignmentCount;
       const gb = personBurdenBreakdown(b.name, tracker, rules, scheduling).guardAssignmentCount;
@@ -1163,9 +1368,18 @@ export function assignStandbyRoom(
   });
 
   const pool = okInRoom(rooms[0]).sort((a, b) => {
-    const wa = workScore(a, tracker, rules, meanPrior);
-    const wb = workScore(b, tracker, rules, meanPrior);
-    if (wa !== wb) return wa - wb;
+    const cmp = compareByFairnessThenBurden(
+      a,
+      b,
+      slot,
+      people,
+      tracker,
+      rules,
+      meanPrior,
+      scheduling,
+      slot.seatCount,
+    );
+    if (cmp !== 0) return cmp;
     return a.name.localeCompare(b.name, "he");
   });
 
@@ -1466,9 +1680,18 @@ export function assignBaseWorkShift(input: {
     const pool = activePools[i]
       .filter((p) => !input.taken.includes(p.name) && !assigned.includes(p.name))
       .sort((a, b) => {
-        const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
-        const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
-        return wa - wb || a.name.localeCompare(b.name, "he");
+        const cmp = compareByFairnessThenBurden(
+          a,
+          b,
+          input.slot,
+          input.people,
+          input.tracker,
+          input.rules,
+          input.meanPrior,
+          input.scheduling,
+          input.slot.seatCount,
+        );
+        return cmp || a.name.localeCompare(b.name, "he");
       });
 
     let squadAdded = 0;
