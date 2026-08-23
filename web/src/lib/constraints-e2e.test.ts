@@ -4,6 +4,7 @@ import { flattenMissionSlots } from "@/lib/mission-utils";
 import { runGlobalAssign } from "@/lib/global-assign";
 import {
   blockedByIssue,
+  createEmptyScheduleTracker,
   findAssignmentConflicts,
   fitsPerson,
   validateGeneratedRoster,
