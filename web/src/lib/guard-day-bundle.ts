@@ -20,7 +20,7 @@ import {
 import type { MissionDay, MissionSchedulingRules } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
-export const DEFAULT_DUTY_GUARD_GAP_MINUTES = 90;
+export const DEFAULT_DUTY_GUARD_GAP_MINUTES = 60;
 
 export type GuardDayBundleInput = {
   mission_date: string;

@@ -146,7 +146,7 @@ export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
   guard_ratio: 2,
   board_start: "20:00",
   shift_hours: 4,
-  duty_guard_gap_minutes: 90,
+  duty_guard_gap_minutes: 60,
   kitchen: DEFAULT_KITCHEN_SCHEDULING_RULES,
   base_work: DEFAULT_BASE_WORK_SCHEDULING_RULES,
 };

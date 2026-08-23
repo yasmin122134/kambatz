@@ -4,6 +4,7 @@ import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
   findAssignmentConflicts,
+  forceFillEmptySeats,
   repairGuardAssignmentGaps,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
@@ -130,32 +131,78 @@ async function smartAssignScope(input: {
     const assignments = output.assignmentsByMission.get(mission.id);
     if (!assignments) continue;
 
-    const draftAssignments = syncAssignmentSeats(mission.positions, { ...assignments });
-    const draftMissions = input.scopeMissions.map((m) => ({
-      ...m,
-      assignments:
-        m.id === mission.id
-          ? draftAssignments
-          : output.assignmentsByMission.get(m.id) ?? m.assignments,
-    }));
-    const tracker = buildTrackerFromMissions(
-      [...input.allMissions.filter((m) => !draftMissions.some((d) => d.id === m.id)), ...draftMissions],
-      input.rules,
-      new Set(),
-    );
+    let currentAssignments = syncAssignmentSeats(mission.positions, { ...assignments });
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-    const { assignments: repaired } = repairGuardAssignmentGaps({
-      mission: { ...mission, assignments: draftAssignments },
-      assignments: draftAssignments,
-      people: input.people,
-      tracker,
-      issues: input.issues,
-      scheduling,
-      rules: input.rules,
-      meanPrior,
-    });
-    output.assignmentsByMission.set(mission.id, repaired);
+
+    for (let round = 0; round < 3; round++) {
+      const draftMissions = input.scopeMissions.map((m) => ({
+        ...m,
+        assignments:
+          m.id === mission.id
+            ? currentAssignments
+            : output.assignmentsByMission.get(m.id) ?? m.assignments,
+      }));
+      const tracker = buildTrackerFromMissions(
+        [
+          ...input.allMissions.filter((m) => !draftMissions.some((d) => d.id === m.id)),
+          ...draftMissions,
+        ],
+        input.rules,
+        new Set(),
+      );
+
+      const { assignments: repaired } = repairGuardAssignmentGaps({
+        mission: { ...mission, assignments: currentAssignments },
+        assignments: currentAssignments,
+        people: input.people,
+        tracker,
+        issues: input.issues,
+        scheduling,
+        rules: input.rules,
+        meanPrior,
+      });
+      currentAssignments = repaired;
+
+      const trackerAfterRepair = buildTrackerFromMissions(
+        [
+          ...input.allMissions.filter((m) => !draftMissions.some((d) => d.id === m.id)),
+          ...draftMissions.map((m) =>
+            m.id === mission.id ? { ...m, assignments: currentAssignments } : m,
+          ),
+        ],
+        input.rules,
+        new Set(),
+      );
+      const { assignments: forceFilled, warnings: fillWarnings, filled: roundFilled } =
+        forceFillEmptySeats({
+          mission: { ...mission, assignments: currentAssignments },
+          assignments: currentAssignments,
+          people: input.people,
+          tracker: trackerAfterRepair,
+          issues: input.issues,
+          scheduling,
+          rules: input.rules,
+          meanPrior,
+        });
+      currentAssignments = forceFilled;
+      if (fillWarnings.length) {
+        for (const w of fillWarnings) {
+          if (!output.warnings.includes(w)) output.warnings.push(w);
+        }
+      }
+      if (roundFilled === 0) break;
+    }
+
+    output.assignmentsByMission.set(mission.id, currentAssignments);
   }
+
+  let postFilled = 0;
+  for (const mission of input.scopeMissions) {
+    const assignments = output.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+    postFilled += countMissionFilledSeats(assignments);
+  }
+  output.filled = postFilled;
 
   const draftMissions = input.scopeMissions.map((mission) => ({
     ...mission,

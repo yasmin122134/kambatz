@@ -12,6 +12,7 @@ import {
   validateNoPersonOverlaps,
   explainFitsPersonFailure,
   assignmentNeedsSpacingGap,
+  allowsParallelAssignmentOverlap,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -170,7 +171,7 @@ describe("overlap rejection across mission types", () => {
     ).toBe(false);
   });
 
-  it("Test B — Carmel B vs Base Work overlap is invalid", () => {
+  it("Test B — Carmel B vs Base Work overlap is allowed (parallel)", () => {
     const guardMission = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const carmelId = carmelBSlot(guardMission).slotId;
     const guard = withCustomSlotTimes(guardMission, carmelId, "08:00", "12:00");
@@ -187,7 +188,7 @@ describe("overlap rejection across mission types", () => {
     const target = slotByLabel(baseSlot, "09:00–13:00");
 
     const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
-    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
   });
 
   it("Test C — consecutive Carmel B and Base Work is valid", () => {
@@ -246,6 +247,46 @@ describe("overlap rejection across mission types", () => {
 });
 
 describe("validateNoPersonOverlaps", () => {
+  it("allows Carmel B parallel with base work", () => {
+    const guard = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
+    const carmel = carmelBSlot(guard);
+    const base = missionDay(
+      "base-1",
+      "base_work",
+      defaultBaseWorkPositions(),
+      {},
+      "2026-08-21T08:00:00",
+      "2026-08-21T20:00:00",
+    );
+    const timed = withCustomSlotTimes(
+      withCustomSlotTimes(guard, carmel.slotId, "08:00", "12:00"),
+      base.positions[0].slots[0].id,
+      "09:00",
+      "13:00",
+    );
+    const baseSlotId = base.positions[0].slots[0].id;
+    const assignments = { ...timed.assignments };
+    assignments[carmel.slotId] = ["Alex", "", ""];
+    assignments[baseSlotId] = Array(14).fill("");
+    assignments[baseSlotId][0] = "Alex";
+
+    const guardMission = { ...timed, assignments };
+    const baseMission = {
+      ...withCustomSlotTimes(base, baseSlotId, "09:00", "13:00"),
+      assignments: { [baseSlotId]: assignments[baseSlotId] },
+    };
+
+    expect(
+      allowsParallelAssignmentOverlap(
+        "standby_carmel_b",
+        "guards",
+        "duty",
+        "base_work",
+      ),
+    ).toBe(true);
+    expect(validateNoPersonOverlaps([guardMission, baseMission])).toHaveLength(0);
+  });
+
   it("Test H — rejects manually constructed overlapping roster", () => {
     const guard = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const carmel = carmelBSlot(guard);

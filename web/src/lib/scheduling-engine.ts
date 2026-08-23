@@ -163,6 +163,32 @@ function needsDutyGuardGap(
   return (aBase && bGuard) || (aGuard && bBase);
 }
 
+/** כרמל ב׳ מותר במקביל לעב״ס — אותו צוער בשתי המשימות בו-זמנית. */
+export function allowsParallelAssignmentOverlap(
+  kindA: MissionPositionKind,
+  typeA: MissionType,
+  kindB: MissionPositionKind,
+  typeB: MissionType,
+): boolean {
+  const aCarmelB = kindA === "standby_carmel_b";
+  const bCarmelB = kindB === "standby_carmel_b";
+  const aBaseWork = typeA === "base_work" && kindA === "duty";
+  const bBaseWork = typeB === "base_work" && kindB === "duty";
+  return (aCarmelB && bBaseWork) || (bCarmelB && aBaseWork);
+}
+
+function parallelOverlapAllowed(
+  slot: FlatSlot,
+  block: BusyBlock,
+): boolean {
+  return allowsParallelAssignmentOverlap(
+    slot.positionKind,
+    slot.missionType,
+    block.positionKind,
+    block.missionType,
+  );
+}
+
 export function blockedByIssue(
   personName: string,
   slot: FlatSlot,
@@ -361,6 +387,7 @@ function overlapsSlot(
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
+    if (parallelOverlapAllowed(slot, b)) continue;
 
     const blockIv = blockInterval(b);
     const extraGap = needsDutyGuardGap(
@@ -873,22 +900,43 @@ export function repairGuardAssignmentGaps(input: {
             peopleByName,
           ),
         );
-        const chosen = pickBestCandidate(
-          direct,
-          slot,
-          input.tracker,
-          input.rules,
-          input.meanPrior,
-          {
-            scheduling: input.scheduling,
-            roster: input.people,
-            dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
-              input.mission,
-              slot,
-              assignments,
-            ) ?? undefined,
-          },
-        );
+        const chosen =
+          pickBestCandidate(
+            direct,
+            slot,
+            input.tracker,
+            input.rules,
+            input.meanPrior,
+            {
+              scheduling: input.scheduling,
+              roster: input.people,
+              dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+                input.mission,
+                slot,
+                assignments,
+              ) ?? undefined,
+            },
+          ) ??
+          pickRelaxedCandidate(
+            input.people,
+            slot,
+            input.tracker,
+            input.issues,
+            input.scheduling,
+            mates,
+            peopleByName,
+            input.rules,
+            input.meanPrior,
+            new Set(mates),
+            {
+              roster: input.people,
+              dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+                input.mission,
+                slot,
+                assignments,
+              ) ?? undefined,
+            },
+          );
         if (chosen) {
           seats[seatIndex] = chosen.name;
           placePerson(
@@ -1086,6 +1134,7 @@ function overlapAssignmentWarning(
 
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
+    if (parallelOverlapAllowed(slot, b)) continue;
 
     const blockIv = blockInterval(b);
     const dutyGuardGap = needsDutyGuardGap(
@@ -1116,7 +1165,7 @@ function overlapAssignmentWarning(
   return null;
 }
 
-/** מועמדים כשאין מי שעומד בכל הכללים — עדיין אוסר חפיפות */
+/** מועמדים כשאין מי שעומד בכל הכללים — עדיין אוסר חפיפות ויחס שמירות */
 export function pickRelaxedCandidate(
   people: Person[],
   slot: FlatSlot,
@@ -1135,8 +1184,48 @@ export function pickRelaxedCandidate(
     if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
     if (blockedByIssue(p.name, slot, issues)) return false;
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
+    if (
+      isGuardKind(slot.positionKind) &&
+      !guardOk(p.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+    ) {
+      return false;
+    }
     if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
     if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
+    return true;
+  });
+  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
+    scheduling,
+    roster: pickOptions?.roster ?? people,
+    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
+  });
+}
+
+/** מילוי אחרון — מדלג על מנוחה יומית ועל אותו חדר/מגדר, שומר חפיפות ויחס שמירות */
+export function pickRestRelaxedCandidate(
+  people: Person[],
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
+  exclude: Set<string>,
+  pickOptions?: { dutyOfficerAlreadyAssigned?: string; roster?: Person[] },
+): Person | null {
+  const candidates = people.filter((p) => {
+    if (exclude.has(p.name) || mates.includes(p.name)) return false;
+    if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
+    if (blockedByIssue(p.name, slot, issues)) return false;
+    if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
+    if (
+      isGuardKind(slot.positionKind) &&
+      !guardOk(p.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+    ) {
+      return false;
+    }
     return true;
   });
   return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
@@ -1205,6 +1294,26 @@ export function forceFillEmptySeats(input: {
           },
         ) ??
         pickRelaxedCandidate(
+          input.people,
+          slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          mates,
+          peopleByName,
+          input.rules,
+          input.meanPrior,
+          inSlot,
+          {
+            roster: input.people,
+            dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
+              input.mission,
+              slot,
+              assignments,
+            ) ?? undefined,
+          },
+        ) ??
+        pickRestRelaxedCandidate(
           input.people,
           slot,
           input.tracker,
@@ -2405,6 +2514,8 @@ type TrackedAssignment = {
   endMs: number;
   slotId: string;
   missionId: string;
+  positionKind: MissionPositionKind;
+  missionType: MissionType;
 };
 
 /** Global validator — every person must have zero overlapping assignment pairs. */
@@ -2423,6 +2534,8 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
           endMs: slot.endAtMs,
           slotId: slot.slotId,
           missionId: mission.id,
+          positionKind: slot.positionKind,
+          missionType: slot.missionType,
         });
         byPerson.set(name, list);
       }
@@ -2437,6 +2550,16 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
         const a = sorted[i];
         const b = sorted[j];
         if (a.slotId === b.slotId && a.missionId === b.missionId) continue;
+        if (
+          allowsParallelAssignmentOverlap(
+            a.positionKind,
+            a.missionType,
+            b.positionKind,
+            b.missionType,
+          )
+        ) {
+          continue;
+        }
         if (
           assignmentIntervalsOverlap(
             { startMs: a.startMs, endMs: a.endMs },
