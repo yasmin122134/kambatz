@@ -26,11 +26,23 @@ type Props = {
   personName: string;
   initialMissions: MissionDay[];
   isAdmin: boolean;
+  initialPeople?: Person[];
+  initialApprovedIssues?: Issue[];
 };
 
 type SwapMode = "take" | "swap" | null;
 
-export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
+function peopleByNameFromList(people: Person[]): Record<string, Person> {
+  return Object.fromEntries(people.map((person) => [person.name, person]));
+}
+
+export function BoardClient({
+  personName,
+  initialMissions,
+  isAdmin,
+  initialPeople = [],
+  initialApprovedIssues = [],
+}: Props) {
   const [missions, setMissions] = useState(initialMissions);
   const dates = useMemo(
     () => [...new Set(missions.map((m) => m.mission_date))].sort(),
@@ -42,8 +54,10 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   const [isAdminUser, setIsAdminUser] = useState(isAdmin);
   const [showConstraints, setShowConstraints] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [approvedIssues, setApprovedIssues] = useState<Issue[]>([]);
-  const [peopleByName, setPeopleByName] = useState<Record<string, Person>>({});
+  const [approvedIssues, setApprovedIssues] = useState<Issue[]>(initialApprovedIssues);
+  const [peopleByName, setPeopleByName] = useState<Record<string, Person>>(() =>
+    peopleByNameFromList(initialPeople),
+  );
   const [profileRequests, setProfileRequests] = useState<ProfileRequest[]>([]);
   const [fairnessRequests, setFairnessRequests] = useState<FairnessRuleRequest[]>([]);
   const [publishedRules, setPublishedRules] = useState(DEFAULT_FAIRNESS_RULES);
@@ -88,6 +102,7 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
 
   const rosterWarnings = useMemo(() => {
     if (!isAdminUser || !dayMissions.length) return [];
+    if (Object.keys(peopleByName).length === 0) return [];
     return collectRosterWarnings({
       missions: dayMissions,
       peopleByName,
@@ -129,13 +144,15 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       fetch("/api/people").then((r) => (r.ok ? r.json() : [])),
     ]);
     setIssues(i);
-    setApprovedIssues(approved);
+    if (Array.isArray(approved)) {
+      setApprovedIssues(approved);
+    }
     setProfileRequests(p);
     setFairnessRequests(f);
     if (rulesRes?.rules) setPublishedRules(rulesRes.rules);
-    if (Array.isArray(peopleRes)) {
+    if (Array.isArray(peopleRes) && peopleRes.length > 0) {
       const people = peopleRes as Person[];
-      setPeopleByName(Object.fromEntries(people.map((person) => [person.name, person])));
+      setPeopleByName(peopleByNameFromList(people));
       const officers = people
         .filter((person) => person.is_officer)
         .map((person) => person.name);
@@ -348,9 +365,6 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
           <button type="button" className="btn-sm" onClick={loadMissions}>
             רענון
           </button>
-          <a href="/api/me/calendar" className="btn-sm" download>
-            יומן שלי
-          </a>
           {isAdminUser && (
             <>
               <button

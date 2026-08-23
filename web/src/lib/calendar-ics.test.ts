@@ -48,5 +48,6 @@ describe("calendar-ics", () => {
     expect(ics).toMatch(/DTSTART:\d{8}T\d{6}Z/);
     expect(ics).toMatch(/DTEND:\d{8}T\d{6}Z/);
     expect(ics).toContain("SUMMARY:");
+    expect(ics).toContain("הגנם ועבס");
   });
 });

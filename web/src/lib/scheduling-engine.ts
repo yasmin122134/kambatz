@@ -1704,6 +1704,9 @@ export type CollectRosterWarningsInput = {
 
 /** Admin board warnings — rest, approved blocks, overlaps, coverage, eligibility. */
 export function collectRosterWarnings(input: CollectRosterWarningsInput): string[] {
+  const peopleByName = input.peopleByName;
+  if (!Object.keys(peopleByName).length) return [];
+
   const issues = (input.issues ?? []).filter((row) => row.status === "approved");
   const messages: string[] = [...validateNoPersonOverlaps(input.missions)];
 

@@ -331,10 +331,6 @@ export default function ProfilePage() {
           <Link href="/report" className="text-brick hover:underline">
             הוספת אילוץ
           </Link>
-          {" · "}
-          <a href="/api/me/calendar" className="text-brick hover:underline" download>
-            ייצוא ליומן
-          </a>
         </p>
       </div>
       </main>

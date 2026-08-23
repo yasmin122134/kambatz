@@ -2,6 +2,9 @@ import { flattenMissionSlots } from "@/lib/mission-utils";
 import { MISSION_WALL_TZ } from "@/lib/time-interval";
 import { MISSION_TYPE_LABELS, type MissionDay } from "@/lib/types";
 
+/** שם היומן ב-Google Calendar / Apple Calendar */
+export const KAMBATZ_CALENDAR_NAME = "הגנם ועבס";
+
 export type CalendarEvent = {
   uid: string;
   startMs: number;
@@ -123,7 +126,7 @@ export function buildPersonCalendarIcs(
   personName: string,
 ): string {
   const events = calendarEventsForPerson(missions, personName);
-  return buildIcsCalendar(events, `משמרות — ${personName}`);
+  return buildIcsCalendar(events, KAMBATZ_CALENDAR_NAME);
 }
 
 export function buildCalendarInviteIcs(

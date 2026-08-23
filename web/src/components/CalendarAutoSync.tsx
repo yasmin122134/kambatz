@@ -49,7 +49,7 @@ export function CalendarAutoSync() {
       </button>
 
       <p className="hint text-xs text-center">
-        Google Calendar → «הוסף לוח» → אישור. אחר כך המשמרות מופיעות לבד.
+        Google Calendar → «הוסף לוח» → אישור. הלוח ייקרא «הגנם ועבס» ויתעדכן לבד.
       </p>
     </div>
   );
