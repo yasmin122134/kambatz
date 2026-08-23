@@ -85,34 +85,33 @@ function flatSlot(
 }
 
 describe("guard base scoring", () => {
-  it("paired 00–04 = 7", () => {
-    expect(getGuardBaseBurden("00:00", "04:00", 2)).toBe(7);
+  it("paired 00–04 = 14 (2× hours × band rate)", () => {
+    expect(getGuardBaseBurden("00:00", "04:00", 2)).toBe(14);
   });
 
-  it("solo 00–04 = 10", () => {
-    expect(getGuardBaseBurden("00:00", "04:00", 1)).toBe(10);
+  it("solo 00–04 = 20", () => {
+    expect(getGuardBaseBurden("00:00", "04:00", 1)).toBe(20);
   });
 
-  it("paired 08–12 = 1", () => {
-    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(1);
+  it("paired 08–12 = 2", () => {
+    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(2);
   });
 
-  it("solo 12–16 = 9", () => {
-    expect(getGuardBaseBurden("12:00", "16:00", 1)).toBe(9);
+  it("solo 12–16 = 18", () => {
+    expect(getGuardBaseBurden("12:00", "16:00", 1)).toBe(18);
   });
 
   it("shortened 2h solo 00–02 = half night burden", () => {
-    expect(getGuardBaseBurden("00:00", "02:00", 1)).toBe(5);
+    expect(getGuardBaseBurden("00:00", "02:00", 1)).toBe(10);
   });
 
   it("shift spanning two bands 02–06 solo", () => {
-    expect(getGuardBaseBurden("02:00", "06:00", 1)).toBe(9.5);
+    expect(getGuardBaseBurden("02:00", "06:00", 1)).toBe(19);
   });
 
   it("cross-midnight 22–02 solo", () => {
     const score = getGuardBaseBurden("22:00", "02:00", 1);
-    expect(score).toBeGreaterThan(0);
-    expect(score).toBeLessThan(10);
+    expect(score).toBe(17);
   });
 });
 
@@ -149,14 +148,14 @@ describe("no double-counting rest penalties", () => {
     const b = guardBlock("12:00", "16:00", 1, "b");
     const breakdown = calculatePersonBurden([a, b], rules);
     expect(breakdown.restPenalties).toBe(getRestPenalty(8));
-    expect(breakdown.guardBaseBurden).toBe(10 + 9);
+    expect(breakdown.guardBaseBurden).toBe(20 + 18);
   });
 });
 
 describe("paired guard individual burden", () => {
   it("each person gets paired score", () => {
     const detail = calculateGuardAssignmentBurden(guardBlock("00:00", "04:00", 2), null);
-    expect(detail.baseBurden).toBe(7);
+    expect(detail.baseBurden).toBe(14);
     expect(detail.isSolo).toBe(false);
   });
 });

@@ -10,7 +10,17 @@ create table if not exists fairness_rules (
     "standby_b": 0.15,
     "duty": 0.1,
     "kitchen": 0.1,
-    "hist": 0.7
+    "hist": 0.7,
+    "guard_hours_factor": 2,
+    "guard_bands": [
+      {"solo": 10, "paired": 7},
+      {"solo": 9, "paired": 6},
+      {"solo": 4, "paired": 1},
+      {"solo": 9, "paired": 6},
+      {"solo": 6, "paired": 3},
+      {"solo": 7, "paired": 4}
+    ],
+    "rest_penalties": [0, 1, 2, 3, 4, 5, 7, 9, 12]
   }'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -23,7 +33,17 @@ insert into fairness_rules (id, rules) values (1, '{
   "standby_b": 0.15,
   "duty": 0.1,
   "kitchen": 0.1,
-  "hist": 0.7
+  "hist": 0.7,
+  "guard_hours_factor": 2,
+  "guard_bands": [
+    {"solo": 10, "paired": 7},
+    {"solo": 9, "paired": 6},
+    {"solo": 4, "paired": 1},
+    {"solo": 9, "paired": 6},
+    {"solo": 6, "paired": 3},
+    {"solo": 7, "paired": 4}
+  ],
+  "rest_penalties": [0, 1, 2, 3, 4, 5, 7, 9, 12]
 }'::jsonb)
 on conflict (id) do nothing;
 

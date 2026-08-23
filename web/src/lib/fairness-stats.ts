@@ -4,27 +4,91 @@ import {
   type BurdenTimelineBlock,
 } from "@/lib/guard-burden";
 import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules } from "@/lib/mission-utils";
-import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
-import type {
-  FairnessBucket,
-  FairnessRules,
-  MissionDay,
-  MissionPositionKind,
-  MissionType,
-  PersonFairnessStats,
-  PersonMissionHistoryItem,
+import {
+  DEFAULT_FAIRNESS_RULES,
+  DEFAULT_GUARD_BANDS,
+  DEFAULT_REST_PENALTIES,
+  type FairnessBucket,
+  type FairnessRules,
+  type GuardBandRule,
+  type MissionDay,
+  type MissionPositionKind,
+  type MissionType,
+  type PersonFairnessStats,
+  type PersonMissionHistoryItem,
 } from "@/lib/types";
 import { slotDurationHours, pointsForHours } from "@/lib/fairness-math";
 import { isStandbyKind } from "@/lib/mission-utils";
 
+function parseNonNegativeNumber(value: unknown): number | null {
+  const v = parseFloat(String(value));
+  if (Number.isNaN(v) || v < 0) return null;
+  return v;
+}
+
+function normalizeGuardBands(raw: unknown): GuardBandRule[] {
+  const fallback = DEFAULT_GUARD_BANDS.map((b) => ({ ...b }));
+  if (!Array.isArray(raw)) return fallback;
+  return DEFAULT_GUARD_BANDS.map((defaults, i) => {
+    const row = raw[i];
+    if (!row || typeof row !== "object") return { ...defaults };
+    const src = row as Partial<GuardBandRule>;
+    const solo = parseNonNegativeNumber(src.solo);
+    const paired = parseNonNegativeNumber(src.paired);
+    return {
+      solo: solo ?? defaults.solo,
+      paired: paired ?? defaults.paired,
+    };
+  });
+}
+
+function normalizeRestPenalties(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [...DEFAULT_REST_PENALTIES];
+  return DEFAULT_REST_PENALTIES.map((defaults, i) => {
+    const v = parseNonNegativeNumber(raw[i]);
+    return v ?? defaults;
+  });
+}
+
 export function normalizeFairnessRulesFromRaw(raw: unknown): FairnessRules {
   const src = (raw || {}) as Partial<FairnessRules>;
-  const out = { ...DEFAULT_FAIRNESS_RULES };
+  const out: FairnessRules = {
+    ...DEFAULT_FAIRNESS_RULES,
+    guard_bands: normalizeGuardBands(src.guard_bands),
+    rest_penalties: normalizeRestPenalties(src.rest_penalties),
+  };
   for (const key of Object.keys(DEFAULT_FAIRNESS_RULES) as (keyof FairnessRules)[]) {
-    const v = parseFloat(String(src[key]));
-    if (!Number.isNaN(v) && v >= 0) out[key] = v;
+    if (key === "guard_bands" || key === "rest_penalties") continue;
+    const v = parseNonNegativeNumber(src[key]);
+    if (v !== null) out[key] = v;
   }
   return out;
+}
+
+function guardBandsEqual(a: GuardBandRule[], b: GuardBandRule[]): boolean {
+  return (
+    a.length === b.length &&
+    a.every((row, i) => row.solo === b[i].solo && row.paired === b[i].paired)
+  );
+}
+
+function numberArraysEqual(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+export function fairnessRulesChanged(current: FairnessRules, proposed: FairnessRules): boolean {
+  for (const key of Object.keys(DEFAULT_FAIRNESS_RULES) as (keyof FairnessRules)[]) {
+    if (key === "guard_bands") {
+      if (!guardBandsEqual(current.guard_bands, proposed.guard_bands)) return true;
+      continue;
+    }
+    if (key === "rest_penalties") {
+      if (!numberArraysEqual(current.rest_penalties, proposed.rest_penalties)) return true;
+      continue;
+    }
+    if (current[key] !== proposed[key]) return true;
+  }
+  return false;
 }
 
 export function bucketForAssignment(

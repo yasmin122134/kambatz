@@ -12,9 +12,10 @@ import {
   type MissionDay,
   type ProfileRequest,
   type FairnessRuleRequest,
-  FAIRNESS_BUCKET_LABELS,
   DEFAULT_FAIRNESS_RULES,
+  type FairnessRules,
 } from "@/lib/types";
+import { formatFairnessRulesDiff } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
@@ -327,13 +328,7 @@ export function BoardClient({
   }
 
   function formatFairnessDiff(req: FairnessRuleRequest) {
-    return (Object.keys(FAIRNESS_BUCKET_LABELS) as (keyof typeof FAIRNESS_BUCKET_LABELS)[])
-      .map((k) => {
-        if (req.proposed_rules[k] === publishedRules[k]) return null;
-        return `${FAIRNESS_BUCKET_LABELS[k]}: ${publishedRules[k]}→${req.proposed_rules[k]}`;
-      })
-      .filter(Boolean)
-      .join(" · ");
+    return formatFairnessRulesDiff(publishedRules, req.proposed_rules);
   }
 
   function formatDate(d: string) {
@@ -453,6 +448,7 @@ export function BoardClient({
               mission={guardsMission}
               personName={personName}
               isAdmin={isAdminUser}
+              fairnessRules={publishedRules}
               dutyOfficerNames={dutyOfficerNames}
               mySlots={mySlots}
               swapTarget={swapTarget}
@@ -494,6 +490,7 @@ export function BoardClient({
               mission={baseMission}
               personName={personName}
               isAdmin={isAdminUser}
+              fairnessRules={publishedRules}
               mySlots={mySlots}
               swapTarget={swapTarget}
               swapMode={swapMode}
@@ -534,6 +531,7 @@ export function BoardClient({
               mission={kitchenMission}
               personName={personName}
               isAdmin={isAdminUser}
+              fairnessRules={publishedRules}
               mySlots={mySlots}
               swapTarget={swapTarget}
               swapMode={swapMode}
@@ -738,6 +736,7 @@ function GuardTimeline({
   boardStartMin,
   personName,
   isAdmin,
+  fairnessRules,
   dutyOfficerNames,
   swapTarget,
   swapMode,
@@ -755,6 +754,7 @@ function GuardTimeline({
   boardStartMin: number;
   personName: string;
   isAdmin: boolean;
+  fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
@@ -820,6 +820,7 @@ function GuardTimeline({
                         slot={slot}
                         personName={personName}
                         isAdmin={isAdmin}
+                        fairnessRules={fairnessRules}
                         dutyOfficerNames={dutyOfficerNames}
                         swapTarget={swapTarget}
                         swapMode={swapMode}
@@ -849,6 +850,7 @@ function MissionPanel({
   mission,
   personName,
   isAdmin,
+  fairnessRules,
   dutyOfficerNames,
   mySlots,
   swapTarget,
@@ -864,6 +866,7 @@ function MissionPanel({
   mission: MissionDay;
   personName: string;
   isAdmin: boolean;
+  fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
   mySlots: ReturnType<typeof flattenMissionSlots>;
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
@@ -893,6 +896,7 @@ function MissionPanel({
         boardStartMin={boardStartMin}
         personName={personName}
         isAdmin={isAdmin}
+        fairnessRules={fairnessRules}
         dutyOfficerNames={dutyOfficerNames}
         swapTarget={swapTarget}
         swapMode={swapMode}
@@ -917,6 +921,7 @@ function MissionPanel({
             slot={slot}
             personName={personName}
             isAdmin={isAdmin}
+            fairnessRules={fairnessRules}
             swapTarget={swapTarget}
             swapMode={swapMode}
             mySlotIds={new Set(mySlots.map((s) => s.slotId))}
@@ -1048,6 +1053,7 @@ function SlotCard({
   slot,
   personName,
   isAdmin,
+  fairnessRules,
   dutyOfficerNames,
   swapTarget,
   swapMode,
@@ -1065,6 +1071,7 @@ function SlotCard({
   slot: FlatSlot;
   personName: string;
   isAdmin: boolean;
+  fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
@@ -1168,8 +1175,8 @@ function SlotCard({
         <div className="slot-card-time">{slot.startTime}</div>
         <div className="slot-card-body">
           {isGuardKind(slot.positionKind) && (
-            <div className="text-[10px] text-ink3 mb-0.5" title={guardSlotBurdenTitle(slot)}>
-              {guardSlotBurdenLabel(slot)}
+            <div className="text-[10px] text-ink3 mb-0.5" title={guardSlotBurdenTitle(slot, fairnessRules)}>
+              {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
           {assigneeList}
@@ -1183,8 +1190,8 @@ function SlotCard({
     <div className={`slot-card ${isMine ? "mine" : ""}`}>
       <div className="mono text-sm font-medium">{slot.timeLabel}</div>
       {isGuardKind(slot.positionKind) && (
-        <div className="text-xs text-ink3 mt-0.5" title={guardSlotBurdenTitle(slot)}>
-          {guardSlotBurdenLabel(slot)}
+        <div className="text-xs text-ink3 mt-0.5" title={guardSlotBurdenTitle(slot, fairnessRules)}>
+          {guardSlotBurdenLabel(slot, fairnessRules)}
         </div>
       )}
       {missionId && slot.positionName && (
@@ -1274,15 +1281,21 @@ function SwapButtons({
   );
 }
 
-function guardSlotBurdenLabel(slot: ReturnType<typeof flattenMissionSlots>[0]): string {
+function guardSlotBurdenLabel(
+  slot: ReturnType<typeof flattenMissionSlots>[0],
+  rules: FairnessRules,
+): string {
   const solo = slot.seatCount <= 1;
-  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount);
+  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount, rules);
   return `עומס בסיס: ${base} (${solo ? "סולו" : "זוג"})`;
 }
 
-function guardSlotBurdenTitle(slot: ReturnType<typeof flattenMissionSlots>[0]): string {
+function guardSlotBurdenTitle(
+  slot: ReturnType<typeof flattenMissionSlots>[0],
+  rules: FairnessRules,
+): string {
   const solo = slot.seatCount <= 1;
-  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount);
+  const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount, rules);
   return `${slot.timeLabel} — ${solo ? "סולו" : "זוג"}\nעומס בסיס: ${base}\n(עונש מנוחה מחושב לפי משימות קודמות/הבאות)`;
 }
 

@@ -7,7 +7,7 @@ import {
   bucketForAssignment,
   collectPersonBlocks,
   normalizeFairnessRulesFromRaw,
-  statsFromStoredHistory,
+  fairnessRulesChanged,
 } from "@/lib/fairness-stats";
 import {
   hasStoredFairnessPoints,
@@ -31,6 +31,7 @@ export {
   buildPersonFairnessHistory,
   statsFromStoredHistory,
   normalizeFairnessRulesFromRaw,
+  fairnessRulesChanged,
 } from "@/lib/fairness-stats";
 export { slotDurationHours, pointsForHours } from "@/lib/fairness-math";
 

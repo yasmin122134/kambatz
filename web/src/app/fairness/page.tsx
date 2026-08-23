@@ -16,11 +16,23 @@ import {
   SOLO_PAIR_DEFINITION,
   SQUAD_EXPLANATION,
 } from "@/lib/fairness-display";
-import { REST_PENALTY_TIERS } from "@/lib/guard-burden";
+import {
+  GUARD_TIME_BAND_LABELS,
+  REST_PENALTY_TIERS,
+  restPenaltyTiersFromRules,
+} from "@/lib/guard-burden";
 import {
   DEFAULT_FAIRNESS_RULES,
   type FairnessRules,
 } from "@/lib/types";
+
+function cloneRules(rules: FairnessRules): FairnessRules {
+  return {
+    ...rules,
+    guard_bands: rules.guard_bands.map((band) => ({ ...band })),
+    rest_penalties: [...rules.rest_penalties],
+  };
+}
 
 export default function FairnessPage() {
   const [rules, setRules] = useState<FairnessRules>(DEFAULT_FAIRNESS_RULES);
@@ -38,9 +50,9 @@ export default function FairnessPage() {
       fetch("/api/me").then((r) => (r.ok ? r.json() : null)),
     ])
       .then(([fair, me]) => {
-        const r = fair.rules || DEFAULT_FAIRNESS_RULES;
+        const r = cloneRules(fair.rules || DEFAULT_FAIRNESS_RULES);
         setRules(r);
-        setProposed(r);
+        setProposed(cloneRules(r));
         setLoggedIn(!!me?.name);
       })
       .finally(() => setLoading(false));
@@ -82,7 +94,8 @@ export default function FairnessPage() {
     );
   }
 
-  const guardBands = guardBandRows();
+  const guardBands = guardBandRows(rules);
+  const restTiers = restPenaltyTiersFromRules(rules);
 
   return (
     <AppShell title="טבלת צדק">
@@ -107,8 +120,9 @@ export default function FairnessPage() {
           <div>
             <h3 className="font-display text-lg mb-1">שמירות — טבלת שעות</h3>
             <p className="text-sm text-ink2 mb-2">
-              קבועה בקוד (לא ניתנת לעריכה דרך הטבלה). זו הטבלה שבאמת קובעת עומס
-              שמירה.
+              מקדם שעות נוכחי: <span className="mono font-bold">{rules.guard_hours_factor}</span>
+              {" · "}
+              נקודות למשמרת 4ש׳ = מקדם × ציון בסיס (למטה).
             </p>
             <ul className="text-sm text-ink2 space-y-1 list-disc list-inside mb-3">
               {GUARD_SCORING_EXPLANATION.map((line) => (
@@ -131,8 +145,10 @@ export default function FairnessPage() {
               <thead>
                 <tr>
                   <th>רצועת 4 שעות</th>
-                  <th>סולו (נק׳)</th>
-                  <th>זוג+ (נק׳)</th>
+                  <th>סולו (נק׳/4ש׳)</th>
+                  <th>זוג+ (נק׳/4ש׳)</th>
+                  <th>ציון בסיס סולו</th>
+                  <th>ציון בסיס זוג</th>
                   <th>הערה</th>
                 </tr>
               </thead>
@@ -142,6 +158,8 @@ export default function FairnessPage() {
                     <td className="font-medium mono">{row.label}</td>
                     <td className="mono font-bold text-accent">{row.solo}</td>
                     <td className="mono font-bold">{row.pair}</td>
+                    <td className="mono text-ink2">{row.soloBase}</td>
+                    <td className="mono text-ink2">{row.pairBase}</td>
                     <td className="text-ink2 text-xs">{row.help}</td>
                   </tr>
                 ))}
@@ -166,7 +184,7 @@ export default function FairnessPage() {
                 </tr>
               </thead>
               <tbody>
-                {REST_PENALTY_TIERS.map((tier) => (
+                {restTiers.map((tier) => (
                   <tr key={tier.restHoursLabel}>
                     <td>{tier.restHoursLabel}</td>
                     <td className="mono font-bold text-accent">+{tier.penalty}</td>
@@ -179,10 +197,6 @@ export default function FairnessPage() {
 
         <div className="card space-y-3">
           <h3 className="font-display text-lg">משימות אחרות — נקודות לשעה / למשמרת</h3>
-          <p className="text-sm text-ink2">
-            ערכים אלה ניתנים להצעת שינוי (לאחר אישור מפקד). ברירת המחדל מוצגת
-            בעמודה «נוכחי».
-          </p>
           <div className="schedule-table-wrap overflow-x-auto">
             <table className="schedule-table w-full text-sm">
               <thead>
@@ -233,7 +247,7 @@ export default function FairnessPage() {
                   <tr key={row.mission}>
                     <td className="font-medium">{row.mission}</td>
                     <td>{row.scoring}</td>
-                    <td>{row.editable ? "כן — בטבלה למעלה" : "לא — קבוע בקוד"}</td>
+                    <td>{row.editable ? "כן — בטופס למטה" : "לא"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -251,49 +265,164 @@ export default function FairnessPage() {
         </div>
 
         {loggedIn ? (
-          <form onSubmit={submit} className="card space-y-4">
-            <h3 className="font-display text-base">הצעת שינוי לערכים הניתנים לעריכה</h3>
-            <p className="hint text-sm">
-              ניתן לערוך רק כרמל א/ב, עב״ס/עתודה, מטבch ומשקל hist. טבלת השעות
-              לשמירות ועונש המנוחה קבועים בקוד.
-            </p>
+          <form onSubmit={submit} className="card space-y-6">
+            <div>
+              <h3 className="font-display text-base mb-1">הצעת שינוי — שמירות</h3>
+              <p className="hint text-sm mb-3">
+                מקדם שעות, ציוני רצועות 4ש׳ (סולו/זוג), ועונשי מנוחה.
+              </p>
 
-            <div className="space-y-3">
-              {EDITABLE_FAIRNESS_BUCKETS.map((bucket) => (
-                <div key={bucket} className="rowf items-end">
-                  <div className="field flex-[2]">
-                    <label>{editableBucketLabel(bucket)}</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      min={0}
-                      value={proposed[bucket]}
-                      onChange={(e) =>
-                        setProposed((p) => ({
-                          ...p,
-                          [bucket]: parseFloat(e.target.value) || 0,
-                        }))
-                      }
-                    />
-                  </div>
-                  <p className="hint text-xs flex-1 pb-2">נוכחי: {rules[bucket]}</p>
-                </div>
-              ))}
-              <div className="field">
-                <label>משקל ניקוד קודם (hist)</label>
+              <div className="field mb-4">
+                <label>מקדם שעות שמירה (guard_hours_factor)</label>
                 <input
                   type="number"
                   step="0.05"
                   min={0}
-                  value={proposed.hist}
+                  value={proposed.guard_hours_factor}
                   onChange={(e) =>
                     setProposed((p) => ({
                       ...p,
-                      hist: parseFloat(e.target.value) || 0,
+                      guard_hours_factor: parseFloat(e.target.value) || 0,
                     }))
                   }
                 />
-                <p className="hint text-xs mt-1">נוכחי: {rules.hist}</p>
+                <p className="hint text-xs mt-1">נוכחי: {rules.guard_hours_factor}</p>
+              </div>
+
+              <div className="schedule-table-wrap overflow-x-auto mb-4">
+                <table className="schedule-table w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th>רצועה</th>
+                      <th>סולו (בסיס)</th>
+                      <th>זוג (בסיס)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {proposed.guard_bands.map((band, i) => (
+                      <tr key={GUARD_TIME_BAND_LABELS[i]}>
+                        <td className="font-medium mono">{GUARD_TIME_BAND_LABELS[i]}</td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.05"
+                            min={0}
+                            className="w-20"
+                            value={band.solo}
+                            onChange={(e) =>
+                              setProposed((p) => ({
+                                ...p,
+                                guard_bands: p.guard_bands.map((row, j) =>
+                                  j === i
+                                    ? { ...row, solo: parseFloat(e.target.value) || 0 }
+                                    : row,
+                                ),
+                              }))
+                            }
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.05"
+                            min={0}
+                            className="w-20"
+                            value={band.paired}
+                            onChange={(e) =>
+                              setProposed((p) => ({
+                                ...p,
+                                guard_bands: p.guard_bands.map((row, j) =>
+                                  j === i
+                                    ? { ...row, paired: parseFloat(e.target.value) || 0 }
+                                    : row,
+                                ),
+                              }))
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="schedule-table-wrap overflow-x-auto">
+                <table className="schedule-table w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th>פער מנוחה</th>
+                      <th>עונש מוצע</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {REST_PENALTY_TIERS.map((tier) => (
+                      <tr key={tier.restHoursLabel}>
+                        <td>{tier.restHoursLabel}</td>
+                        <td>
+                          <input
+                            type="number"
+                            step="0.5"
+                            min={0}
+                            className="w-20"
+                            value={proposed.rest_penalties[tier.index]}
+                            onChange={(e) =>
+                              setProposed((p) => ({
+                                ...p,
+                                rest_penalties: p.rest_penalties.map((value, j) =>
+                                  j === tier.index
+                                    ? parseFloat(e.target.value) || 0
+                                    : value,
+                                ),
+                              }))
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-display text-base mb-3">הצעת שינוי — משימות אחרות</h3>
+              <div className="space-y-3">
+                {EDITABLE_FAIRNESS_BUCKETS.map((bucket) => (
+                  <div key={bucket} className="rowf items-end">
+                    <div className="field flex-[2]">
+                      <label>{editableBucketLabel(bucket)}</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        min={0}
+                        value={proposed[bucket]}
+                        onChange={(e) =>
+                          setProposed((p) => ({
+                            ...p,
+                            [bucket]: parseFloat(e.target.value) || 0,
+                          }))
+                        }
+                      />
+                    </div>
+                    <p className="hint text-xs flex-1 pb-2">נוכחי: {rules[bucket]}</p>
+                  </div>
+                ))}
+                <div className="field">
+                  <label>משקל ניקוד קודם (hist)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    min={0}
+                    value={proposed.hist}
+                    onChange={(e) =>
+                      setProposed((p) => ({
+                        ...p,
+                        hist: parseFloat(e.target.value) || 0,
+                      }))
+                    }
+                  />
+                  <p className="hint text-xs mt-1">נוכחי: {rules.hist}</p>
+                </div>
               </div>
             </div>
 
@@ -305,7 +434,7 @@ export default function FairnessPage() {
                 required
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                placeholder="למשל: להעלות כרמל א׳ ל-0.5 כי הכוננות קשה יותר"
+                placeholder="למשל: להעלות כרמל א׳ ל-0.5, או להקל על בוקר בזוג"
               />
             </div>
 

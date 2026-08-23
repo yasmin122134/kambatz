@@ -3,12 +3,10 @@ import { consolidateGuardDayMission } from "@/lib/guard-day-bundle";
 import { isAdmin } from "@/lib/auth";
 import {
   defaultSchedulingForType,
-  missionTemplateComplete,
   resolveMissionPositions,
 } from "@/lib/mission-templates";
 import {
   deleteMissionDay,
-  emptyAssignments,
   getMissionDay,
   normalizeSchedulingRules,
   saveMissionDay,
@@ -121,13 +119,9 @@ export async function PUT(request: Request, { params }: Params) {
     regenerateStructure,
   });
 
-  const templateWasIncomplete =
-    !clientPositions?.length || !missionTemplateComplete(mission_type, clientPositions);
   const assignments = syncAssignmentSeats(
     positions,
-    templateWasIncomplete && !body.assignments
-      ? emptyAssignments(positions)
-      : (body.assignments ?? existing.assignments),
+    body.assignments ?? existing.assignments,
   );
 
   try {

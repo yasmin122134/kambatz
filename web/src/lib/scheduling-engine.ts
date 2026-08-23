@@ -1050,7 +1050,7 @@ export function slotRank(
   if (isStandbyKind(slot.positionKind)) return 1e9;
   if (slot.positionKind === "kitchen") return 500;
   if (isGuardKind(slot.positionKind)) {
-    return guardSlotDifficultyRank(slot, eligibleCount ?? 10);
+    return guardSlotDifficultyRank(slot, eligibleCount ?? 10, rules);
   }
   return pointsForSlot(slot, slot.seatCount, rules) * 100;
 }

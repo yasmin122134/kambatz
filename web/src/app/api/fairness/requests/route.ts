@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import {
   createFairnessRequest,
+  fairnessRulesChanged,
   getFairnessRules,
   listFairnessRequests,
   normalizeFairnessRules,
@@ -44,9 +45,7 @@ export async function POST(request: Request) {
   const current = await getFairnessRules();
   const proposed = normalizeFairnessRules(body.proposed_rules ?? body);
 
-  const changed = (Object.keys(current) as (keyof typeof current)[]).some(
-    (k) => proposed[k] !== current[k],
-  );
+  const changed = fairnessRulesChanged(current, proposed);
   if (!changed) {
     return NextResponse.json({ error: "לא שיניתם אף ערך בטבלה" }, { status: 400 });
   }
