@@ -8,6 +8,7 @@ import {
   collectPersonBlocks,
   normalizeFairnessRulesFromRaw,
   fairnessRulesChanged,
+  statsFromStoredHistory,
 } from "@/lib/fairness-stats";
 import {
   hasStoredFairnessPoints,

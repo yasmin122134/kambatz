@@ -28,6 +28,7 @@ import {
 } from "@/lib/time-interval";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
+  DEFAULT_FAIRNESS_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
   type FairnessRules,
   type Issue,
@@ -37,6 +38,19 @@ import {
   type MissionType,
   type Person,
 } from "@/lib/types";
+
+/** Neutral weights for overlap/rest validation — not used for ranking. */
+const VALIDATION_FAIRNESS_RULES: FairnessRules = {
+  ...DEFAULT_FAIRNESS_RULES,
+  solo: 1,
+  pair: 1,
+  standby: 1,
+  standby_a: 1,
+  standby_b: 1,
+  duty: 1,
+  kitchen: 1,
+  hist: 0,
+};
 
 type BusyBlock = BurdenTimelineBlock & {
   cyclicStart: number;
@@ -1735,16 +1749,7 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
   );
 
   const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
-  const rules: FairnessRules = {
-    solo: 1,
-    pair: 1,
-    standby: 1,
-    standby_a: 1,
-    standby_b: 1,
-    duty: 1,
-    kitchen: 1,
-    hist: 0,
-  };
+  const rules = VALIDATION_FAIRNESS_RULES;
 
   for (const { mission, slot, names } of entries) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
@@ -1818,16 +1823,7 @@ export function findAssignmentConflicts(
   }
 
   const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
-  const rules: FairnessRules = {
-    solo: 1,
-    pair: 1,
-    standby: 1,
-    standby_a: 1,
-    standby_b: 1,
-    duty: 1,
-    kitchen: 1,
-    hist: 0,
-  };
+  const rules = VALIDATION_FAIRNESS_RULES;
 
   for (const slot of slots) {
     const seats = mission.assignments[slot.slotId] || [];
@@ -1945,16 +1941,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
   const messages: string[] = [];
   const issues = input.issues ?? [];
   const peopleByName = input.peopleByName ?? {};
-  const rules: FairnessRules = {
-    solo: 1,
-    pair: 1,
-    standby: 1,
-    standby_a: 1,
-    standby_b: 1,
-    duty: 1,
-    kitchen: 1,
-    hist: 0,
-  };
+  const rules = VALIDATION_FAIRNESS_RULES;
   const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
 
   for (const mission of input.missions) {
