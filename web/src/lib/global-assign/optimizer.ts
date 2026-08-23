@@ -193,10 +193,14 @@ function seedExistingAssignments(
   return tracker;
 }
 
-function initAssignments(missions: MissionDay[]): Map<string, Record<string, string[]>> {
+function initAssignments(
+  missions: MissionDay[],
+  keepExisting: boolean,
+): Map<string, Record<string, string[]>> {
   const map = new Map<string, Record<string, string[]>>();
   for (const mission of missions) {
-    map.set(mission.id, syncAssignmentSeats(mission.positions, { ...mission.assignments }));
+    const source = keepExisting ? mission.assignments : {};
+    map.set(mission.id, syncAssignmentSeats(mission.positions, { ...source }));
   }
   return map;
 }
@@ -1082,7 +1086,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
 
   const initialState: SolverState = {
     tracker: cloneTracker(tracker),
-    assignmentsByMission: initAssignments(missions),
+    assignmentsByMission: initAssignments(missions, keepExisting),
     assignedUnitIds: new Set(
       units.filter((u) => {
         const seats =
