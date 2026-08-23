@@ -3,6 +3,10 @@ import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
+  filterStaleUnresolvedRequirements,
+  formatUnresolvedSummary,
+} from "@/lib/global-assign/diagnostics";
+import {
   findAssignmentConflicts,
   forceFillEmptySeats,
   repairGuardAssignmentGaps,
@@ -203,6 +207,16 @@ async function smartAssignScope(input: {
     postFilled += countMissionFilledSeats(assignments);
   }
   output.filled = postFilled;
+
+  output.unresolved = filterStaleUnresolvedRequirements(
+    output.unresolved,
+    input.scopeMissions,
+    output.assignmentsByMission,
+  );
+  output.warnings = output.warnings.filter(
+    (w) => !w.startsWith("Smart assignment completed with"),
+  );
+  output.warnings.push(...formatUnresolvedSummary(output.unresolved));
 
   const draftMissions = input.scopeMissions.map((mission) => ({
     ...mission,

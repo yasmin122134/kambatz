@@ -8,11 +8,13 @@ import {
   buildTrackerFromMissions,
   fitsPerson,
   placePerson,
+  findAssignmentConflicts,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   explainFitsPersonFailure,
   assignmentNeedsSpacingGap,
   allowsParallelAssignmentOverlap,
+  collectRosterWarnings,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -189,6 +191,38 @@ describe("overlap rejection across mission types", () => {
 
     const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
     expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+  });
+
+  it("guard bundle — Carmel B + embedded ABAS parallel does not warn", () => {
+    const guard = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
+    const slots = flattenMissionSlots(guard);
+    const carmel = slots.find((s) => s.positionKind === "standby_carmel_b")!;
+    const abas = slots.find((s) => s.missionType === "base_work")!;
+    const assignments = { ...guard.assignments };
+    assignments[carmel.slotId] = ["Alex", "Bob", "Cal"];
+    const abasSeats = Array(abas.seatCount).fill("");
+    abasSeats[0] = "Alex";
+    abasSeats[1] = "Bob";
+    abasSeats[2] = "Cal";
+    assignments[abas.slotId] = abasSeats;
+    const mission = { ...guard, assignments };
+    const people = {
+      Alex: person("Alex", 1),
+      Bob: person("Bob", 1),
+      Cal: person("Cal", 1),
+    };
+
+    const overlapWarnings = findAssignmentConflicts(mission, people).filter((m) =>
+      /חפיפה/.test(m),
+    );
+    expect(overlapWarnings).toHaveLength(0);
+
+    const rosterWarnings = collectRosterWarnings({
+      missions: [mission],
+      peopleByName: people,
+    }).filter((m) => /חפיפה/.test(m));
+    expect(rosterWarnings).toHaveLength(0);
+    expect(validateNoPersonOverlaps([mission])).toHaveLength(0);
   });
 
   it("Test C — consecutive Carmel B and Base Work is valid", () => {

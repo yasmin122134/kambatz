@@ -1,4 +1,5 @@
 import type { FlatSlot } from "@/lib/mission-utils";
+import { flattenMissionSlots } from "@/lib/mission-utils";
 import type { MissionDay } from "@/lib/types";
 import type {
   AssignmentUnit,
@@ -62,7 +63,7 @@ export function buildUnresolvedRequirements(input: {
         assignedSeats: assigned,
         reasons: input.failureReasons.get(key) || [
           unit.kind === "basework"
-            ? "לא נמצאו מספיק צוערים לעב״ס (מנוחה/שמירות/מרווח 90 דק׳/חסימות)"
+            ? "לא נמצאו מספיק צוערים לעב״ס (מנוחה/שמירות/מרווח שמירה↔עב״ס/חסימות)"
             : "לא נותרה קבוצת חדר/מגדר תקפה לאחר שיבוצים אחרים",
         ],
         carmelSnapshot: snapshot,
@@ -87,6 +88,26 @@ export function buildUnresolvedRequirements(input: {
   }
 
   return [...bySlot.values()];
+}
+
+/** Drops optimizer unresolved entries whose slots were filled in a later post-process pass. */
+export function filterStaleUnresolvedRequirements(
+  unresolved: UnresolvedRequirement[],
+  missions: MissionDay[],
+  assignmentsByMission: Map<string, Record<string, string[]>>,
+): UnresolvedRequirement[] {
+  return unresolved.filter((item) => {
+    const mission = missions.find((m) => m.id === item.missionId);
+    if (!mission) return true;
+    const assignments = assignmentsByMission.get(item.missionId);
+    if (!assignments) return true;
+    const slot = flattenMissionSlots(mission).find(
+      (s) => s.positionName === item.positionName && s.timeLabel === item.timeLabel,
+    );
+    if (!slot) return true;
+    const filled = (assignments[slot.slotId] || []).filter(Boolean).length;
+    return filled < slot.seatCount;
+  });
 }
 
 export function formatUnresolvedSummary(unresolved: UnresolvedRequirement[]): string[] {

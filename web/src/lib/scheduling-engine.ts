@@ -807,7 +807,7 @@ export function placePerson(
   rules: FairnessRules,
   scheduling: MissionSchedulingRules,
   seatCount: number,
-  missionType?: MissionType,
+  _missionType?: MissionType,
 ) {
   const block: BusyBlock = {
     cyclicStart: slot.cyclicStart,
@@ -816,7 +816,7 @@ export function placePerson(
     durationMinutes: slot.durationMinutes,
     eatsRest: slotEatsRest(slot),
     positionKind: slot.positionKind,
-    missionType: missionType ?? slot.missionType,
+    missionType: slot.missionType,
     seatCount,
     startTime: slot.startTime,
     endTime: slot.endTime,
@@ -2301,11 +2301,10 @@ export function findReplacements(input: {
 }
 
 function blockLabel(block: BusyBlock): string {
-  return block.positionKind === "standby_carmel_a"
-    ? "כרמל א׳"
-    : block.positionKind === "standby_carmel_b"
-      ? "כרמל ב׳"
-      : block.positionKind;
+  if (block.positionKind === "standby_carmel_a") return "כרמל א׳";
+  if (block.positionKind === "standby_carmel_b") return "כרמל ב׳";
+  if (block.missionType === "base_work" && block.positionKind === "duty") return "עב״ס";
+  return block.positionKind;
 }
 
 /** Structural roster issues that are not tied to a single assignee. */
@@ -2485,7 +2484,10 @@ export function findAssignmentConflicts(
 
       if (overlapsSlot(name, slot, tracker, scheduling)) {
         const blocker = (tracker.busy[name] || []).find(
-          (b) => b.slotId !== slot.slotId && assignmentIntervalsOverlap(blockInterval(b), slotInterval(slot)),
+          (b) =>
+            b.slotId !== slot.slotId &&
+            !parallelOverlapAllowed(slot, b) &&
+            assignmentIntervalsOverlap(blockInterval(b), slotInterval(slot)),
         );
         messages.push(
           `${name}: חפיפה — ${slot.positionName} ${slot.timeLabel}` +
