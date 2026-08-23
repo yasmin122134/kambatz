@@ -53,6 +53,8 @@ export {
 /** @deprecated Mission-relative cadence is anchored to missionStart, not 08:00. */
 export const CANONICAL_GUARD_GRID_START = "08:00";
 
+export const DEFAULT_RESERVE_FORCE_SEATS = 4;
+
 function uid() {
   return crypto.randomUUID();
 }
@@ -534,6 +536,7 @@ function staffingProfileForPosition(
   if (pos.name.includes("רכב אחורי")) return ctx.rearProfile;
   if (pos.name.includes("רגלי")) return ctx.footProfile;
   if (pos.name.includes("רכב קדמי")) return constantStaffingProfile(2);
+  if (pos.name.includes("עתודה")) return constantStaffingProfile(DEFAULT_RESERVE_FORCE_SEATS);
   if (pos.kind === "duty") return constantStaffingProfile(3);
   return constantStaffingProfile(1);
 }
@@ -650,7 +653,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
     case "duty":
       if (pos.name.includes("עתודה")) {
-        return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
+        return `${DEFAULT_RESERVE_FORCE_SEATS} צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.`;
       }
       if (pos.name.includes("עבודות בסיס") || pos.name.includes("עב״ס")) {
         return "3 חלונות (בוקר/צהריים/ערב) — צוות שלם 13–15 בכל חלון, צוות אחד במנוחה.";
@@ -696,7 +699,7 @@ export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "pair", label: "שמירה בזוג+", default: 1.0, examples: "ש״ג רכב קדמי, ש״ג רכב אחורי (לילה — 2)" },
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
-  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (3)" },
+  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (4)" },
   { bucket: "kitchen", label: "מטבch", default: 0.1, examples: "35 למשמרת" },
 ] as const;
 

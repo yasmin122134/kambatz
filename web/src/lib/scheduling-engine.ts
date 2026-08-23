@@ -369,7 +369,7 @@ function overlapsSlot(
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
-    90;
+    70;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
@@ -387,12 +387,38 @@ function overlapsSlot(
       : 0;
 
     if (extraGap > 0) {
-      if (intervalsConflictWithGap(slotIv, blockIv, extraGap)) return true;
+      if (
+        assignmentSpacingConflict(slotIv, blockIv, extraGap, true)
+      ) {
+        return true;
+      }
     } else if (assignmentIntervalsOverlap(slotIv, blockIv)) {
       return true;
     }
   }
   return false;
+}
+
+/** Overlap, or minimum gap between end of one block and start of the other (not symmetric padding). */
+function assignmentSpacingConflict(
+  slotIv: TimeInterval,
+  blockIv: TimeInterval,
+  gapMin: number,
+  directionalGap: boolean,
+): boolean {
+  if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
+  if (gapMin <= 0) return false;
+  const gapMs = gapMin * 60_000;
+  if (directionalGap) {
+    if (blockIv.endMs <= slotIv.startMs && slotIv.startMs - blockIv.endMs < gapMs) {
+      return true;
+    }
+    if (slotIv.endMs <= blockIv.startMs && blockIv.startMs - slotIv.endMs < gapMs) {
+      return true;
+    }
+    return false;
+  }
+  return intervalsConflictWithGap(slotIv, blockIv, gapMin);
 }
 
 function sameRoomOk(
@@ -1280,7 +1306,7 @@ function overlapAssignmentWarning(
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
-    90;
+    70;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
@@ -1297,7 +1323,7 @@ function overlapAssignmentWarning(
 
     const conflicts =
       extraGap > 0
-        ? intervalsConflictWithGap(slotIv, blockIv, extraGap)
+        ? assignmentSpacingConflict(slotIv, blockIv, extraGap, true)
         : assignmentIntervalsOverlap(slotIv, blockIv);
 
     if (conflicts) {
@@ -1441,6 +1467,8 @@ export function forceFillEmptySeats(input: {
           input.scheduling,
           mates,
           peopleByName,
+          undefined,
+          input.mission.id,
         )
       ) {
         for (const msg of describeAssignmentWarnings(

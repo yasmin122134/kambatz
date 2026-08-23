@@ -10,6 +10,8 @@ import {
   assignBaseWorkShift,
   buildTrackerFromMissions,
   fitsPerson,
+  forceFillEmptySeats,
+  pickRelaxedCandidate,
   placePerson,
   siblingDutyOfficerAssignee,
   unplacePerson,
@@ -643,6 +645,39 @@ function listSeatCandidates(
   });
 }
 
+function pickRelaxedSeatPerson(
+  unit: Extract<AssignmentUnit, { kind: "seat" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+  peopleByName: Record<string, Person>,
+): Person | null {
+  const scheduling = schedulingFor(unit.mission);
+  const missionAssignments = state.assignmentsByMission.get(unit.mission.id) || {};
+  const seats = missionAssignments[unit.slot.slotId] || [];
+  const mates = matesForSeat(seats, unit.seatIndex);
+  const inSlot = new Set(seats.filter(Boolean));
+  return pickRelaxedCandidate(
+    people,
+    unit.slot,
+    state.tracker,
+    issues,
+    scheduling,
+    mates,
+    peopleByName,
+    rules,
+    meanPrior,
+    inSlot,
+    {
+      roster: people,
+      dutyOfficerAlreadyAssigned:
+        siblingDutyOfficerAssignee(unit.mission, unit.slot, missionAssignments) ?? undefined,
+    },
+  );
+}
+
 function listCarmelCandidates(
   unit: Extract<AssignmentUnit, { kind: "carmel" }>,
   state: SolverState,
@@ -1171,22 +1206,70 @@ function solveGreedy(input: {
                   input.meanPrior,
                   input.seed,
                 )[0];
-                return group?.length
-                  ? { kind: "guard_pair", people: group }
+                if (group?.length) {
+                  return { kind: "guard_pair" as const, people: group };
+                }
+                const relaxed: Person[] = [];
+                const taken = new Set<string>();
+                for (const seatIndex of unit.seatIndices) {
+                  const seatUnit: Extract<AssignmentUnit, { kind: "seat" }> = {
+                    kind: "seat",
+                    id: `${unit.id}:${seatIndex}`,
+                    mission: unit.mission,
+                    slot: unit.slot,
+                    seatIndex,
+                  };
+                  const person =
+                    listSeatCandidates(
+                      seatUnit,
+                      state,
+                      input.people,
+                      input.issues,
+                      input.rules,
+                      input.meanPrior,
+                      peopleByName,
+                      input.seed,
+                      input.units,
+                    ).find((p) => !taken.has(p.name)) ??
+                    pickRelaxedSeatPerson(
+                      seatUnit,
+                      state,
+                      input.people,
+                      input.issues,
+                      input.rules,
+                      input.meanPrior,
+                      peopleByName,
+                    );
+                  if (!person || taken.has(person.name)) continue;
+                  taken.add(person.name);
+                  relaxed.push(person);
+                }
+                return relaxed.length
+                  ? { kind: "guard_pair" as const, people: relaxed }
                   : null;
               })()
             : (() => {
-              const person = listSeatCandidates(
-                unit,
-                state,
-                input.people,
-                input.issues,
-                input.rules,
-                input.meanPrior,
-                peopleByName,
-                input.seed,
-                input.units,
-              )[0];
+              const person =
+                listSeatCandidates(
+                  unit,
+                  state,
+                  input.people,
+                  input.issues,
+                  input.rules,
+                  input.meanPrior,
+                  peopleByName,
+                  input.seed,
+                  input.units,
+                )[0] ??
+                pickRelaxedSeatPerson(
+                  unit,
+                  state,
+                  input.people,
+                  input.issues,
+                  input.rules,
+                  input.meanPrior,
+                  peopleByName,
+                );
               return person ? { kind: "seat", person } : null;
             })();
 
@@ -1488,6 +1571,35 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   }
 
   const finalState = bestResult?.state ?? initialState;
+
+  const fillWarnings: string[] = [];
+  for (const mission of missions) {
+    const assignments = finalState.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+    const draftMissions = missions.map((m) => ({
+      ...m,
+      assignments: finalState.assignmentsByMission.get(m.id) ?? m.assignments,
+    }));
+    const tracker = buildTrackerFromMissions(
+      [...crossDay.filter((m) => !missions.some((s) => s.id === m.id)), ...draftMissions],
+      input.rules,
+      new Set(),
+    );
+    const scheduling = schedulingFor(mission);
+    const { assignments: filled, warnings } = forceFillEmptySeats({
+      mission: { ...mission, assignments: syncAssignmentSeats(mission.positions, { ...assignments }) },
+      assignments: syncAssignmentSeats(mission.positions, { ...assignments }),
+      people: input.people,
+      tracker,
+      issues: input.issues,
+      scheduling,
+      rules: input.rules,
+      meanPrior: input.meanPrior,
+    });
+    finalState.assignmentsByMission.set(mission.id, filled);
+    fillWarnings.push(...warnings);
+  }
+
   const filled = countFilledSeats(units, finalState.assignmentsByMission);
   const failureReasons = new Map<string, string[]>();
 
@@ -1515,7 +1627,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     carmelSnapshots,
     failureReasons,
   });
-  const warnings = formatUnresolvedSummary(unresolved);
+  const warnings = [...formatUnresolvedSummary(unresolved), ...fillWarnings];
   if (timedOut && filled < requiredSeats) {
     warnings.unshift(
       "החיפוש הופסק לאחר מגבלת זמן — ייתכן שיבוץ חלקי; נסו שוב או מלאו ידנית משבצות שנותרו.",
