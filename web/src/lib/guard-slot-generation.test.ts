@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { generatePositionSlots, partitionInterval } from "@/lib/guard-slot-generation";
+import { generatePositionSlots, partitionInterval, validateGeneratedSlots } from "@/lib/guard-slot-generation";
 import {
   buildGuardDayPositions,
   footPatrolSlotsValid,
@@ -99,6 +99,8 @@ describe("intervalsOverlap", () => {
 });
 
 describe("rear gate slot generation", () => {
+  const MAX_SHIFT_MS = 4 * 3_600_000;
+
   for (const m of MISSION_STARTS) {
     it(`mission start ${m.label} — every slot has correct seat count`, () => {
       const interval = missionInterval(m.startsAt, m.endsAt)!;
@@ -112,6 +114,17 @@ describe("rear gate slot generation", () => {
       for (const row of slotSeatsAtMid(slots, REAR_GATE_STAFFING_SUMMER)) {
         expect(row.seats).toBe(row.expected);
       }
+      for (const s of slots) {
+        expect(s.endMs - s.startMs).toBeLessThanOrEqual(MAX_SHIFT_MS);
+      }
+      expect(
+        validateGeneratedSlots(
+          slots,
+          REAR_GATE_STAFFING_SUMMER,
+          interval.startMs,
+          interval.endMs,
+        ),
+      ).toEqual([]);
       expect(rearVehicleSlotsValid(
         slots.map((s) => ({
           id: "x",
@@ -126,6 +139,26 @@ describe("rear gate slot generation", () => {
       )).toBe(true);
     });
   }
+
+  it("09:00 mission — no slot exceeds 4h before 18:00 staffing change", () => {
+    const { startsAt, endsAt } = missionWindow("2026-08-21", 9);
+    const interval = missionInterval(startsAt, endsAt)!;
+    const slots = generatePositionSlots({
+      missionStartMs: interval.startMs,
+      missionEndMs: interval.endMs,
+      nominalShiftDurationMin: 240,
+      staffingProfile: REAR_GATE_STAFFING_SUMMER,
+    });
+    const daytime = slots.filter((s) => s.requiredSeats === 1);
+    expect(daytime.length).toBeGreaterThan(0);
+    for (const s of daytime) {
+      expect(s.endMs - s.startMs).toBeLessThanOrEqual(MAX_SHIFT_MS);
+    }
+    const endingAt18 = daytime.find((s) => fmtTimeLabel(s.endMs) === "18:00");
+    expect(endingAt18).toBeDefined();
+    expect(endingAt18!.endMs - endingAt18!.startMs).toBeLessThanOrEqual(MAX_SHIFT_MS);
+    expect(endingAt18!.endMs - endingAt18!.startMs).toBeGreaterThan(0);
+  });
 
   it("standard 20:00 mission produces expected rear-gate slots", () => {
     const { startsAt, endsAt } = missionWindow("2026-08-21", 20);

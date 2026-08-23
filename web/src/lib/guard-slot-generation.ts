@@ -108,7 +108,7 @@ function mergeShortTailFragments(
     const tail = cur.pop()!;
     const prev = cur.pop()!;
     const combined = prev.durMin + tail.durMin;
-    if (combined > maxShiftMin + minShiftMin) {
+    if (combined > maxShiftMin) {
       cur.push(prev, tail);
       break;
     }
@@ -125,6 +125,34 @@ function hasAwkwardFragments(segments: RawSegment[], minShiftMin: number): boole
   return segments.some((s) => s.durMin < minShiftMin);
 }
 
+function resolveShortTailByPeeling(
+  segments: RawSegment[],
+  minShiftMin: number,
+): RawSegment[] {
+  const cur = [...segments];
+  while (cur.length > 1 && cur[cur.length - 1].durMin < minShiftMin) {
+    const tail = cur.pop()!;
+    const prev = cur.pop()!;
+    const need = minShiftMin - tail.durMin;
+    if (prev.durMin - need < minShiftMin) {
+      cur.push(prev, tail);
+      break;
+    }
+    const peelEndMs = addWallClockMinutes(prev.endMs, -need);
+    cur.push({
+      startMs: prev.startMs,
+      endMs: peelEndMs,
+      durMin: prev.durMin - need,
+    });
+    cur.push({
+      startMs: peelEndMs,
+      endMs: tail.endMs,
+      durMin: minShiftMin,
+    });
+  }
+  return cur;
+}
+
 function mergeAdjacentSegments(
   segments: RawSegment[],
   nominalMin: number,
@@ -137,9 +165,8 @@ function mergeAdjacentSegments(
     changed = false;
     for (let i = 0; i < cur.length - 1; i++) {
       const combined = cur[i].durMin + cur[i + 1].durMin;
-      const tailTooShort = cur[i + 1].durMin < minShiftMin;
       const fitsSingle = combined <= maxSingle;
-      if (tailTooShort || fitsSingle) {
+      if (fitsSingle) {
         cur[i] = {
           startMs: cur[i].startMs,
           endMs: cur[i + 1].endMs,
@@ -188,6 +215,7 @@ function slotsForStaffingSegment(
   }
 
   raw = mergeShortTailFragments(raw, minShiftMin, nominalMin);
+  raw = resolveShortTailByPeeling(raw, minShiftMin);
 
   if (hasAwkwardFragments(raw, minShiftMin)) {
     return partitionInterval(segStartMs, segEndMs, nominalMin, minShiftMin).map((p) => ({
@@ -283,6 +311,13 @@ export function validateGeneratedSlots(
     }
     if (slot.requiredSeats <= 0) {
       errors.push(`Zero-seat assignable slot at ${fmtTimeLabel(slot.startMs)}`);
+    }
+
+    const durMin = segmentDurationMin(slot.startMs, slot.endMs);
+    if (durMin > 240) {
+      errors.push(
+        `Slot exceeds 4h: ${fmtTimeLabel(slot.startMs)}–${fmtTimeLabel(slot.endMs)} (${durMin} min)`,
+      );
     }
 
     const midMs = slot.startMs + (slot.endMs - slot.startMs) / 2;

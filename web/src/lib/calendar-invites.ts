@@ -159,6 +159,32 @@ function groupTargetsByEmail(targets: InviteTarget[]): Map<string, InviteTarget[
   return map;
 }
 
+export function isTestResendSender(): boolean {
+  const from = process.env.CALENDAR_FROM_EMAIL?.trim();
+  if (!from) return !!process.env.RESEND_API_KEY?.trim();
+  return from.endsWith("@resend.dev");
+}
+
+/** Short admin-facing hint from Resend API error bodies. */
+export function resendErrorHint(errors: string[]): string | null {
+  if (!errors.length) return null;
+  const joined = errors.join(" ").toLowerCase();
+  if (
+    isTestResendSender() ||
+    joined.includes("testing emails to your own") ||
+    joined.includes("resend.dev")
+  ) {
+    return "Resend במצב בדיקה — onboarding@resend.dev שולח רק למייל של חשבון Resend. אמתי דומיין ב-resend.com/domains והגדירו CALENDAR_FROM_EMAIL לכתובת על הדומיין.";
+  }
+  if (joined.includes("domain") && (joined.includes("403") || joined.includes("mismatch"))) {
+    return "כתובת CALENDAR_FROM_EMAIL חייבת להיות על אותו דומיין (כולל תת-דומיין) שאימתת ב-Resend.";
+  }
+  if (joined.includes("invalid") && joined.includes("from")) {
+    return "כתובת השולח (CALENDAR_FROM_EMAIL) לא תקינה — בדקו ב-Vercel.";
+  }
+  return null;
+}
+
 /** Send calendar invite emails when a mission is saved/published. */
 export async function sendCalendarInvitesForMission(
   mission: MissionDay,
@@ -315,12 +341,32 @@ export function formatCalendarInviteMessage(summary: CalendarInviteSummary): str
   if (summary.reason === "not_published" || summary.events === 0) {
     return null;
   }
+
+  const peopleTargeted = summary.people || new Set(summary.errors.map((e) => e.split(":")[0])).size;
+
+  if (summary.sent === 0 && summary.errors.length > 0) {
+    const hint = resendErrorHint(summary.errors);
+    const parts = [
+      `הזמנות לא נשלחו (${peopleTargeted} חניכים, ${summary.events} משמרות)`,
+    ];
+    if (hint) parts.push(hint);
+    else if (summary.errors[0]) {
+      parts.push(summary.errors[0].slice(0, 160));
+    }
+    return parts.join(" · ");
+  }
+
   const parts = [`נשלחו הזמנות ל-${summary.sent} חניכים (${summary.events} משמרות)`];
   if (summary.missingEmail.length) {
     parts.push(`ללא מייל: ${summary.missingEmail.slice(0, 5).join(", ")}${summary.missingEmail.length > 5 ? "…" : ""}`);
   }
   if (summary.errors.length) {
-    parts.push(`שגיאות: ${summary.errors.length}`);
+    const hint = resendErrorHint(summary.errors);
+    parts.push(
+      hint
+        ? `חלק נכשל (${summary.errors.length}) — ${hint}`
+        : `שגיאות: ${summary.errors.length}`,
+    );
   }
   return parts.join(" · ");
 }

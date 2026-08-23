@@ -79,7 +79,8 @@ describe("mission start coverage", () => {
     expect(foot.slots.map((s) => `${s.start_time}-${s.end_time}`)).toEqual([
       "06:00-10:00",
       "10:00-14:00",
-      "14:00-19:00",
+      "14:00-17:00",
+      "17:00-19:00",
     ]);
   });
 });
