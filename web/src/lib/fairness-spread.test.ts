@@ -83,41 +83,27 @@ describe("rosterBurdenSpread", () => {
   });
 });
 
-function kitchenSlot(start = "08:00", end = "12:00"): FlatSlot {
-  const [sh, sm] = start.split(":").map(Number);
-  const [eh, em] = end.split(":").map(Number);
-  let dur = eh * 60 + em - (sh * 60 + sm);
-  if (dur <= 0) dur += 1440;
-  return {
-    slotId: "kitchen-1",
-    positionId: "pos-kitchen",
-    positionName: "מטבח",
-    positionKind: "kitchen",
-    sameRoom: false,
-    sameGender: false,
-    missionType: "kitchen",
-    startTime: start,
-    endTime: end,
-    timeLabel: `${start}–${end}`,
-    seatCount: 1,
-    assignees: [],
-    sortKey: sh * 60 + sm,
-    durationMinutes: dur,
-    cyclicStart: sh * 60 + sm,
-    wallStartMin: sh * 60 + sm,
-    calendarDayOffset: 0,
-    startAtMs: new Date(`2026-01-15T${start}:00`).getTime(),
-    endAtMs: new Date(`2026-01-15T${start}:00`).getTime() + dur * 60_000,
-  };
-}
-
 describe("compareByFairnessThenBurden", () => {
   it("prefers kitchen candidate that lowers kitchen spread", () => {
     const roster = [person("א"), person("ב"), person("ג", 20)];
     const tracker = createEmptyScheduleTracker();
     tracker.kitchenPoints = { א: 0.1 };
     tracker.dutyPoints = { א: 8 };
-    const slot = kitchenSlot();
+    const slot = {
+      slotId: "s1",
+      positionKind: "kitchen",
+      missionType: "kitchen",
+      seatCount: 1,
+      startTime: "08:00",
+      endTime: "12:00",
+      timeLabel: "08:00–12:00",
+      wallStartMin: 480,
+      cyclicStart: 480,
+      calendarDayOffset: 0,
+      assignees: [],
+      positionName: "מטבח",
+      sortKey: 0,
+    } as FlatSlot;
 
     const cmp = compareByFairnessThenBurden(
       person("ב"),
