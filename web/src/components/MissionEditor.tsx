@@ -86,6 +86,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   const createInitDone = useRef(false);
   const templateFixDone = useRef(false);
   const loadedTimesRef = useRef<{ startsAt: string; endsAt: string } | null>(null);
+  const loadedSchedulingRef = useRef<{ shift_hours: number; board_start: string } | null>(
+    null,
+  );
+  const structureDirtyRef = useRef(false);
   const [loading, setLoading] = useState(!!missionId);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState("");
@@ -170,6 +174,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setStartsAt(formatDatetimeLocal(m.starts_at));
     setEndsAt(formatDatetimeLocal(m.ends_at));
     loadedTimesRef.current = { startsAt: m.starts_at, endsAt: m.ends_at };
+    loadedSchedulingRef.current = {
+      shift_hours: rules.shift_hours ?? 4,
+      board_start: rules.board_start ?? "20:00",
+    };
+    structureDirtyRef.current = false;
     setStatus(m.status);
     setSchedulingRules(rules);
     setPositions(positions);
@@ -198,6 +207,23 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setTitle("");
   }
 
+  function syncGuardStructureFromEditor(
+    nextStartsAt = startsAt,
+    nextEndsAt = endsAt,
+    nextScheduling = schedulingRules,
+  ) {
+    if (missionType !== "guards" || !nextStartsAt || !nextEndsAt) return;
+    setPositions((prev) =>
+      generateGuardMissionStructure(prev, {
+        missionDate,
+        startsAt: new Date(nextStartsAt).toISOString(),
+        endsAt: new Date(nextEndsAt).toISOString(),
+        scheduling: nextScheduling,
+      }),
+    );
+    structureDirtyRef.current = true;
+  }
+
   function regenerateGuardStructure() {
     if (missionType !== "guards") return;
     if (
@@ -215,6 +241,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         scheduling: schedulingRules,
       }),
     );
+    structureDirtyRef.current = true;
     setMsg("מבנה המשמרות עודכן — לחצו «שמור» כדי לשמור");
   }
 
@@ -244,6 +271,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       (loadedTimesRef.current.startsAt !== isoStart ||
         loadedTimesRef.current.endsAt !== isoEnd);
 
+    const schedulingChanged =
+      missionType === "guards" &&
+      loadedSchedulingRef.current != null &&
+      (loadedSchedulingRef.current.shift_hours !== (scheduling_rules.shift_hours ?? 4) ||
+        loadedSchedulingRef.current.board_start !== (scheduling_rules.board_start ?? "20:00"));
+
+    const regenerateOnSave =
+      missionType === "guards" &&
+      (missionTimesChanged || structureDirtyRef.current || schedulingChanged);
+
     const payload = {
       title: title || `${missionDate} · ${MISSION_TYPE_LABELS[missionType]}`,
       mission_type: missionType,
@@ -254,7 +291,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       positions,
       scheduling_rules,
       notes: notes || null,
-      regenerate_structure: missionTimesChanged,
+      regenerate_structure: regenerateOnSave,
       standalone: missionType === "guards" && standaloneGuards,
     };
 
@@ -276,8 +313,15 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     }
 
     loadedTimesRef.current = { startsAt: isoStart, endsAt: isoEnd };
+    loadedSchedulingRef.current = {
+      shift_hours: scheduling_rules.shift_hours ?? 4,
+      board_start: scheduling_rules.board_start ?? "20:00",
+    };
+    structureDirtyRef.current = false;
     setMsg(
-      missionTimesChanged ? "נשמר — מבנה המשמרות סונכרן לשעות החדשות" : "נשמר",
+      regenerateOnSave
+        ? "נשמר — מבנה המשמרות עודכן; שיבוצים שלא תואמים נוקו"
+        : "נשמר",
     );
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
@@ -301,7 +345,13 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
 
   async function runAutoAssign() {
     if (!missionId) return;
-    if (!confirm("ליצור שיבוץ חכם לשמירות ועב״ס? משבצות שכבר מלאות יישארו.")) return;
+    if (
+      !confirm(
+        "ליצור שיבוץ חכם לפי מבנה המשמרות הנוכחי? השיבוץ ייבנה מחדש לפי חלונות השמירה.",
+      )
+    ) {
+      return;
+    }
     setAutoAssigning(true);
     setErr("");
     setMsg("");
@@ -310,7 +360,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mission_id: missionId,
-        keep_existing: true,
+        keep_existing: false,
         include_same_day: false,
       }),
     });
@@ -487,14 +537,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 setStartsAt(value);
                 if (missionType === "guards" && value) {
                   const iso = new Date(value).toISOString();
-                  setSchedulingRules((r) => ({
-                    ...r,
+                  const nextScheduling = {
+                    ...schedulingRules,
                     board_start: effectiveBoardStartLabel({
                       starts_at: iso,
                       positions,
-                      scheduling_rules: r,
+                      scheduling_rules: schedulingRules,
                     }),
-                  }));
+                  };
+                  setSchedulingRules(nextScheduling);
+                  syncGuardStructureFromEditor(value, endsAt, nextScheduling);
                 }
               }}
             />
@@ -505,7 +557,13 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               type="datetime-local"
               required
               value={endsAt}
-              onChange={(e) => setEndsAt(e.target.value)}
+              onChange={(e) => {
+                const value = e.target.value;
+                setEndsAt(value);
+                if (missionType === "guards") {
+                  syncGuardStructureFromEditor(startsAt, value);
+                }
+              }}
             />
           </div>
         </div>
@@ -582,12 +640,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               max={12}
               step={1}
               value={schedulingRules.shift_hours ?? 4}
-              onChange={(e) =>
-                setSchedulingRules((r) => ({
-                  ...r,
+              onChange={(e) => {
+                const nextScheduling = {
+                  ...schedulingRules,
                   shift_hours: Math.max(1, +e.target.value || 4),
-                }))
-              }
+                };
+                setSchedulingRules(nextScheduling);
+                if (missionType === "guards") {
+                  syncGuardStructureFromEditor(startsAt, endsAt, nextScheduling);
+                }
+              }}
             />
           </div>
           <div className="field">
@@ -595,9 +657,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             <input
               type="time"
               value={schedulingRules.board_start}
-              onChange={(e) =>
-                setSchedulingRules((r) => ({ ...r, board_start: e.target.value }))
-              }
+              onChange={(e) => {
+                const nextScheduling = {
+                  ...schedulingRules,
+                  board_start: e.target.value,
+                };
+                setSchedulingRules(nextScheduling);
+                if (missionType === "guards") {
+                  syncGuardStructureFromEditor(startsAt, endsAt, nextScheduling);
+                }
+              }}
             />
           </div>
           {(missionType === "guards" || missionType === "base_work") && (

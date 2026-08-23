@@ -366,14 +366,44 @@ export function syncAssignmentSeats(
   positions: MissionPosition[],
   assignments: Record<string, string[]>,
 ): Record<string, string[]> {
-  const out: Record<string, string[]> = { ...assignments };
+  const out: Record<string, string[]> = {};
   for (const pos of positions) {
     for (const slot of pos.slots) {
-      const cur = out[slot.id] || [];
+      const cur = assignments[slot.id] || [];
       out[slot.id] = Array.from({ length: slot.seat_count }, (_, i) => cur[i] || "");
     }
   }
   return out;
+}
+
+/** Keep assignments only for slots whose window did not change after structure sync. */
+export function reconcileAssignmentsOnStructureChange(
+  prevPositions: MissionPosition[],
+  nextPositions: MissionPosition[],
+  assignments: Record<string, string[]>,
+): Record<string, string[]> {
+  const prevSlotById = new Map<string, MissionSlot>();
+  for (const pos of prevPositions) {
+    for (const slot of pos.slots) {
+      prevSlotById.set(slot.id, slot);
+    }
+  }
+
+  const kept: Record<string, string[]> = {};
+  for (const pos of nextPositions) {
+    for (const slot of pos.slots) {
+      const prev = prevSlotById.get(slot.id);
+      const unchanged =
+        prev &&
+        prev.start_time === slot.start_time &&
+        prev.end_time === slot.end_time &&
+        prev.seat_count === slot.seat_count;
+      if (unchanged && assignments[slot.id]?.some(Boolean)) {
+        kept[slot.id] = assignments[slot.id];
+      }
+    }
+  }
+  return syncAssignmentSeats(nextPositions, kept);
 }
 
 /** תצוגת עב״ס מהעמדות המוטמעות ביום שמירות (ללוח). */

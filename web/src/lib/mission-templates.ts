@@ -168,6 +168,31 @@ export function generateGuardMissionStructure(
   return finalizeGuardMissionPositions(positions, input);
 }
 
+/** True when guard slot windows should be rebuilt from mission window + rules. */
+export function shouldRegenerateGuardStructure(
+  existing: {
+    starts_at: string;
+    ends_at: string;
+    scheduling_rules?: MissionSchedulingRules;
+  },
+  next: {
+    starts_at: string;
+    ends_at: string;
+    scheduling_rules?: MissionSchedulingRules;
+  },
+  explicitFlag = false,
+): boolean {
+  if (explicitFlag) return true;
+  if (existing.starts_at !== next.starts_at || existing.ends_at !== next.ends_at) {
+    return true;
+  }
+  const a = existing.scheduling_rules;
+  const b = next.scheduling_rules;
+  if ((a?.shift_hours ?? 4) !== (b?.shift_hours ?? 4)) return true;
+  if (a?.board_start !== b?.board_start) return true;
+  return false;
+}
+
 export type ResolveMissionPositionsInput = {
   missionType: MissionType;
   startsAt: string;

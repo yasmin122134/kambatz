@@ -4,6 +4,7 @@ import { isAdmin } from "@/lib/auth";
 import {
   defaultSchedulingForType,
   resolveMissionPositions,
+  shouldRegenerateGuardStructure,
 } from "@/lib/mission-templates";
 import {
   deleteMissionDay,
@@ -15,7 +16,7 @@ import {
 import { fetchActivePeople } from "@/lib/people";
 import { loadApprovedIssues } from "@/lib/issues";
 import { canAssignKind, blockedByIssue, issueBlockMessage } from "@/lib/scheduling-engine";
-import { flattenMissionSlots } from "@/lib/mission-utils";
+import { flattenMissionSlots, reconcileAssignmentsOnStructureChange } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
 import type { Person } from "@/lib/types";
@@ -107,7 +108,13 @@ export async function PUT(request: Request, { params }: Params) {
     : existing.scheduling_rules;
 
   const clientPositions = body.positions ?? existing.positions;
-  const regenerateStructure = body.regenerate_structure === true;
+  const regenerateStructure =
+    mission_type === "guards" &&
+    shouldRegenerateGuardStructure(
+      existing,
+      { starts_at, ends_at, scheduling_rules },
+      body.regenerate_structure === true,
+    );
   const positions = resolveMissionPositions({
     missionType: mission_type,
     startsAt: starts_at,
@@ -118,10 +125,15 @@ export async function PUT(request: Request, { params }: Params) {
     regenerateStructure,
   });
 
-  const assignments = syncAssignmentSeats(
-    positions,
-    body.assignments ?? existing.assignments,
-  );
+  const rawAssignments = body.assignments ?? existing.assignments;
+  const assignments =
+    regenerateStructure && mission_type === "guards"
+      ? reconcileAssignmentsOnStructureChange(
+          existing.positions,
+          positions,
+          rawAssignments,
+        )
+      : syncAssignmentSeats(positions, rawAssignments);
 
   try {
     const { mission: saved } = await saveMissionDay({
