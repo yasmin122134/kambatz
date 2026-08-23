@@ -19,7 +19,6 @@ import {
 import { formatFairnessRulesDiff } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
-import { computeHourlyAvailability } from "@/lib/hourly-availability";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
@@ -79,8 +78,6 @@ export function BoardClient({
     Array<{
       personName: string;
       totalBurden: number;
-      dutyPoints: number;
-      kitchenPoints: number;
       guardAssignmentCount: number;
       guardBaseBurden: number;
       restPenalties: number;
@@ -205,13 +202,6 @@ export function BoardClient({
       setMsg(data.error || "שגיאה");
       return null;
     }
-    if (Array.isArray(data.missions)) {
-      const byId = new Map(
-        (data.missions as MissionDay[]).map((m) => [m.id, m]),
-      );
-      setMissions((prev) => prev.map((m) => byId.get(m.id) ?? m));
-      return data.missions as MissionDay[];
-    }
     setMissions((prev) => prev.map((m) => (m.id === data.id ? data : m)));
     return data as MissionDay;
   }
@@ -242,45 +232,6 @@ export function BoardClient({
     setSwapMode(null);
   }
 
-  async function applyReplacement(
-    missionId: string,
-    slotId: string,
-    seatIndex: number,
-    removeName: string,
-    option:
-      | { type: "direct"; personName: string }
-      | {
-          type: "swap";
-          swapMissionId: string;
-          swapSlotId: string;
-          swapSeatIndex: number;
-        },
-  ) {
-    setMsg("");
-    const res = await fetch(`/api/missions/${missionId}/replacements/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        slot_id: slotId,
-        seat_index: seatIndex,
-        remove_name: removeName,
-        option,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      setMsg(data.error || "שגיאה בשמירת החלפה");
-      return false;
-    }
-    if (Array.isArray(data.missions)) {
-      const byId = new Map(
-        (data.missions as MissionDay[]).map((m) => [m.id, m]),
-      );
-      setMissions((prev) => prev.map((m) => byId.get(m.id) ?? m));
-    }
-    return true;
-  }
-
   async function adminSetName(
     missionId: string,
     slotId: string,
@@ -292,6 +243,22 @@ export function BoardClient({
       slot_id: slotId,
       seat_index: seatIndex,
       name,
+    });
+  }
+
+  async function adminReplacementSwap(
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) {
+    await patchAssignment(missionId, {
+      action: "swap",
+      slot_id: slotId,
+      seat_index: seatIndex,
+      target_slot_id: targetSlotId,
+      target_seat_index: targetSeatIndex,
     });
   }
 
@@ -313,22 +280,16 @@ export function BoardClient({
     loadAdminData();
   }
 
-  async function runAutoAssign(keepExisting: boolean) {
-    if (!activeDate) return;
-    const confirmed = keepExisting
-      ? confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")
-      : confirm(
-          "לשבץ מחדש את כל היום מאפס?\n\n" +
-            "כל השיבוצים הקיימים יימחקו ויחולקו מחדש לפי האלגוריתם המעודכן (כולל איזון עומס נפרד למטבח ולשמירה+עב״ס).",
-        );
-    if (!confirmed) return;
-
+  async function runAutoAssign() {
+    if (!activeDate || !confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")) {
+      return;
+    }
     setAutoAssigning(true);
     setMsg("");
     const res = await fetch("/api/missions/auto-assign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mission_date: activeDate, keep_existing: keepExisting }),
+      body: JSON.stringify({ mission_date: activeDate, keep_existing: true }),
     });
     const data = await res.json();
     setAutoAssigning(false);
@@ -346,7 +307,7 @@ export function BoardClient({
     const warnings: string[] = data.warnings || [];
     const statusLine =
       status === "complete"
-        ? `${keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+        ? `שיבוץ הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
         : status === "infeasible"
           ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
           : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
@@ -407,18 +368,9 @@ export function BoardClient({
                 type="button"
                 className="btn-pri btn-sm"
                 disabled={autoAssigning || !activeDate}
-                onClick={() => runAutoAssign(true)}
+                onClick={runAutoAssign}
               >
                 {autoAssigning ? "משבץ…" : "שיבוץ חכם ליום"}
-              </button>
-              <button
-                type="button"
-                className="btn-sm"
-                disabled={autoAssigning || !activeDate}
-                onClick={() => runAutoAssign(false)}
-                title="מוחק שיבוצים קיימים ומחלק מחדש את כל היום"
-              >
-                {autoAssigning ? "משבץ…" : "שיבוץ מחדש"}
               </button>
               <button
                 type="button"
@@ -496,8 +448,6 @@ export function BoardClient({
           {guardsMission && (
             <MissionPanel
               mission={guardsMission}
-              dayMissions={dayMissions}
-              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -527,7 +477,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onApplyReplacement={applyReplacement}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -540,8 +490,6 @@ export function BoardClient({
           {baseMission && baseWorkMissionId && (
             <MissionPanel
               mission={baseMission}
-              dayMissions={dayMissions}
-              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -570,7 +518,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onApplyReplacement={applyReplacement}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -583,8 +531,6 @@ export function BoardClient({
           {kitchenMission && (
             <MissionPanel
               mission={kitchenMission}
-              dayMissions={dayMissions}
-              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -613,7 +559,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onApplyReplacement={applyReplacement}
+              onAdminReplacementSwap={adminReplacementSwap}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -790,8 +736,6 @@ function GuardTimeline({
   mission,
   slots,
   boardStartMin,
-  dayMissions,
-  rosterPeople,
   personName,
   isAdmin,
   fairnessRules,
@@ -804,14 +748,12 @@ function GuardTimeline({
   onTake,
   onSwap,
   onAdminSet,
-  onApplyReplacement,
+  onAdminReplacementSwap,
   onCancelSwap,
 }: {
   mission: MissionDay;
   slots: FlatSlot[];
   boardStartMin: number;
-  dayMissions: MissionDay[];
-  rosterPeople: Person[];
   personName: string;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
@@ -824,20 +766,13 @@ function GuardTimeline({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onApplyReplacement: (
+  onAdminReplacementSwap: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    removeName: string,
-    option:
-      | { type: "direct"; personName: string }
-      | {
-          type: "swap";
-          swapMissionId: string;
-          swapSlotId: string;
-          swapSeatIndex: number;
-        },
-  ) => Promise<boolean>;
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
   onCancelSwap: () => void;
 }) {
   const positions = mission.positions || [];
@@ -851,20 +786,6 @@ function GuardTimeline({
     ["--timeline-height" as string]: `${TIMELINE_HEIGHT_PX}px`,
     ["--timeline-hour-step" as string]: `${hourStepPx}px`,
   };
-
-  const hourlyAvailable = useMemo(
-    () =>
-      isAdmin
-        ? computeHourlyAvailability({
-            missions: dayMissions,
-            people: rosterPeople,
-            missionDate: mission.mission_date,
-            boardStartMin,
-            stepMinutes: 60,
-          })
-        : [],
-    [isAdmin, dayMissions, rosterPeople, mission.mission_date, boardStartMin],
-  );
 
   return (
     <div className="guard-timeline-wrap">
@@ -913,7 +834,7 @@ function GuardTimeline({
                         onTake={onTake}
                         onSwap={onSwap}
                         onAdminSet={onAdminSet}
-                        onApplyReplacement={onApplyReplacement}
+                        onAdminReplacementSwap={onAdminReplacementSwap}
                         onCancelSwap={onCancelSwap}
                       />
                     </div>
@@ -922,29 +843,6 @@ function GuardTimeline({
               </div>
             );
           })}
-          {isAdmin && (
-            <div className="guard-timeline-col guard-timeline-col-available">
-              <div className="guard-timeline-col-header">פנויים</div>
-              <div className="guard-timeline-col-body">
-                {hourlyAvailable.map((row) => (
-                  <div
-                    key={row.cyclicStart}
-                    className="guard-timeline-available-hour"
-                    style={{
-                      top: `${cyclicToPx(row.cyclicStart)}px`,
-                      height: `${durationToPx(60)}px`,
-                    }}
-                    title={row.names.join(", ") || "—"}
-                  >
-                    <span className="guard-timeline-available-time">{row.wallLabel}</span>
-                    <span className="guard-timeline-available-names">
-                      {row.names.length ? row.names.join(" · ") : "—"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -953,8 +851,6 @@ function GuardTimeline({
 
 function MissionPanel({
   mission,
-  dayMissions,
-  rosterPeople,
   personName,
   isAdmin,
   fairnessRules,
@@ -967,12 +863,10 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
-  onApplyReplacement,
+  onAdminReplacementSwap,
   onCancelSwap,
 }: {
   mission: MissionDay;
-  dayMissions: MissionDay[];
-  rosterPeople: Person[];
   personName: string;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
@@ -985,20 +879,13 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onApplyReplacement: (
+  onAdminReplacementSwap: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    removeName: string,
-    option:
-      | { type: "direct"; personName: string }
-      | {
-          type: "swap";
-          swapMissionId: string;
-          swapSlotId: string;
-          swapSeatIndex: number;
-        },
-  ) => Promise<boolean>;
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
   onCancelSwap: () => void;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
@@ -1010,8 +897,6 @@ function MissionPanel({
         mission={mission}
         slots={slots}
         boardStartMin={boardStartMin}
-        dayMissions={dayMissions}
-        rosterPeople={rosterPeople}
         personName={personName}
         isAdmin={isAdmin}
         fairnessRules={fairnessRules}
@@ -1024,7 +909,7 @@ function MissionPanel({
         onTake={onTake}
         onSwap={onSwap}
         onAdminSet={onAdminSet}
-        onApplyReplacement={onApplyReplacement}
+        onAdminReplacementSwap={onAdminReplacementSwap}
         onCancelSwap={onCancelSwap}
       />
     );
@@ -1049,7 +934,7 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
-            onApplyReplacement={onApplyReplacement}
+            onAdminReplacementSwap={onAdminReplacementSwap}
             onCancelSwap={onCancelSwap}
           />
         ))}
@@ -1062,34 +947,24 @@ function ReplacementPicker({
   slotId,
   seatIndex,
   currentName,
-  onApply,
+  onDirect,
+  onSwap,
 }: {
   missionId: string;
   slotId: string;
   seatIndex: number;
   currentName: string;
-  onApply: (
-    option:
-      | { type: "direct"; personName: string }
-      | {
-          type: "swap";
-          swapMissionId: string;
-          swapSlotId: string;
-          swapSeatIndex: number;
-        },
-  ) => Promise<boolean>;
+  onDirect: (name: string) => void;
+  onSwap: (targetSlotId: string, targetSeatIndex: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap">("replace");
   const [loading, setLoading] = useState(false);
-  const [applying, setApplying] = useState(false);
-  const [pickerError, setPickerError] = useState("");
   const [options, setOptions] = useState<
     {
       type: "direct" | "swap";
       personName: string;
       label: string;
-      swapMissionId?: string;
       swapSlotId?: string;
       swapSeatIndex?: number;
     }[]
@@ -1113,26 +988,6 @@ function ReplacementPicker({
     setLoading(false);
     if (res.ok) setOptions(data.options || []);
     else setOptions([]);
-  }
-
-  async function pickOption(o: (typeof options)[number]) {
-    setPickerError("");
-    setApplying(true);
-    let ok = false;
-    if (o.type === "direct") {
-      ok = await onApply({ type: "direct", personName: o.personName });
-    } else if (o.swapMissionId && o.swapSlotId != null && o.swapSeatIndex != null) {
-      ok = await onApply({
-        type: "swap",
-        swapMissionId: o.swapMissionId,
-        swapSlotId: o.swapSlotId,
-        swapSeatIndex: o.swapSeatIndex,
-      });
-    } else {
-      setPickerError("לא ניתן להחיל החלפה זו — נסו לרענן את הרשימה");
-    }
-    setApplying(false);
-    if (ok) setOpen(false);
   }
 
   if (!currentName) return null;
@@ -1168,8 +1023,6 @@ function ReplacementPicker({
           </div>
           {loading ? (
             <p className="hint">מחפש…</p>
-          ) : applying ? (
-            <p className="hint">שומר…</p>
           ) : options.length === 0 ? (
             <p className="hint">אין מחליף שעומד בכללים</p>
           ) : (
@@ -1179,8 +1032,13 @@ function ReplacementPicker({
                   <button
                     type="button"
                     className="btn-sm w-full text-right"
-                    disabled={applying}
-                    onClick={() => void pickOption(o)}
+                    onClick={() => {
+                      if (o.type === "direct") onDirect(o.personName);
+                      else if (o.swapSlotId != null && o.swapSeatIndex != null) {
+                        onSwap(o.swapSlotId, o.swapSeatIndex);
+                      }
+                      setOpen(false);
+                    }}
                   >
                     {o.label}
                   </button>
@@ -1188,7 +1046,6 @@ function ReplacementPicker({
               ))}
             </ul>
           )}
-          {pickerError && <p className="msg-err mt-2 text-xs">{pickerError}</p>}
         </div>
       )}
     </div>
@@ -1212,7 +1069,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
-  onApplyReplacement,
+  onAdminReplacementSwap,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -1231,20 +1088,13 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onApplyReplacement: (
+  onAdminReplacementSwap: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    removeName: string,
-    option:
-      | { type: "direct"; personName: string }
-      | {
-          type: "swap";
-          swapMissionId: string;
-          swapSlotId: string;
-          swapSeatIndex: number;
-        },
-  ) => Promise<boolean>;
+    targetSlotId: string,
+    targetSeatIndex: number,
+  ) => void;
   onCancelSwap: () => void;
 }) {
   const isMine = slot.assignees.includes(personName);
@@ -1282,8 +1132,15 @@ function SlotCard({
                     slotId={slot.slotId}
                     seatIndex={seatIndex}
                     currentName={name}
-                    onApply={(option) =>
-                      onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
+                    onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
+                    onSwap={(targetSlotId, targetSeatIndex) =>
+                      onAdminReplacementSwap(
+                        missionId,
+                        slot.slotId,
+                        seatIndex,
+                        targetSlotId,
+                        targetSeatIndex,
+                      )
                     }
                   />
                 )}
@@ -1464,8 +1321,6 @@ function BurdenSummaryPanel({
   roster: Array<{
     personName: string;
     totalBurden: number;
-    dutyPoints: number;
-    kitchenPoints: number;
     guardAssignmentCount: number;
     guardBaseBurden: number;
     restPenalties: number;
@@ -1475,14 +1330,6 @@ function BurdenSummaryPanel({
   }>;
   onRefresh: () => void;
 }) {
-  const assignedCount = roster.filter((r) => r.totalBurden > 0).length;
-  const maxTotal = roster.reduce((m, r) => Math.max(m, r.totalWithHistory), 0);
-  const assignedBurden = roster
-    .filter((r) => r.totalBurden > 0)
-    .reduce((s, r) => s + r.totalBurden, 0);
-  const avgAssignedBurden =
-    assignedCount > 0 ? Math.round((assignedBurden / assignedCount) * 10) / 10 : 0;
-
   if (!roster.length) {
     return (
       <section className="card mb-6">
@@ -1505,79 +1352,37 @@ function BurdenSummaryPanel({
           רענון
         </button>
       </div>
-      <p className="text-xs text-ink3 mb-2">
-        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח ושמירה+עב״ס נספרים בנפרד לשיבוץ הוגן.
-        ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).
+      <p className="text-xs text-ink3 mb-3">
+        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח/כוננות/עב״ס לפי טבלת הצדק.
       </p>
-      <div className="burden-roster-summary">
-        <span>
-          <strong>{roster.length}</strong> צוערים פעילים
-        </span>
-        <span>
-          <strong>{assignedCount}</strong> משובצים ביום
-        </span>
-        <span>
-          ממוצע עומס (משובצים): <strong>{avgAssignedBurden.toFixed(1)}</strong>
-        </span>
-        <span>
-          מקס׳ סה״כ+היסט׳: <strong>{maxTotal.toFixed(1)}</strong>
-        </span>
-      </div>
-      <div className="burden-roster-scroll" tabIndex={0} aria-label="רשימת עומס — ניתן לגלול">
+      <div className="schedule-table-wrap overflow-x-auto max-h-64 overflow-y-auto">
         <table className="schedule-table w-full text-sm">
           <thead>
             <tr>
               <th>צוער</th>
-              <th title="עומס ביום הנבחר">עומס יום</th>
-              <th title="עומס + התאמת ניקוד קודם — לשיבוץ חכם">סה״כ+היסט׳</th>
-              <th aria-label="יחס לעומס המקסימלי" />
+              <th>עומס</th>
               <th>שמירות</th>
               <th title="עומס בסיס שמירות">בסיס</th>
               <th title="עונש מנוחה">מנוחה</th>
-              <th title="שמירות + עב״ס + כוננות">שמירה+עב״ס</th>
-              <th title="תורנות מטבח">מטבח</th>
-              <th title="עב״ס/כוננות (לא כולל שמירות)">עב״ס/כוננ</th>
-              <th title="התאמת ניקוד קודם">היסט׳</th>
+              <th title="מטבח/עב״ס/כוננות">אחר</th>
+              <th title="היסטוריה">היסט׳</th>
             </tr>
           </thead>
           <tbody>
-            {roster.map((row) => {
-              const barPct =
-                maxTotal > 0
-                  ? Math.round((row.totalWithHistory / maxTotal) * 100)
-                  : 0;
-              const idle = row.totalBurden <= 0;
-              return (
-                <tr
-                  key={row.personName}
-                  className={idle ? "burden-roster-row--idle" : undefined}
-                >
-                  <td>{row.personName}</td>
-                  <td className="mono">{row.totalBurden.toFixed(1)}</td>
-                  <td className="mono font-medium">{row.totalWithHistory.toFixed(1)}</td>
-                  <td>
-                    <div className="burden-roster-bar" title={`${barPct}% מהמקסימום`}>
-                      <div className="burden-roster-bar-track">
-                        <div
-                          className="burden-roster-bar-fill"
-                          style={{ width: `${barPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="mono">{row.guardAssignmentCount}</td>
-                  <td className="mono text-ink2">{row.guardBaseBurden.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.restPenalties.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.dutyPoints.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.kitchenPoints.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.otherMissionPoints.toFixed(1)}</td>
-                  <td className="mono text-ink2">
-                    {row.historicalAdjustment >= 0 ? "+" : ""}
-                    {row.historicalAdjustment.toFixed(1)}
-                  </td>
-                </tr>
-              );
-            })}
+            {roster.map((row) => (
+              <tr key={row.personName} title={`סה״כ עם היסטוריה: ${row.totalWithHistory}`}>
+                <td>{row.personName}</td>
+                <td className="mono">{row.totalBurden.toFixed(1)}</td>
+                <td className="mono">{row.guardAssignmentCount}</td>
+                <td className="mono text-ink2">{row.guardBaseBurden.toFixed(1)}</td>
+                <td className="mono text-ink2">{row.restPenalties.toFixed(1)}</td>
+                <td className="mono text-ink2">{row.otherMissionPoints.toFixed(1)}</td>
+                <td className="mono text-ink2">
+                  {row.historicalAdjustment >= 0 ? "+" : ""}
+                  {row.historicalAdjustment.toFixed(1)}
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>

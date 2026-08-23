@@ -277,64 +277,6 @@ button:hover,
   background: var(--color-accent-bg);
 }
 
-.burden-roster-summary {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem 1.25rem;
-  font-size: 0.8125rem;
-  color: var(--color-ink2);
-  margin-bottom: 0.75rem;
-}
-
-.burden-roster-summary strong {
-  color: var(--color-ink);
-  font-weight: 600;
-}
-
-.burden-roster-scroll {
-  max-height: min(70vh, 36rem);
-  overflow: auto;
-  border: 1px solid var(--color-line2);
-  border-radius: var(--radius-md);
-  background: var(--color-card);
-}
-
-.burden-roster-scroll .schedule-table {
-  width: 100%;
-}
-
-.burden-roster-scroll .schedule-table th {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  box-shadow: 0 1px 0 var(--color-line2);
-}
-
-.burden-roster-row--idle {
-  color: var(--color-ink3);
-}
-
-.burden-roster-bar {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 5.5rem;
-}
-
-.burden-roster-bar-track {
-  flex: 1;
-  height: 6px;
-  border-radius: 999px;
-  background: var(--color-line2);
-  overflow: hidden;
-}
-
-.burden-roster-bar-fill {
-  height: 100%;
-  border-radius: 999px;
-  background: var(--color-accent);
-}
-
 .schedule-table-wrap {
   background: var(--color-card);
   border-radius: var(--radius-md);
