@@ -1,4 +1,3 @@
-import { sendCalendarInvitesForMission } from "@/lib/calendar-invites";
 import { createClient } from "@/lib/supabase/server";
 import { loadApprovedIssues } from "@/lib/issues";
 import { findAssignmentConflicts } from "@/lib/scheduling-engine";
@@ -187,6 +186,7 @@ async function afterMissionSave(
   }
 
   try {
+    const { sendCalendarInvitesForMission } = await import("@/lib/calendar-invites");
     await sendCalendarInvitesForMission(mission, previous);
   } catch (e) {
     console.error("[calendar-invite] mission save", e);

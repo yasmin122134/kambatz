@@ -1,4 +1,3 @@
-import { getFairnessRules } from "@/lib/fairness";
 import { slotDurationHours } from "@/lib/fairness-math";
 import {
   calculatePersonBurden,
@@ -27,7 +26,7 @@ import {
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
-import { issueAbsoluteInterval } from "@/lib/issues";
+import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
   DEFAULT_MISSION_SCHEDULING_RULES,
   type FairnessRules,
@@ -2007,5 +2006,4 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
   return [...new Set(messages)];
 }
 
-export { getFairnessRules };
 export { guardSlotDifficultyRank, type PersonBurdenBreakdown } from "@/lib/guard-burden";
