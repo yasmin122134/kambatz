@@ -222,16 +222,16 @@ export function getRestPenalty(restHours: number, rules?: FairnessRules): number
   return penalties[8];
 }
 
-/** Tiers shown on the fairness page — mirrors getRestPenalty() / טבלת צדק. */
+/** Tiers shown on the fairness page — mirrors getRestPenalty(). */
 export const REST_PENALTY_TIERS = [
-  { restHoursLabel: "מעל 12 שעות", penalty: 0, index: 0 },
-  { restHoursLabel: "מעל 10 עד 12 שעות", penalty: 1, index: 1 },
-  { restHoursLabel: "מעל 8 עד 10 שעות", penalty: 2, index: 2 },
-  { restHoursLabel: "מעל 6 עד 8 שעות", penalty: 3, index: 3 },
-  { restHoursLabel: "מעל 4 עד 6 שעות", penalty: 4, index: 4 },
-  { restHoursLabel: "מעל 3 עד 4 שעות", penalty: 5, index: 5 },
-  { restHoursLabel: "מעל 2 עד 3 שעות", penalty: 6, index: 6 },
-  { restHoursLabel: "מעל שעה עד 2 שעות", penalty: 7, index: 7 },
+  { restHoursLabel: "12 שעות ומעלה", penalty: 0, index: 0 },
+  { restHoursLabel: "10–12 שעות", penalty: 1, index: 1 },
+  { restHoursLabel: "8–10 שעות", penalty: 2, index: 2 },
+  { restHoursLabel: "6–8 שעות", penalty: 3, index: 3 },
+  { restHoursLabel: "4–6 שעות", penalty: 4, index: 4 },
+  { restHoursLabel: "3–4 שעות", penalty: 5, index: 5 },
+  { restHoursLabel: "2–3 שעות", penalty: 6, index: 6 },
+  { restHoursLabel: "1–2 שעות", penalty: 7, index: 7 },
   { restHoursLabel: "0–1 שעות", penalty: 8, index: 8 },
 ] as const;
 

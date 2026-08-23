@@ -138,7 +138,7 @@ describe("assignmentIntervalsOverlap", () => {
 describe("overlap rejection across mission types", () => {
   const p = person("Alex", 1);
 
-  function trackerWith(blocks: Array<{ slot: ReturnType<typeof flattenMissionSlots>[number]; missionId: string }>) {
+  function trackerWith(blocks: Array<{ slot: ReturnType<typeof flattenMissionSlots>[number]; missionId: string; missionType: MissionDay["mission_type"] }>) {
     const tracker = buildTrackerFromMissions([], rules);
     for (const block of blocks) {
       placePerson(
@@ -149,6 +149,7 @@ describe("overlap rejection across mission types", () => {
         rules,
         scheduling,
         block.slot.seatCount,
+        block.missionType,
       );
     }
     return tracker;
@@ -163,13 +164,13 @@ describe("overlap rejection across mission types", () => {
     const carmelSlot = slotByLabel(reserveTimed, "08:00–12:00");
     const reserveSlot = slotByLabel(reserveTimed, "10:00–14:00");
 
-    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1" }]);
+    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
     expect(
       fitsPerson(p, reserveSlot, tracker, [], scheduling, [], { [p.name]: p }),
     ).toBe(false);
   });
 
-  it("Test B — Carmel B vs Base Work overlap is allowed (parallel)", () => {
+  it("Test B — Carmel B vs Base Work overlap is allowed in parallel", () => {
     const guardMission = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const carmelId = carmelBSlot(guardMission).slotId;
     const guard = withCustomSlotTimes(guardMission, carmelId, "08:00", "12:00");
@@ -185,7 +186,7 @@ describe("overlap rejection across mission types", () => {
     const baseSlot = withCustomSlotTimes(base, base.positions[0].slots[0].id, "09:00", "13:00");
     const target = slotByLabel(baseSlot, "09:00–13:00");
 
-    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1" }]);
+    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
     expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
   });
 
@@ -205,7 +206,7 @@ describe("overlap rejection across mission types", () => {
     const baseSlot = withCustomSlotTimes(base, base.positions[0].slots[0].id, "12:00", "16:00");
     const target = slotByLabel(baseSlot, "12:00–16:00");
 
-    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1" }]);
+    const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
     expect(carmelSlot.endAtMs - carmelSlot.startAtMs).toBe(4 * 3_600_000);
     expect(target.startAtMs).toBe(carmelSlot.endAtMs);
     const busy = tracker.busy[p.name] || [];
@@ -239,7 +240,7 @@ describe("overlap rejection across mission types", () => {
     const reserveSlot = slotByLabel(timed, "08:00–12:00");
     const guardSlot = slotByLabel(timed, "10:00–14:00");
 
-    const tracker = trackerWith([{ slot: reserveSlot, missionId: "g1" }]);
+    const tracker = trackerWith([{ slot: reserveSlot, missionId: "g1", missionType: "guards" }]);
     expect(fitsPerson(p, guardSlot, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
   });
 });
@@ -297,6 +298,7 @@ describe("base work assignment", () => {
       rules,
       meanPrior: 0,
       missionId: base.id,
+      missionType: base.mission_type,
     });
     expect(names.length).toBeGreaterThan(0);
     expect(diagnostics.assigned).toBeGreaterThan(0);
@@ -326,6 +328,7 @@ describe("base work assignment", () => {
       rules,
       meanPrior: 0,
       missionId: base.id,
+      missionType: base.mission_type,
     });
     expect(usedFallback).toBe(false);
     expect(workSquad).toBe(1);
@@ -369,6 +372,7 @@ describe("base work assignment", () => {
       rules,
       meanPrior: 0,
       missionId: base.id,
+      missionType: base.mission_type,
     });
 
     expect(names.length).toBeGreaterThan(0);

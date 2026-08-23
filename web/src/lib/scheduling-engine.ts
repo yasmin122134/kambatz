@@ -5,8 +5,6 @@ import {
   calculateProjectedCandidateBurden,
   calculateProjectedKitchenBurden,
   guardSlotDifficultyRank,
-  blockFromFlatSlot,
-  getRestPenalty,
   type BurdenTimelineBlock,
   type PersonBurdenBreakdown,
 } from "@/lib/guard-burden";
@@ -30,8 +28,8 @@ import {
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
-import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import { kitchenMissionInterval } from "@/lib/kitchen-day-template";
+import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
@@ -299,36 +297,22 @@ function workedRestMinutes(blocks: BusyBlock[]): number {
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 }
 
-/** Minimum spacing between guard shifts — absolute time; scoped to one mission when assigning. */
 function guardOk(
   personName: string,
   slot: FlatSlot,
-  tracker: ScheduleTracker,
+  guardShifts: Record<string, { start: number; duration: number }[]>,
   ratio: number,
-  ignoreSlotId?: string,
-  scopeMissionId?: string,
 ): boolean {
-  if (!isGuardKind(slot.positionKind)) return true;
-  const effectiveRatio = ratio > 0 ? ratio : 1;
-  const slotIv = slotInterval(slot);
-  const ratioMs = (minutes: number) => minutes * effectiveRatio * 60_000;
-
-  for (const b of tracker.busy[personName] || []) {
-    if (!isGuardKind(b.positionKind)) continue;
-    if (scopeMissionId && b.missionId !== scopeMissionId) continue;
-    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    if (b.slotId === slot.slotId) continue;
-
-    const blockIv = blockInterval(b);
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
-
-    if (blockIv.endMs <= slotIv.startMs) {
-      const gap = slotIv.startMs - blockIv.endMs;
-      if (gap < ratioMs(b.durationMinutes)) return false;
+  if (!ratio || !isGuardKind(slot.positionKind)) return true;
+  for (const g of guardShifts[personName] || []) {
+    if (cyclicGap(g.start, g.duration, slot.cyclicStart) < g.duration * ratio) {
+      return false;
     }
-    if (slotIv.endMs <= blockIv.startMs) {
-      const gap = blockIv.startMs - slotIv.endMs;
-      if (gap < ratioMs(slot.durationMinutes)) return false;
+    if (
+      cyclicGap(slot.cyclicStart, slot.durationMinutes, g.start) <
+      slot.durationMinutes * ratio
+    ) {
+      return false;
     }
   }
   return true;
@@ -373,296 +357,6 @@ export function allowsParallelAssignmentOverlap(
   );
 }
 
-/** True calendar overlap only — never relaxed by Smart Assignment (except allowed pairs). */
-export function hasHardTimeOverlap(
-  personName: string,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  ignoreSlotId?: string,
-): boolean {
-  const slotIv = slotInterval(slot);
-  for (const b of tracker.busy[personName] || []) {
-    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    if (b.slotId === slot.slotId) continue;
-    if (
-      allowsParallelAssignmentOverlap(
-        { positionKind: b.positionKind, missionType: b.missionType },
-        { positionKind: slot.positionKind, missionType: slot.missionType },
-      )
-    ) {
-      continue;
-    }
-    if (assignmentIntervalsOverlap(slotIv, blockInterval(b))) return true;
-  }
-  return false;
-}
-
-export type HardEligibilityReason =
-  | "canAssignKind"
-  | "blockedByIssue"
-  | "overlap"
-  | "guardSpacing"
-  | "sameRoom"
-  | "sameGender";
-
-export type HardEligibilityOptions = {
-  scheduling?: MissionSchedulingRules;
-  scopeMissionId?: string;
-};
-
-export type HardEligibilityResult = {
-  allowed: boolean;
-  reason?: HardEligibilityReason;
-};
-
-/** Minimum guard spacing ratio when evaluating soft guard gaps. */
-export const MIN_GUARD_RATIO = 1;
-
-export function effectiveGuardRatio(scheduling?: MissionSchedulingRules): number {
-  const configured = scheduling?.guard_ratio;
-  if (configured != null && configured > 0) {
-    return Math.max(MIN_GUARD_RATIO, configured);
-  }
-  return MIN_GUARD_RATIO;
-}
-
-/** Category A — never relaxed during Smart Assignment. */
-export function checkHardEligibility(
-  person: Person,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  issues: Issue[],
-  mates: string[],
-  peopleByName: Record<string, Person>,
-  ignoreSlotId?: string,
-  options?: HardEligibilityOptions,
-): HardEligibilityResult {
-  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
-    return { allowed: false, reason: "canAssignKind" };
-  }
-  if (blockedByIssue(person.name, slot, issues)) {
-    return { allowed: false, reason: "blockedByIssue" };
-  }
-  if (hasHardTimeOverlap(person.name, slot, tracker, ignoreSlotId)) {
-    return { allowed: false, reason: "overlap" };
-  }
-  if (
-    isGuardKind(slot.positionKind) &&
-    options?.scheduling &&
-    !guardOk(
-      person.name,
-      slot,
-      tracker,
-      effectiveGuardRatio(options.scheduling),
-      ignoreSlotId,
-      options.scopeMissionId,
-    )
-  ) {
-    return { allowed: false, reason: "guardSpacing" };
-  }
-  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) {
-    return { allowed: false, reason: "sameRoom" };
-  }
-  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) {
-    return { allowed: false, reason: "sameGender" };
-  }
-  return { allowed: true };
-}
-
-export type SoftConstraintEvaluation = {
-  restPenalty: number;
-  restViolationSevere: number;
-  restViolationSignificant: number;
-  guardSpacingPenalty: number;
-  dutyGuardGapPenalty: number;
-  dailyRestBudgetPenalty: number;
-  projectedDutyBurden: number;
-  totalSoftCost: number;
-};
-
-function guardSpacingRestHours(
-  personName: string,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  ratio: number,
-  ignoreSlotId?: string,
-  scopeMissionId?: string,
-): number | null {
-  if (!isGuardKind(slot.positionKind)) return null;
-  const effectiveRatio = ratio > 0 ? ratio : 1;
-  const slotIv = slotInterval(slot);
-  let worst: number | null = null;
-
-  for (const b of tracker.busy[personName] || []) {
-    if (!isGuardKind(b.positionKind)) continue;
-    if (scopeMissionId && b.missionId !== scopeMissionId) continue;
-    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    if (b.slotId === slot.slotId) continue;
-
-    const blockIv = blockInterval(b);
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
-
-    if (blockIv.endMs <= slotIv.startMs) {
-      const requiredMs = b.durationMinutes * effectiveRatio * 60_000;
-      const gapMs = slotIv.startMs - blockIv.endMs;
-      if (gapMs < requiredMs) {
-        const restHours = gapMs / 3_600_000;
-        worst = worst == null ? restHours : Math.min(worst, restHours);
-      }
-    }
-    if (slotIv.endMs <= blockIv.startMs) {
-      const requiredMs = slot.durationMinutes * effectiveRatio * 60_000;
-      const gapMs = blockIv.startMs - slotIv.endMs;
-      if (gapMs < requiredMs) {
-        const restHours = gapMs / 3_600_000;
-        worst = worst == null ? restHours : Math.min(worst, restHours);
-      }
-    }
-  }
-  return worst;
-}
-
-function dutyGuardGapRestHours(
-  personName: string,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  scheduling: MissionSchedulingRules,
-  ignoreSlotId?: string,
-): number | null {
-  const gapMin =
-    scheduling.duty_guard_gap_minutes ??
-    DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
-    70;
-  const slotIv = slotInterval(slot);
-  let worst: number | null = null;
-
-  for (const b of tracker.busy[personName] || []) {
-    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    if (b.slotId === slot.slotId) continue;
-    const extraGap = needsDutyGuardGap(
-      slot.positionKind,
-      slot.missionType,
-      b.positionKind,
-      b.missionType,
-    )
-      ? gapMin
-      : 0;
-    if (extraGap <= 0) continue;
-
-    const blockIv = blockInterval(b);
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
-
-    if (blockIv.endMs <= slotIv.startMs) {
-      const gapMs = slotIv.startMs - blockIv.endMs;
-      if (gapMs < extraGap * 60_000) {
-        const restHours = gapMs / 3_600_000;
-        worst = worst == null ? restHours : Math.min(worst, restHours);
-      }
-    }
-    if (slotIv.endMs <= blockIv.startMs) {
-      const gapMs = blockIv.startMs - slotIv.endMs;
-      if (gapMs < extraGap * 60_000) {
-        const restHours = gapMs / 3_600_000;
-        worst = worst == null ? restHours : Math.min(worst, restHours);
-      }
-    }
-  }
-  return worst;
-}
-
-function dailyRestBudgetRestHours(
-  personName: string,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  restHoursRequired: number,
-): number | null {
-  if (!slotEatsRest(slot)) return null;
-  const restMin = restHoursRequired * 60;
-  const worked = workedRestMinutes(tracker.busy[personName] || []);
-  const available = 1440 - worked - slot.durationMinutes;
-  if (available >= restMin) return null;
-  return Math.max(0, available / 60);
-}
-
-/** Category B/C soft costs for ranking — never used to reject hard-valid candidates. */
-export function evaluateSoftConstraints(
-  person: Person,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  scheduling: MissionSchedulingRules,
-  rules: FairnessRules,
-  meanPrior: number,
-  seatCount?: number,
-  ignoreSlotId?: string,
-  scopeMissionId?: string,
-): SoftConstraintEvaluation {
-  const blocks = busyToBurdenBlocks(tracker.busy[person.name] || []);
-  const seats = seatCount ?? slot.seatCount;
-  const before = calculatePersonBurden(blocks, rules, scheduling);
-  const newBlock = blockFromFlatSlot(slot, slot.missionType, seats);
-  const after = calculatePersonBurden([...blocks, newBlock], rules, scheduling);
-  const restDelta = Math.max(0, after.restPenalties - before.restPenalties);
-
-  const guardGapHours = guardSpacingRestHours(
-    person.name,
-    slot,
-    tracker,
-    scheduling.guard_ratio,
-    ignoreSlotId,
-    scopeMissionId,
-  );
-  const guardSpacingPenalty =
-    guardGapHours != null ? getRestPenalty(guardGapHours, rules) : 0;
-
-  const dutyGapHours = dutyGuardGapRestHours(
-    person.name,
-    slot,
-    tracker,
-    scheduling,
-    ignoreSlotId,
-  );
-  const dutyGuardGapPenalty =
-    dutyGapHours != null ? getRestPenalty(dutyGapHours, rules) : 0;
-
-  const dailyRestHours = dailyRestBudgetRestHours(
-    person.name,
-    slot,
-    tracker,
-    scheduling.rest_hours,
-  );
-  const dailyRestBudgetPenalty =
-    dailyRestHours != null ? getRestPenalty(dailyRestHours, rules) : 0;
-
-  const projectedDutyBurden = projectedBurdenForSlot(
-    person,
-    slot,
-    tracker,
-    rules,
-    meanPrior,
-    scheduling,
-    seats,
-  );
-
-  const restPenalty =
-    restDelta + guardSpacingPenalty + dutyGuardGapPenalty + dailyRestBudgetPenalty;
-  const worstGapHours = [guardGapHours, dutyGapHours, dailyRestHours]
-    .filter((h): h is number => h != null)
-    .reduce<number | null>((min, h) => (min == null ? h : Math.min(min, h)), null);
-  const restViolationSevere = worstGapHours != null && worstGapHours < 4 ? 1 : 0;
-  const restViolationSignificant = worstGapHours != null && worstGapHours < 6 ? 1 : 0;
-
-  return {
-    restPenalty: Math.round(restPenalty * 100) / 100,
-    restViolationSevere,
-    restViolationSignificant,
-    guardSpacingPenalty,
-    dutyGuardGapPenalty,
-    dailyRestBudgetPenalty,
-    projectedDutyBurden,
-    totalSoftCost: Math.round((restPenalty + projectedDutyBurden) * 100) / 100,
-  };
-}
-
 /** Canonical overlap check for assignment intervals — half-open [start, end). */
 export function assignmentIntervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
   return intervalsOverlap(a, b);
@@ -678,22 +372,26 @@ function overlapsSlot(
   tracker: ScheduleTracker,
   scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
-  options?: { relaxDutyGuardGap?: boolean },
 ): boolean {
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
-    70;
+    90;
   const slotIv = slotInterval(slot);
-  const relaxDutyGuardGap = options?.relaxDutyGuardGap ?? false;
 
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
 
     const blockIv = blockInterval(b);
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
-
+    if (
+      allowsParallelAssignmentOverlap(
+        { positionKind: b.positionKind, missionType: b.missionType },
+        { positionKind: slot.positionKind, missionType: slot.missionType },
+      )
+    ) {
+      continue;
+    }
     const extraGap = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
@@ -703,37 +401,13 @@ function overlapsSlot(
       ? gapMin
       : 0;
 
-    if (extraGap > 0 && !relaxDutyGuardGap) {
-      if (
-        assignmentSpacingConflict(slotIv, blockIv, extraGap, true)
-      ) {
-        return true;
-      }
+    if (extraGap > 0) {
+      if (intervalsConflictWithGap(slotIv, blockIv, extraGap)) return true;
+    } else if (assignmentIntervalsOverlap(slotIv, blockIv)) {
+      return true;
     }
   }
   return false;
-}
-
-/** Overlap, or minimum gap between end of one block and start of the other (not symmetric padding). */
-function assignmentSpacingConflict(
-  slotIv: TimeInterval,
-  blockIv: TimeInterval,
-  gapMin: number,
-  directionalGap: boolean,
-): boolean {
-  if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
-  if (gapMin <= 0) return false;
-  const gapMs = gapMin * 60_000;
-  if (directionalGap) {
-    if (blockIv.endMs <= slotIv.startMs && slotIv.startMs - blockIv.endMs < gapMs) {
-      return true;
-    }
-    if (slotIv.endMs <= blockIv.startMs && blockIv.startMs - slotIv.endMs < gapMs) {
-      return true;
-    }
-    return false;
-  }
-  return intervalsConflictWithGap(slotIv, blockIv, gapMin);
 }
 
 function sameRoomOk(
@@ -922,42 +596,6 @@ export function rosterBurdenSpread(
   return spreadWithOverrides(base, names, overrides ?? new Map());
 }
 
-/** Guard shift counts per person — for even distribution of שמירות. */
-export function rosterGuardCountByName(
-  roster: Person[],
-  tracker: ScheduleTracker,
-): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const person of activeRosterMembers(roster)) {
-    map.set(person.name, (tracker.guardShifts[person.name] || []).length);
-  }
-  return map;
-}
-
-export function rosterGuardCountSpread(
-  roster: Person[],
-  tracker: ScheduleTracker,
-  overrides?: Map<string, number>,
-): number {
-  const base = rosterGuardCountByName(roster, tracker);
-  const names = activeRosterMembers(roster).map((p) => p.name);
-  return spreadWithOverrides(base, names, overrides ?? new Map());
-}
-
-export function spreadAfterGuardGroupAssign(
-  group: Person[],
-  roster: Person[],
-  tracker: ScheduleTracker,
-): number {
-  const base = rosterGuardCountByName(roster, tracker);
-  const names = activeRosterMembers(roster).map((p) => p.name);
-  const overrides = new Map<string, number>();
-  for (const person of group) {
-    overrides.set(person.name, (base.get(person.name) ?? 0) + 1);
-  }
-  return spreadWithOverrides(base, names, overrides);
-}
-
 export function projectedPeriodBurdenForSlot(
   person: Person,
   slot: FlatSlot,
@@ -1062,11 +700,6 @@ export function compareByFairnessThenBurden(
   const spreadA = spreadWithOverrides(base, names, new Map([[a.name, burdenA]]));
   const spreadB = spreadWithOverrides(base, names, new Map([[b.name, burdenB]]));
   if (spreadA !== spreadB) return spreadA - spreadB;
-
-  const maxA = Math.max(...names.map((n) => (n === a.name ? burdenA : base.get(n) ?? 0)));
-  const maxB = Math.max(...names.map((n) => (n === b.name ? burdenB : base.get(n) ?? 0)));
-  if (maxA !== maxB) return maxA - maxB;
-
   const scoreA = projectedBurdenForSlot(
     a,
     slot,
@@ -1085,27 +718,7 @@ export function compareByFairnessThenBurden(
     scheduling,
     seatCount,
   );
-  if (scoreA !== scoreB) return preferHigh ? scoreB - scoreA : scoreA - scoreB;
-
-  if (isGuardKind(slot.positionKind)) {
-    const countBase = rosterGuardCountByName(roster, tracker);
-    const countSpreadA = spreadWithOverrides(
-      countBase,
-      names,
-      new Map([[a.name, (countBase.get(a.name) ?? 0) + 1]]),
-    );
-    const countSpreadB = spreadWithOverrides(
-      countBase,
-      names,
-      new Map([[b.name, (countBase.get(b.name) ?? 0) + 1]]),
-    );
-    if (countSpreadA !== countSpreadB) return countSpreadA - countSpreadB;
-    const ga = countBase.get(a.name) ?? 0;
-    const gb = countBase.get(b.name) ?? 0;
-    if (ga !== gb) return ga - gb;
-  }
-
-  return 0;
+  return preferHigh ? scoreB - scoreA : scoreA - scoreB;
 }
 
 export function spreadAfterGroupAssign(
@@ -1155,24 +768,17 @@ export function explainFitsPersonFailure(
   mates: string[],
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
-  scopeMissionId?: string,
 ): string | null {
-  const hard = checkHardEligibility(
-    person,
-    slot,
-    tracker,
-    issues,
-    mates,
-    peopleByName,
-    ignoreSlotId,
-    { scheduling, scopeMissionId },
-  );
-  if (!hard.allowed) return hard.reason ?? "hard";
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
+  if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
+  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
+  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) return "guardOk";
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
   return null;
 }
 
-/** Hard constraints for Smart Assignment — includes guard spacing (no consecutive guards). */
 export function fitsPerson(
   person: Person,
   slot: FlatSlot,
@@ -1182,55 +788,16 @@ export function fitsPerson(
   mates: string[],
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
-  scopeMissionId?: string,
 ): boolean {
-  return checkHardEligibility(
-    person,
-    slot,
-    tracker,
-    issues,
-    mates,
-    peopleByName,
-    ignoreSlotId,
-    { scheduling, scopeMissionId },
-  ).allowed;
-}
-
-/** Strict check including preferred rest and guard spacing — for validation warnings. */
-export function fitsPersonStrict(
-  person: Person,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  issues: Issue[],
-  scheduling: MissionSchedulingRules,
-  mates: string[],
-  peopleByName: Record<string, Person>,
-  ignoreSlotId?: string,
-  scopeMissionId?: string,
-): boolean {
-  if (
-    !fitsPerson(
-      person,
-      slot,
-      tracker,
-      issues,
-      scheduling,
-      mates,
-      peopleByName,
-      ignoreSlotId,
-      scopeMissionId,
-    )
-  ) {
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
+  if (blockedByIssue(person.name, slot, issues)) return false;
+  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
+  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
     return false;
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return false;
-  if (
-    overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId, {
-      relaxDutyGuardGap: false,
-    })
-  ) {
-    return false;
-  }
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return false;
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return false;
   return true;
 }
 
@@ -1242,6 +809,7 @@ export function placePerson(
   rules: FairnessRules,
   scheduling: MissionSchedulingRules,
   seatCount: number,
+  missionType?: MissionType,
 ) {
   const block: BusyBlock = {
     cyclicStart: slot.cyclicStart,
@@ -1250,7 +818,7 @@ export function placePerson(
     durationMinutes: slot.durationMinutes,
     eatsRest: slotEatsRest(slot),
     positionKind: slot.positionKind,
-    missionType: slot.missionType,
+    missionType: missionType ?? slot.missionType,
     seatCount,
     startTime: slot.startTime,
     endTime: slot.endTime,
@@ -1332,8 +900,6 @@ export function repairGuardAssignmentGaps(input: {
             input.scheduling,
             mates,
             peopleByName,
-            undefined,
-            input.mission.id,
           ),
         );
         const chosen = pickBestCandidate(
@@ -1362,6 +928,7 @@ export function repairGuardAssignmentGaps(input: {
             input.rules,
             input.scheduling,
             slot.seatCount,
+            input.mission.mission_type,
           );
           filled += 1;
           progress = true;
@@ -1394,8 +961,6 @@ export function repairGuardAssignmentGaps(input: {
               input.scheduling,
               mates,
               peopleByName,
-              undefined,
-              input.mission.id,
             );
             if (!donorFitsTarget) {
               placePerson(
@@ -1406,6 +971,7 @@ export function repairGuardAssignmentGaps(input: {
                 input.rules,
                 input.scheduling,
                 donorSlot.seatCount,
+                input.mission.mission_type,
               );
               continue;
             }
@@ -1424,8 +990,6 @@ export function repairGuardAssignmentGaps(input: {
                     input.scheduling,
                     donorMates,
                     peopleByName,
-                    undefined,
-                    input.mission.id,
                   ),
               ),
               donorSlot,
@@ -1444,6 +1008,7 @@ export function repairGuardAssignmentGaps(input: {
                 input.rules,
                 input.scheduling,
                 donorSlot.seatCount,
+                input.mission.mission_type,
               );
               continue;
             }
@@ -1458,6 +1023,7 @@ export function repairGuardAssignmentGaps(input: {
               input.rules,
               input.scheduling,
               donorSlot.seatCount,
+              input.mission.mission_type,
             );
             placePerson(
               donorName,
@@ -1467,6 +1033,7 @@ export function repairGuardAssignmentGaps(input: {
               input.rules,
               input.scheduling,
               slot.seatCount,
+              input.mission.mission_type,
             );
             filled += 1;
             progress = true;
@@ -1480,114 +1047,6 @@ export function repairGuardAssignmentGaps(input: {
   }
 
   return { assignments, filled };
-}
-
-/** מעביר שמירות ממי שכבר קיבל 2+ למי שעדיין בלי — כשאפשר לפי כללים. */
-export function rebalanceGuardAssignmentCounts(input: {
-  mission: MissionDay;
-  assignments: Record<string, string[]>;
-  people: Person[];
-  tracker: ScheduleTracker;
-  issues: Issue[];
-  scheduling: MissionSchedulingRules;
-  rules: FairnessRules;
-}): { assignments: Record<string, string[]>; moved: number } {
-  const assignments = { ...input.assignments };
-  for (const key of Object.keys(assignments)) {
-    assignments[key] = [...assignments[key]];
-  }
-  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
-  let moved = 0;
-
-  const guardCount = (name: string) => (input.tracker.guardShifts[name] || []).length;
-
-  const slots = flattenMissionSlots(input.mission).filter(
-    (s) => s.positionKind === "guard" && s.seatCount > 0,
-  );
-
-  let progress = true;
-  let guard = 0;
-  while (progress && guard < 120) {
-    progress = false;
-    guard += 1;
-
-    const counts = new Map(input.people.map((p) => [p.name, guardCount(p.name)]));
-    const values = [...counts.values()];
-    const maxCount = values.length ? Math.max(...values) : 0;
-    const minCount = values.length ? Math.min(...values) : 0;
-    if (maxCount - minCount <= 1) break;
-
-    const overloaded = input.people
-      .filter((p) => (counts.get(p.name) ?? 0) >= maxCount && maxCount >= 2)
-      .sort((a, b) => (counts.get(a.name) ?? 0) - (counts.get(b.name) ?? 0));
-    const underloaded = input.people
-      .filter((p) => (counts.get(p.name) ?? 0) <= minCount)
-      .sort((a, b) => (counts.get(a.name) ?? 0) - (counts.get(b.name) ?? 0));
-
-    for (const slot of slots) {
-      const seats = assignments[slot.slotId] || [];
-      for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
-        const current = seats[seatIndex];
-        if (!current || !overloaded.some((p) => p.name === current)) continue;
-
-        const mates = seats.filter((n, idx) => n && idx !== seatIndex);
-        for (const candidate of underloaded) {
-          if (candidate.name === current || mates.includes(candidate.name)) continue;
-
-          unplacePerson(
-            current,
-            slot,
-            input.mission.id,
-            input.tracker,
-            input.rules,
-            input.scheduling,
-          );
-          const fits = fitsPerson(
-            candidate,
-            slot,
-            input.tracker,
-            input.issues,
-            input.scheduling,
-            mates,
-            peopleByName,
-            undefined,
-            input.mission.id,
-          );
-          if (!fits) {
-            placePerson(
-              current,
-              slot,
-              input.mission.id,
-              input.tracker,
-              input.rules,
-              input.scheduling,
-              slot.seatCount,
-            );
-            continue;
-          }
-
-          seats[seatIndex] = candidate.name;
-          placePerson(
-            candidate.name,
-            slot,
-            input.mission.id,
-            input.tracker,
-            input.rules,
-            input.scheduling,
-            slot.seatCount,
-          );
-          assignments[slot.slotId] = seats;
-          moved += 1;
-          progress = true;
-          break;
-        }
-        if (progress) break;
-      }
-      if (progress) break;
-    }
-  }
-
-  return { assignments, moved };
 }
 
 /** אזהרות על הפרות כללים — לשיבוץ כפוי עם הודעות */
@@ -1622,14 +1081,9 @@ export function describeAssignmentWarnings(
   }
   if (
     isGuardKind(slot.positionKind) &&
-    !guardOk(
-      person.name,
-      slot,
-      tracker,
-      effectiveGuardRatio(scheduling),
-    )
+    !guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)
   ) {
-    msgs.push(`${person.name}: שמירות רצופות / יחס שמירות לא מתקיים`);
+    msgs.push(`${person.name}: יחס שמירות (${scheduling.guard_ratio}:1) לא מתקיים`);
   }
   const overlapMsg = overlapAssignmentWarning(
     person.name,
@@ -1656,7 +1110,7 @@ function overlapAssignmentWarning(
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
-    70;
+    90;
   const slotIv = slotInterval(slot);
 
   for (const b of tracker.busy[personName] || []) {
@@ -1673,7 +1127,7 @@ function overlapAssignmentWarning(
 
     const conflicts =
       extraGap > 0
-        ? assignmentSpacingConflict(slotIv, blockIv, extraGap, true)
+        ? intervalsConflictWithGap(slotIv, blockIv, extraGap)
         : assignmentIntervalsOverlap(slotIv, blockIv);
 
     if (conflicts) {
@@ -1691,76 +1145,7 @@ function overlapAssignmentWarning(
   return null;
 }
 
-/** Minimum guard spacing ratio when evaluating soft guard gaps. */
-export type AssignmentRelaxationLevel = 0 | 1 | 2 | 3 | 4;
-
-function personFitsAtRelaxationLevel(
-  person: Person,
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  issues: Issue[],
-  scheduling: MissionSchedulingRules,
-  mates: string[],
-  peopleByName: Record<string, Person>,
-  level: AssignmentRelaxationLevel,
-  scopeMissionId?: string,
-): boolean {
-  if (level === 0) return false;
-  return checkHardEligibility(
-    person,
-    slot,
-    tracker,
-    issues,
-    mates,
-    peopleByName,
-    undefined,
-    { scheduling, scopeMissionId },
-  ).allowed;
-}
-
-export function pickCandidateAtRelaxationLevel(
-  people: Person[],
-  slot: FlatSlot,
-  tracker: ScheduleTracker,
-  issues: Issue[],
-  scheduling: MissionSchedulingRules,
-  mates: string[],
-  peopleByName: Record<string, Person>,
-  rules: FairnessRules,
-  meanPrior: number,
-  exclude: Set<string>,
-  level: AssignmentRelaxationLevel,
-  pickOptions?: {
-    dutyOfficerAlreadyAssigned?: string;
-    roster?: Person[];
-    scopeMissionId?: string;
-  },
-): Person | null {
-  if (level === 0) return null;
-  const scopeMissionId = pickOptions?.scopeMissionId;
-  const candidates = people.filter(
-    (p) =>
-      !exclude.has(p.name) &&
-      !mates.includes(p.name) &&
-      personFitsAtRelaxationLevel(
-        p,
-        slot,
-        tracker,
-        issues,
-        scheduling,
-        mates,
-        peopleByName,
-        level,
-        scopeMissionId,
-      ),
-  );
-  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
-    scheduling,
-    roster: pickOptions?.roster ?? people,
-    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
-  });
-}
-/** Hard-valid candidates ranked by soft rest cost, then fairness. Never relaxes overlap or eligibility. */
+/** מועמדים כשאין מי שעומד בכל הכללים — עדיין אוסר חפיפות */
 export function pickRelaxedCandidate(
   people: Person[],
   slot: FlatSlot,
@@ -1772,81 +1157,26 @@ export function pickRelaxedCandidate(
   rules: FairnessRules,
   meanPrior: number,
   exclude: Set<string>,
-  pickOptions?: {
-    dutyOfficerAlreadyAssigned?: string;
-    roster?: Person[];
-    scopeMissionId?: string;
-  },
+  pickOptions?: { dutyOfficerAlreadyAssigned?: string; roster?: Person[] },
 ): Person | null {
-  const scopeMissionId = pickOptions?.scopeMissionId;
-  const candidates = people
-    .filter(
-      (p) =>
-        !exclude.has(p.name) &&
-        !mates.includes(p.name) &&
-        checkHardEligibility(
-          p,
-          slot,
-          tracker,
-          issues,
-          mates,
-          peopleByName,
-          undefined,
-          { scheduling, scopeMissionId },
-        ).allowed,
-    )
-    .sort((a, b) => {
-      const softA = evaluateSoftConstraints(
-        a,
-        slot,
-        tracker,
-        scheduling,
-        rules,
-        meanPrior,
-        slot.seatCount,
-        undefined,
-        scopeMissionId,
-      );
-      const softB = evaluateSoftConstraints(
-        b,
-        slot,
-        tracker,
-        scheduling,
-        rules,
-        meanPrior,
-        slot.seatCount,
-        undefined,
-        scopeMissionId,
-      );
-      if (softA.restViolationSevere !== softB.restViolationSevere) {
-        return softA.restViolationSevere - softB.restViolationSevere;
-      }
-      if (softA.restViolationSignificant !== softB.restViolationSignificant) {
-        return softA.restViolationSignificant - softB.restViolationSignificant;
-      }
-      if (softA.restPenalty !== softB.restPenalty) return softA.restPenalty - softB.restPenalty;
-      const fairnessCmp = compareByFairnessThenBurden(
-        a,
-        b,
-        slot,
-        pickOptions?.roster ?? people,
-        tracker,
-        rules,
-        meanPrior,
-        scheduling,
-        slot.seatCount,
-      );
-      if (fairnessCmp !== 0) return fairnessCmp;
-      return a.name.localeCompare(b.name, "he");
-    });
-  return candidates[0] ?? null;
+  const candidates = people.filter((p) => {
+    if (exclude.has(p.name) || mates.includes(p.name)) return false;
+    if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
+    if (blockedByIssue(p.name, slot, issues)) return false;
+    if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
+    if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
+    if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
+    return true;
+  });
+  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
+    scheduling,
+    roster: pickOptions?.roster ?? people,
+    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
+  });
 }
 
-/** @deprecated Use fillUsingSoftConstraintViolations */
-export const forceFillEmptySeats = fillUsingSoftConstraintViolations;
-
-/** Fills empty seats using hard-valid candidates only; records soft-rule warnings. */
-export function fillUsingSoftConstraintViolations(input: {
+/** ממלא משבצות ריקות — ללא הפרת חפיפה */
+export function forceFillEmptySeats(input: {
   mission: MissionDay;
   assignments: Record<string, string[]>;
   people: Person[];
@@ -1884,8 +1214,6 @@ export function fillUsingSoftConstraintViolations(input: {
             input.scheduling,
             mates,
             peopleByName,
-            undefined,
-            input.mission.id,
           ),
       );
       let chosen =
@@ -1918,7 +1246,6 @@ export function fillUsingSoftConstraintViolations(input: {
           inSlot,
           {
             roster: input.people,
-            scopeMissionId: input.mission.id,
             dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
               input.mission,
               slot,
@@ -1928,13 +1255,13 @@ export function fillUsingSoftConstraintViolations(input: {
         );
       if (!chosen) {
         warnings.push(
-          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי (מגבלות קשיחות)`,
+          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי`,
         );
         continue;
       }
 
       if (
-        !fitsPersonStrict(
+        !fitsPerson(
           chosen,
           slot,
           input.tracker,
@@ -1942,8 +1269,6 @@ export function fillUsingSoftConstraintViolations(input: {
           input.scheduling,
           mates,
           peopleByName,
-          undefined,
-          input.mission.id,
         )
       ) {
         for (const msg of describeAssignmentWarnings(
@@ -1969,6 +1294,7 @@ export function fillUsingSoftConstraintViolations(input: {
         input.rules,
         input.scheduling,
         slot.seatCount,
+        input.mission.mission_type,
       );
       filled += 1;
     }
@@ -2000,6 +1326,7 @@ export function buildTrackerFromMissions(
           rules,
           scheduling,
           slot.seatCount,
+          mission.mission_type,
         );
       }
     }
@@ -2094,6 +1421,7 @@ export function assignStandbyRoom(
   rules: FairnessRules,
   meanPrior: number,
   missionId: string,
+  missionType: MissionType = slot.missionType,
 ): string[] {
   const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
   const fixed = taken.filter(Boolean);
@@ -2168,6 +1496,7 @@ export function assignStandbyRoom(
       rules,
       scheduling,
       slot.seatCount,
+      missionType,
     );
   }
   return out;
@@ -2186,6 +1515,7 @@ export function assignKitchenShift(input: {
   rules: FairnessRules;
   meanPrior: number;
   missionId: string;
+  missionType: MissionType;
 }): { names: string[]; usedRestSquad: boolean; squadCounts: Record<number, number> } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const kitchen = input.scheduling.kitchen;
@@ -2249,6 +1579,7 @@ export function assignKitchenShift(input: {
         input.rules,
         input.scheduling,
         input.slot.seatCount,
+        input.missionType,
       );
       added += 1;
     }
@@ -2306,25 +1637,16 @@ function classifyCandidateRejection(
   scheduling: MissionSchedulingRules,
   mates: string[],
   peopleByName: Record<string, Person>,
-  scopeMissionId?: string,
 ): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
-  const hard = checkHardEligibility(
-    person,
-    slot,
-    tracker,
-    issues,
-    mates,
-    peopleByName,
-    undefined,
-    { scheduling, scopeMissionId },
-  );
-  if (!hard.allowed) {
-    if (hard.reason === "blockedByIssue") return "rejectedIssue";
-    if (hard.reason === "canAssignKind") return "rejectedIneligible";
-    if (hard.reason === "overlap") return "rejectedOverlap";
-    if (hard.reason === "guardSpacing") return "rejectedGuardRatio";
-    return "rejectedOther";
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "rejectedIneligible";
+  if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
+  if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
+  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
+    return "rejectedGuardRatio";
   }
+  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "rejectedRest";
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "rejectedOther";
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "rejectedOther";
   return null;
 }
 
@@ -2358,6 +1680,7 @@ export function assignBaseWorkShift(input: {
   rules: FairnessRules;
   meanPrior: number;
   missionId: string;
+  missionType: MissionType;
   taken: string[];
 }): {
   names: string[];
@@ -2401,7 +1724,6 @@ export function assignBaseWorkShift(input: {
       input.scheduling,
       mates,
       peopleByName,
-      input.missionId,
     );
     if (reason) diagnostics[reason] += 1;
   };
@@ -2415,7 +1737,6 @@ export function assignBaseWorkShift(input: {
       input.scheduling,
       mates,
       peopleByName,
-      input.missionId,
     ) === null;
 
   const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
@@ -2444,6 +1765,7 @@ export function assignBaseWorkShift(input: {
         input.rules,
         input.scheduling,
         input.slot.seatCount,
+        input.missionType,
       );
     }
     diagnostics.assigned = names.length;
@@ -2494,6 +1816,7 @@ export function assignBaseWorkShift(input: {
         input.rules,
         input.scheduling,
         input.slot.seatCount,
+        input.missionType,
       );
     }
   }
@@ -2518,6 +1841,7 @@ export function assignBaseWorkShift(input: {
         input.rules,
         input.scheduling,
         input.slot.seatCount,
+        input.missionType,
       );
     }
   }
@@ -2535,7 +1859,23 @@ export type SlotAssignmentCheck =
   | { ok: true }
   | { ok: false; reason: string };
 
-/** Full hard-rule check for assigning `person` to a seat (optionally replacing someone). */
+function assignmentFailureMessage(
+  personName: string,
+  slot: FlatSlot,
+  code: string | null,
+): string | null {
+  if (!code) return null;
+  if (code === "canAssignKind") return `${personName}: לא זכאי ל«${slot.positionName}»`;
+  if (code === "blockedByIssue") return `${personName}: חסימה מאושרת`;
+  if (code === "overlapsSlot") return `${personName}: חפיפה עם משמרת אחרת`;
+  if (code === "sameRoom") return `${personName}: לא אותו חדר`;
+  if (code === "sameGender") return `${personName}: לא אותו מגדר`;
+  if (code === "restOk") return `${personName}: מנוחה לא מספקת`;
+  if (code === "guardOk") return `${personName}: מרווח שמירות לא מתקיים`;
+  return `${personName}: לא עומד בכללים`;
+}
+
+/** Full rule check for assigning `person` to a seat (optionally replacing someone). */
 export function canAssignPersonToSlot(input: {
   missions: MissionDay[];
   rules: FairnessRules;
@@ -2545,7 +1885,6 @@ export function canAssignPersonToSlot(input: {
   person: Person;
   issues: Issue[];
   peopleByName: Record<string, Person>;
-  /** Occupant to remove from this seat before checking (defaults to current seat holder). */
   replaceName?: string | null;
 }): SlotAssignmentCheck {
   const mission = input.missions.find((m) => m.id === input.missionId);
@@ -2586,8 +1925,6 @@ export function canAssignPersonToSlot(input: {
       scheduling,
       mates,
       input.peopleByName,
-      undefined,
-      input.missionId,
     )
   ) {
     const why = explainFitsPersonFailure(
@@ -2598,8 +1935,6 @@ export function canAssignPersonToSlot(input: {
       scheduling,
       mates,
       input.peopleByName,
-      undefined,
-      input.missionId,
     );
     return {
       ok: false,
@@ -2609,23 +1944,6 @@ export function canAssignPersonToSlot(input: {
     };
   }
   return { ok: true };
-}
-
-function assignmentFailureMessage(
-  personName: string,
-  slot: FlatSlot,
-  code: string | null,
-): string | null {
-  if (!code) return null;
-  if (code === "canAssignKind") return `${personName}: לא זכאי ל«${slot.positionName}»`;
-  if (code === "blockedByIssue") return `${personName}: חסימה מאושרת`;
-  if (code === "overlap") return `${personName}: חפיפה עם משמרת אחרת`;
-  if (code === "guardSpacing") return `${personName}: שמירות רצופות / מרווח שמירות`;
-  if (code === "sameRoom") return `${personName}: לא אותו חדר`;
-  if (code === "sameGender") return `${personName}: לא אותו מגדר`;
-  if (code === "restOk") return `${personName}: מנוחה לא מספקת`;
-  if (code === "guardOk") return `${personName}: מרווח שמירות לא מתקיים`;
-  return `${personName}: לא עומד בכללים`;
 }
 
 /** Validate a two-person swap before applying. */
@@ -2697,8 +2015,6 @@ export function canSwapReplacementAssignments(input: {
       scheduling,
       targetMates,
       input.peopleByName,
-      undefined,
-      input.missionId,
     )
   ) {
     const why = explainFitsPersonFailure(
@@ -2709,8 +2025,6 @@ export function canSwapReplacementAssignments(input: {
       scheduling,
       targetMates,
       input.peopleByName,
-      undefined,
-      input.missionId,
     );
     return {
       ok: false,
@@ -2729,8 +2043,6 @@ export function canSwapReplacementAssignments(input: {
       swapScheduling,
       swapMates,
       input.peopleByName,
-      undefined,
-      input.swapMissionId,
     )
   ) {
     const why = explainFitsPersonFailure(
@@ -2741,8 +2053,6 @@ export function canSwapReplacementAssignments(input: {
       swapScheduling,
       swapMates,
       input.peopleByName,
-      undefined,
-      input.swapMissionId,
     );
     return {
       ok: false,
@@ -2779,119 +2089,87 @@ export function findReplacements(input: {
     input.people.reduce((s, p) => s + (p.prior_score || 0), 0) /
     (input.people.length || 1);
 
+  const tracker = buildTrackerFromMissions(input.missions, input.rules);
+  const removeBlocks = (tracker.busy[input.removeName] || []).filter(
+    (b) => !(b.missionId === input.missionId && b.slotId === input.slotId),
+  );
+  tracker.busy[input.removeName] = removeBlocks;
+  if (isGuardKind(target.positionKind)) {
+    tracker.guardShifts[input.removeName] = (
+      tracker.guardShifts[input.removeName] || []
+    ).slice(0, -1);
+  }
+
   const mates = (mission.assignments[input.slotId] || []).filter(
     (n, i) => n && i !== input.seatIndex,
-  );
-  const roster = activeRosterMembers(input.people);
-  const trackerForRank = buildTrackerFromMissions(input.missions, input.rules);
-  unplacePerson(
-    input.removeName,
-    target,
-    input.missionId,
-    trackerForRank,
-    input.rules,
-    scheduling,
   );
 
   const options: ReplacementOption[] = [];
 
   if (input.mode === "replace") {
-    for (const p of roster) {
+    for (const p of input.people) {
       if (p.name === input.removeName) continue;
       if ((mission.assignments[input.slotId] || []).includes(p.name)) continue;
-
-      const check = canAssignPersonToSlot({
-        missions: input.missions,
-        rules: input.rules,
-        missionId: input.missionId,
-        slot: target,
-        seatIndex: input.seatIndex,
-        person: p,
-        issues: input.issues,
-        peopleByName,
-        replaceName: input.removeName,
-      });
-      if (!check.ok) continue;
-
-      const cost = projectedBurdenForSlot(
-        p,
-        target,
-        trackerForRank,
-        input.rules,
-        meanPrior,
-        scheduling,
-        target.seatCount,
-      );
+      if (
+        !fitsPerson(p, target, tracker, input.issues, scheduling, mates, peopleByName)
+      ) {
+        continue;
+      }
+      const cost = workScore(p, tracker, input.rules, meanPrior);
       options.push({
         type: "direct",
         personName: p.name,
         cost,
-        label: `${p.name} — עומס אחרי שיבוץ ${cost.toFixed(1)} נק׳`,
+        label: `${p.name} — עומס נמוך (${cost.toFixed(1)} נק׳)`,
       });
     }
-    options.sort((a, b) => {
-      const cmp = compareByFairnessThenBurden(
-        peopleByName[a.personName]!,
-        peopleByName[b.personName]!,
-        target,
-        roster,
-        trackerForRank,
-        input.rules,
-        meanPrior,
-        scheduling,
-        target.seatCount,
-      );
-      return cmp || a.cost - b.cost || a.personName.localeCompare(b.personName, "he");
-    });
+    options.sort((a, b) => a.cost - b.cost);
     return options.slice(0, 8);
   }
 
-  const removePerson = peopleByName[input.removeName];
-  if (!removePerson) return [];
-
-  for (const p of roster) {
+  for (const p of input.people) {
     if (p.name === input.removeName) continue;
     for (const otherMission of input.missions) {
-      const otherScheduling = normalizeSchedulingRules(otherMission.scheduling_rules);
       for (const otherSlot of flattenMissionSlots(otherMission)) {
         const arr = otherMission.assignments[otherSlot.slotId] || [];
         const oi = arr.indexOf(p.name);
         if (oi < 0) continue;
         if (arr.includes(input.removeName)) continue;
 
-        const check = canSwapReplacementAssignments({
-          missions: input.missions,
-          rules: input.rules,
-          missionId: input.missionId,
-          slot: target,
-          seatIndex: input.seatIndex,
-          removeName: input.removeName,
-          swapMissionId: otherMission.id,
-          swapSlot: otherSlot,
-          swapSeatIndex: oi,
-          swapPerson: p,
-          issues: input.issues,
-          peopleByName,
-        });
-        if (!check.ok) continue;
+        const perRemove = buildTrackerFromMissions(input.missions, input.rules);
+        const perPerson = peopleByName[p.name];
+        const perRemovePerson = peopleByName[input.removeName];
+        if (!perPerson || !perRemovePerson) continue;
 
-        const probe = buildTrackerFromMissions(input.missions, input.rules);
-        unplacePerson(
-          input.removeName,
-          target,
-          input.missionId,
-          probe,
-          input.rules,
-          scheduling,
-        );
-        unplacePerson(
-          p.name,
-          otherSlot,
-          otherMission.id,
-          probe,
-          input.rules,
-          otherScheduling,
-        );
+        const matesOther = arr.filter((_, i) => i !== oi);
+        if (
+          !fitsPerson(
+            perRemovePerson,
+            otherSlot,
+            perRemove,
+            input.issues,
+            normalizeSchedulingRules(otherMission.scheduling_rules),
+            matesOther,
+            peopleByName,
+            otherSlot.slotId,
+          )
+        ) {
+          continue;
+        }
+        if (
+          !fitsPerson(
+            perPerson,
+            target,
+            perRemove,
+            input.issues,
+            scheduling,
+            mates,
+            peopleByName,
+            input.slotId,
+          )
+        ) {
+          continue;
+        }
 
         const durDiff =
           Math.abs(otherSlot.durationMinutes - target.durationMinutes) / 60;
@@ -2900,16 +2178,7 @@ export function findReplacements(input: {
         const cost =
           durDiff +
           kindPenalty +
-          projectedBurdenForSlot(
-            p,
-            target,
-            probe,
-            input.rules,
-            meanPrior,
-            scheduling,
-            target.seatCount,
-          ) /
-            100;
+          workScore(perPerson, perRemove, input.rules, meanPrior) / 100;
 
         options.push({
           type: "swap",
@@ -3049,6 +2318,7 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
         rules,
         scheduling,
         slot.seatCount,
+        mission.mission_type,
       );
     }
   }
@@ -3128,6 +2398,7 @@ export function findAssignmentConflicts(
         rules,
         scheduling,
         slot.seatCount,
+        mission.mission_type,
       );
     }
   }
@@ -3225,28 +2496,22 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
 
   for (const mission of input.missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-    const missionStartMs = Date.parse(mission.starts_at);
-    const missionEndMs = Date.parse(mission.ends_at);
-    const kitchenBounds =
-      mission.mission_type === "kitchen"
-        ? kitchenMissionInterval(mission.mission_date)
-        : null;
+    let missionStartMs = Date.parse(mission.starts_at);
+    let missionEndMs = Date.parse(mission.ends_at);
+    if (mission.mission_type === "kitchen") {
+      const kitchenIv = kitchenMissionInterval(mission.mission_date);
+      if (kitchenIv) {
+        missionStartMs = kitchenIv.startMs;
+        missionEndMs = kitchenIv.endMs;
+      }
+    }
 
     for (const slot of flattenMissionSlots(mission)) {
       if (slot.startAtMs >= slot.endAtMs) {
         messages.push(`${slot.positionName} ${slot.timeLabel}: start >= end`);
       }
-      if (kitchenBounds) {
-        if (
-          slot.startAtMs < kitchenBounds.startMs ||
-          slot.endAtMs > kitchenBounds.endMs
-        ) {
-          messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
-        }
-      } else if (slot.missionType !== "base_work") {
-        if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
-          messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
-        }
+      if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
+        messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
       }
 
       const seats = mission.assignments[slot.slotId] || [];
@@ -3276,11 +2541,11 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
         }
         if (
           isGuardKind(slot.positionKind) &&
-          !guardOk(name, slot, tracker, scheduling.guard_ratio)
+          !guardOk(name, slot, tracker.guardShifts, scheduling.guard_ratio)
         ) {
           messages.push(`${name}: guard ratio violated at ${slot.timeLabel}`);
         }
-        placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount);
+        placePerson(name, slot, mission.id, tracker, rules, scheduling, slot.seatCount, mission.mission_type);
       }
     }
   }

@@ -4,14 +4,11 @@ import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
   findAssignmentConflicts,
-  rebalanceGuardAssignmentCounts,
   repairGuardAssignmentGaps,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
-  fillUsingSoftConstraintViolations,
 } from "@/lib/scheduling-engine";
-import { improveScheduleBySwaps } from "@/lib/swap-improvement";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   applyAssignmentsOnly,
@@ -157,60 +154,7 @@ async function smartAssignScope(input: {
       rules: input.rules,
       meanPrior,
     });
-    const { assignments: balanced } = rebalanceGuardAssignmentCounts({
-      mission: { ...mission, assignments: repaired },
-      assignments: repaired,
-      people: input.people,
-      tracker,
-      issues: input.issues,
-      scheduling,
-      rules: input.rules,
-    });
-    const { assignments: filled, warnings: fillWarnings } = fillUsingSoftConstraintViolations({
-      mission: { ...mission, assignments: balanced },
-      assignments: balanced,
-      people: input.people,
-      tracker,
-      issues: input.issues,
-      scheduling,
-      rules: input.rules,
-      meanPrior,
-    });
-    output.assignmentsByMission.set(mission.id, filled);
-    if (fillWarnings.length) {
-      output.warnings.push(...fillWarnings);
-    }
-  }
-
-  const preSwapMissions = input.scopeMissions.map((mission) => ({
-    ...mission,
-    assignments: output.assignmentsByMission.get(mission.id) ?? mission.assignments,
-  }));
-  const swapImprovement = improveScheduleBySwaps({
-    missions: preSwapMissions,
-    people: input.people,
-    issues: input.issues,
-    rules: input.rules,
-    meanPrior,
-    crossDayMissions: input.allMissions.filter(
-      (m) => !input.scopeMissions.some((s) => s.id === m.id),
-    ),
-  });
-  for (const mission of swapImprovement.missions) {
-    output.assignmentsByMission.set(mission.id, mission.assignments);
-  }
-  if (swapImprovement.swapsApplied > 0) {
-    output.warnings.push(
-      `שיפור בהחלפות: ${swapImprovement.swapsApplied} החלפות שיפרו מנוחה/צדק.`,
-    );
-    for (const line of swapImprovement.messages.slice(0, 6)) {
-      output.warnings.push(`  ↳ ${line}`);
-    }
-    if (swapImprovement.messages.length > 6) {
-      output.warnings.push(
-        `  ↳ …ועוד ${swapImprovement.messages.length - 6} החלפות`,
-      );
-    }
+    output.assignmentsByMission.set(mission.id, repaired);
   }
 
   const draftMissions = input.scopeMissions.map((mission) => ({
