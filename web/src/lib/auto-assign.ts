@@ -11,6 +11,7 @@ import {
   buildTrackerFromMissions,
   fillUsingSoftConstraintViolations,
 } from "@/lib/scheduling-engine";
+import { improveScheduleBySwaps } from "@/lib/swap-improvement";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   applyAssignmentsOnly,
@@ -178,6 +179,37 @@ async function smartAssignScope(input: {
     output.assignmentsByMission.set(mission.id, filled);
     if (fillWarnings.length) {
       output.warnings.push(...fillWarnings);
+    }
+  }
+
+  const preSwapMissions = input.scopeMissions.map((mission) => ({
+    ...mission,
+    assignments: output.assignmentsByMission.get(mission.id) ?? mission.assignments,
+  }));
+  const swapImprovement = improveScheduleBySwaps({
+    missions: preSwapMissions,
+    people: input.people,
+    issues: input.issues,
+    rules: input.rules,
+    meanPrior,
+    crossDayMissions: input.allMissions.filter(
+      (m) => !input.scopeMissions.some((s) => s.id === m.id),
+    ),
+  });
+  for (const mission of swapImprovement.missions) {
+    output.assignmentsByMission.set(mission.id, mission.assignments);
+  }
+  if (swapImprovement.swapsApplied > 0) {
+    output.warnings.push(
+      `שיפור בהחלפות: ${swapImprovement.swapsApplied} החלפות שיפרו מנוחה/צדק.`,
+    );
+    for (const line of swapImprovement.messages.slice(0, 6)) {
+      output.warnings.push(`  ↳ ${line}`);
+    }
+    if (swapImprovement.messages.length > 6) {
+      output.warnings.push(
+        `  ↳ …ועוד ${swapImprovement.messages.length - 6} החלפות`,
+      );
     }
   }
 
