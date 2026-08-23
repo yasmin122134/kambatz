@@ -10,6 +10,7 @@ import {
   findAssignmentConflicts,
   forceFillEmptySeats,
   repairGuardAssignmentGaps,
+  stripGuardSpacingViolations,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
@@ -194,7 +195,20 @@ async function smartAssignScope(input: {
           if (!output.warnings.includes(w)) output.warnings.push(w);
         }
       }
-      if (roundFilled === 0) break;
+
+      const { assignments: stripped, removed: guardStripped } = stripGuardSpacingViolations({
+        mission,
+        assignments: currentAssignments,
+        scheduling,
+        rules: input.rules,
+      });
+      currentAssignments = stripped;
+      if (guardStripped > 0) {
+        const msg = `הוסרו ${guardStripped} שיבוצי שמירה רצופים/צמודים (יחס ${scheduling.guard_ratio ?? 2}:1)`;
+        if (!output.warnings.includes(msg)) output.warnings.push(msg);
+      }
+
+      if (roundFilled === 0 && guardStripped === 0) break;
     }
 
     output.assignmentsByMission.set(mission.id, currentAssignments);

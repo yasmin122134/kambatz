@@ -151,7 +151,7 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
   }
   if (src.guard_ratio != null) {
     const v = +src.guard_ratio;
-    if (!Number.isNaN(v) && v >= 0) out.guard_ratio = v;
+    if (!Number.isNaN(v) && v > 0) out.guard_ratio = v;
   }
   if (src.board_start && /^\d{1,2}:\d{2}$/.test(src.board_start)) {
     out.board_start = src.board_start;

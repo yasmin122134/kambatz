@@ -359,25 +359,84 @@ function workedRestMinutes(blocks: BusyBlock[]): number {
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 }
 
+function effectiveGuardRatio(scheduling: MissionSchedulingRules): number {
+  const ratio =
+    scheduling.guard_ratio ?? DEFAULT_MISSION_SCHEDULING_RULES.guard_ratio ?? 2;
+  return ratio > 0 ? ratio : 2;
+}
+
+/** מרווח שמירות לפי זמן אמת (ms) — לא ציר מחזורי שיכול לזוז עם תחילת לוח עב״ס. */
 function guardOk(
   personName: string,
   slot: FlatSlot,
-  guardShifts: Record<string, { start: number; duration: number }[]>,
+  tracker: ScheduleTracker,
   ratio: number,
+  ignoreSlotId?: string,
 ): boolean {
   if (!ratio || !isGuardKind(slot.positionKind)) return true;
-  for (const g of guardShifts[personName] || []) {
-    if (cyclicGap(g.start, g.duration, slot.cyclicStart) < g.duration * ratio) {
-      return false;
-    }
-    if (
-      cyclicGap(slot.cyclicStart, slot.durationMinutes, g.start) <
-      slot.durationMinutes * ratio
-    ) {
+
+  for (const block of tracker.busy[personName] || []) {
+    if (ignoreSlotId && block.slotId === ignoreSlotId) continue;
+    if (!isGuardKind(block.positionKind)) continue;
+    if (block.slotId === slot.slotId) continue;
+
+    if (slot.startAtMs >= block.endAtMs) {
+      const gapMin = (slot.startAtMs - block.endAtMs) / 60_000;
+      if (gapMin < block.durationMinutes * ratio) return false;
+    } else if (block.startAtMs >= slot.endAtMs) {
+      const gapMin = (block.startAtMs - slot.endAtMs) / 60_000;
+      if (gapMin < slot.durationMinutes * ratio) return false;
+    } else {
       return false;
     }
   }
   return true;
+}
+
+/** מסיר שיבוצי שמירה שמפרים יחס 2:1 — לניקוי אחרי מילוי כפוי. */
+export function stripGuardSpacingViolations(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+}): { assignments: Record<string, string[]>; removed: number } {
+  const ratio = effectiveGuardRatio(input.scheduling);
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+
+  const slots = flattenMissionSlots(input.mission)
+    .filter((s) => isGuardKind(s.positionKind) && s.seatCount > 0)
+    .sort((a, b) => a.sortKey - b.sortKey || a.slotId.localeCompare(b.slotId));
+
+  const tracker = createEmptyScheduleTracker();
+  let removed = 0;
+
+  for (const slot of slots) {
+    const seats = assignments[slot.slotId] || [];
+    for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+      const name = seats[seatIndex];
+      if (!name) continue;
+      if (!guardOk(name, slot, tracker, ratio)) {
+        seats[seatIndex] = "";
+        removed += 1;
+        continue;
+      }
+      placePerson(
+        name,
+        slot,
+        input.mission.id,
+        tracker,
+        input.rules,
+        input.scheduling,
+        slot.seatCount,
+      );
+    }
+    assignments[slot.slotId] = seats;
+  }
+
+  return { assignments, removed };
 }
 
 function restOk(
@@ -808,7 +867,7 @@ export function explainFitsPersonFailure(
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
   if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
-  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) return "guardOk";
+  if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) return "guardOk";
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
   if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
   if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
@@ -828,7 +887,7 @@ export function fitsPerson(
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
   if (blockedByIssue(person.name, slot, issues)) return false;
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
-  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
+  if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) {
     return false;
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return false;
@@ -1139,7 +1198,7 @@ export function describeAssignmentWarnings(
   }
   if (
     isGuardKind(slot.positionKind) &&
-    !guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+    !guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling))
   ) {
     msgs.push(`${person.name}: יחס שמירות (${scheduling.guard_ratio}:1) לא מתקיים`);
   }
@@ -1225,7 +1284,7 @@ export function pickRelaxedCandidate(
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
     if (
       isGuardKind(slot.positionKind) &&
-      !guardOk(p.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+      !guardOk(p.name, slot, tracker, effectiveGuardRatio(scheduling))
     ) {
       return false;
     }
@@ -1261,7 +1320,7 @@ export function pickRestRelaxedCandidate(
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
     if (
       isGuardKind(slot.positionKind) &&
-      !guardOk(p.name, slot, tracker.guardShifts, scheduling.guard_ratio)
+      !guardOk(p.name, slot, tracker, effectiveGuardRatio(scheduling))
     ) {
       return false;
     }
@@ -1760,7 +1819,7 @@ function classifyCandidateRejection(
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "rejectedIneligible";
   if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
-  if (!guardOk(person.name, slot, tracker.guardShifts, scheduling.guard_ratio)) {
+  if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling))) {
     return "rejectedGuardRatio";
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "rejectedRest";
@@ -2236,11 +2295,7 @@ export function findReplacements(input: {
     (b) => !(b.missionId === input.missionId && b.slotId === input.slotId),
   );
   tracker.busy[input.removeName] = removeBlocks;
-  if (isGuardKind(target.positionKind)) {
-    tracker.guardShifts[input.removeName] = (
-      tracker.guardShifts[input.removeName] || []
-    ).slice(0, -1);
-  }
+  rebuildGuardShiftsForPerson(input.removeName, tracker);
 
   const mates = (mission.assignments[input.slotId] || []).filter(
     (n, i) => n && i !== input.seatIndex,
@@ -2544,6 +2599,14 @@ export function findAssignmentConflicts(
             (blocker ? ` ↔ ${describeAssignmentBlock(blocker)}` : ""),
         );
       }
+      if (
+        isGuardKind(slot.positionKind) &&
+        !guardOk(name, slot, tracker, effectiveGuardRatio(scheduling))
+      ) {
+        messages.push(
+          `${name}: מרווח שמירות (${effectiveGuardRatio(scheduling)}:1) — ${slot.positionName} ${slot.timeLabel}`,
+        );
+      }
       placePerson(
         name,
         slot,
@@ -2706,7 +2769,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
         }
         if (
           isGuardKind(slot.positionKind) &&
-          !guardOk(name, slot, tracker.guardShifts, scheduling.guard_ratio)
+          !guardOk(name, slot, tracker, effectiveGuardRatio(scheduling))
         ) {
           messages.push(`${name}: guard ratio violated at ${slot.timeLabel}`);
         }
