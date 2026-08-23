@@ -1799,7 +1799,7 @@ export function assignBaseWorkShift(input: {
     break;
   }
 
-  // Phase 2 — anchor squad (largest eligible pool) + borrow from other squads
+  // Phase 2 — anchor squad + borrow from other squads (including rest squad if needed)
   const squadFillOrder = [...activeSquads, restSquad]
     .map((squad) => ({
       squad,
@@ -1810,8 +1810,12 @@ export function assignBaseWorkShift(input: {
       ),
     }))
     .sort((a, b) => {
-      const eligibleA = a.pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length;
-      const eligibleB = b.pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length;
+      const eligibleA = a.pool.filter((p) =>
+        fitsCandidate(p, [...input.taken, ...assigned]),
+      ).length;
+      const eligibleB = b.pool.filter((p) =>
+        fitsCandidate(p, [...input.taken, ...assigned]),
+      ).length;
       return eligibleB - eligibleA;
     });
 
@@ -1824,7 +1828,7 @@ export function assignBaseWorkShift(input: {
     if (assigned.length >= need) break;
   }
 
-  // Phase 3 — any remaining eligible person (break squad structure completely)
+  // Phase 3 — any remaining eligible person
   if (assigned.length < need) {
     for (const p of sortByFairness(
       sortedPeople.filter(
@@ -1875,7 +1879,6 @@ export function canAssignPersonToSlot(input: {
   person: Person;
   issues: Issue[];
   peopleByName: Record<string, Person>;
-  /** Occupant to remove from this seat before checking (defaults to current seat holder). */
   replaceName?: string | null;
 }): SlotAssignmentCheck {
   const mission = input.missions.find((m) => m.id === input.missionId);

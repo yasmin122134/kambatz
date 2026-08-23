@@ -4,10 +4,12 @@ import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
   findAssignmentConflicts,
+  repairGuardAssignmentGaps,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
+  buildTrackerFromMissions,
 } from "@/lib/scheduling-engine";
-import { syncAssignmentSeats } from "@/lib/mission-utils";
+import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   applyAssignmentsOnly,
   assertMissionStructureUnchanged,
@@ -122,6 +124,38 @@ async function smartAssignScope(input: {
       (m) => !input.scopeMissions.some((s) => s.id === m.id),
     ),
   });
+
+  for (const mission of input.scopeMissions) {
+    if (mission.mission_type !== "guards") continue;
+    const assignments = output.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+
+    const draftAssignments = syncAssignmentSeats(mission.positions, { ...assignments });
+    const draftMissions = input.scopeMissions.map((m) => ({
+      ...m,
+      assignments:
+        m.id === mission.id
+          ? draftAssignments
+          : output.assignmentsByMission.get(m.id) ?? m.assignments,
+    }));
+    const tracker = buildTrackerFromMissions(
+      [...input.allMissions.filter((m) => !draftMissions.some((d) => d.id === m.id)), ...draftMissions],
+      input.rules,
+      new Set(),
+    );
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+    const { assignments: repaired } = repairGuardAssignmentGaps({
+      mission: { ...mission, assignments: draftAssignments },
+      assignments: draftAssignments,
+      people: input.people,
+      tracker,
+      issues: input.issues,
+      scheduling,
+      rules: input.rules,
+      meanPrior,
+    });
+    output.assignmentsByMission.set(mission.id, repaired);
+  }
 
   const draftMissions = input.scopeMissions.map((mission) => ({
     ...mission,

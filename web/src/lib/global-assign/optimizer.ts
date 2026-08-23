@@ -48,7 +48,8 @@ type SolverState = {
 type CandidateChoice =
   | { kind: "carmel"; group: CarmelGroupCandidate }
   | { kind: "seat"; person: Person }
-  | { kind: "basework"; names: string[] };
+  | { kind: "basework"; names: string[] }
+  | { kind: "guard_pair"; people: Person[] };
 
 /** Branching limits — keeps server-side assign under ~15s on full guard days. */
 const DEFAULT_MAX_NODES = 12_000;
@@ -127,6 +128,21 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
           slot,
           need: emptyIndices.length,
           fixedNames,
+          seatIndices: emptyIndices,
+        });
+        continue;
+      }
+
+      if (
+        isGuardKind(slot.positionKind) &&
+        slot.seatCount > 1 &&
+        emptyIndices.length >= 2
+      ) {
+        units.push({
+          kind: "guard_pair",
+          id: `${mission.id}:${slot.slotId}:guard_pair`,
+          mission,
+          slot,
           seatIndices: emptyIndices,
         });
         continue;
@@ -313,6 +329,65 @@ function computeBaseworkNames(
   return roster.filter((n) => !taken.includes(n));
 }
 
+function countGuardPairCandidates(
+  unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  peopleByName: Record<string, Person>,
+): number {
+  return listGuardPairCandidates(
+    unit,
+    state,
+    people,
+    issues,
+    peopleByName,
+    0,
+  ).length;
+}
+
+function listGuardPairCandidates(
+  unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  peopleByName: Record<string, Person>,
+  seed: number,
+): Person[][] {
+  const scheduling = schedulingFor(unit.mission);
+  const need = unit.seatIndices.length;
+  if (need <= 0) return [];
+
+  const pool = people.filter((p) =>
+    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName),
+  );
+
+  if (need === 1) {
+    return pool.map((p) => [p]);
+  }
+
+  const pairs: Person[][] = [];
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = i + 1; j < pool.length; j++) {
+      const a = pool[i];
+      const b = pool[j];
+      if (
+        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName) &&
+        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName)
+      ) {
+        pairs.push([a, b]);
+      }
+    }
+  }
+
+  return pairs.sort((groupA, groupB) => {
+    const tieA = (groupA[0].name.charCodeAt(0) + seed) % 7;
+    const tieB = (groupB[0].name.charCodeAt(0) + seed) % 7;
+    if (tieA !== tieB) return tieA - tieB;
+    return groupA[0].name.localeCompare(groupB[0].name, "he");
+  });
+}
+
 function unitDifficulty(
   unit: AssignmentUnit,
   state: SolverState,
@@ -327,7 +402,9 @@ function unitDifficulty(
       ? countCarmelCandidates(unit, state, people, issues, peopleByName)
       : unit.kind === "basework"
         ? countBaseworkCandidates(unit, state, people, issues, rules, meanPrior)
-        : countSeatCandidates(unit, state, people, issues, peopleByName);
+        : unit.kind === "guard_pair"
+          ? countGuardPairCandidates(unit, state, people, issues, peopleByName)
+          : countSeatCandidates(unit, state, people, issues, peopleByName);
 
   if (unit.kind === "carmel") {
     return 100_000 + 10_000 / Math.max(1, candidates);
@@ -335,10 +412,21 @@ function unitDifficulty(
   if (unit.kind === "basework") {
     return 9_000 + 900 / Math.max(1, candidates);
   }
+  if (unit.kind === "guard_pair") {
+    return 85_000 + 8_500 / Math.max(1, candidates);
+  }
   if (unit.slot.positionKind === "officer_duty") {
     return 50_000 + 5_000 / Math.max(1, candidates);
   }
   if (isGuardKind(unit.slot.positionKind)) {
+    if (unit.kind === "seat" && unit.slot.seatCount > 1) {
+      const seats =
+        state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
+      const hasMate = seats.some((n, idx) => n && idx !== unit.seatIndex);
+      if (hasMate) {
+        return 80_000 + 8_000 / Math.max(1, candidates);
+      }
+    }
     return 10_000 + 1_000 / Math.max(1, candidates);
   }
   if (unit.mission.mission_type === "kitchen") {
@@ -612,6 +700,31 @@ function applyChoice(
       unit.mission.mission_type,
     );
     state.assignedUnitIds.add(unit.id);
+    return;
+  }
+
+  if (unit.kind === "guard_pair" && choice.kind === "guard_pair") {
+    let pi = 0;
+    for (const idx of unit.seatIndices) {
+      if (row[idx]) continue;
+      const person = choice.people[pi++];
+      if (!person) continue;
+      row[idx] = person.name;
+      if (!personAlreadyInSlot(person.name, unit.slot.slotId, unit.mission.id, state.tracker)) {
+        placePerson(
+          person.name,
+          unit.slot,
+          unit.mission.id,
+          state.tracker,
+          rules,
+          scheduling,
+          unit.slot.seatCount,
+          unit.mission.mission_type,
+        );
+      }
+    }
+    seats[unit.slot.slotId] = row;
+    state.assignedUnitIds.add(unit.id);
   }
 }
 
@@ -653,6 +766,18 @@ function revertChoice(
     row[unit.seatIndex] = "";
     seats[unit.slot.slotId] = row;
     unplacePerson(choice.person.name, unit.slot, unit.mission.id, state.tracker, rules, scheduling);
+    state.assignedUnitIds.delete(unit.id);
+    return;
+  }
+
+  if (unit.kind === "guard_pair" && choice.kind === "guard_pair") {
+    for (const idx of unit.seatIndices) {
+      const name = row[idx];
+      if (!name) continue;
+      row[idx] = "";
+      unplacePerson(name, unit.slot, unit.mission.id, state.tracker, rules, scheduling);
+    }
+    seats[unit.slot.slotId] = row;
     state.assignedUnitIds.delete(unit.id);
   }
 }
@@ -866,7 +991,21 @@ function solveGreedy(input: {
               );
               return names.length ? { kind: "basework", names } : null;
             })()
-          : (() => {
+          : unit.kind === "guard_pair"
+            ? (() => {
+                const group = listGuardPairCandidates(
+                  unit,
+                  state,
+                  input.people,
+                  input.issues,
+                  peopleByName,
+                  input.seed,
+                )[0];
+                return group?.length
+                  ? { kind: "guard_pair", people: group }
+                  : null;
+              })()
+            : (() => {
               const person = listSeatCandidates(
                 unit,
                 state,
@@ -987,7 +1126,18 @@ function solveBacktracking(input: {
               );
               return names.length ? [{ kind: "basework" as const, names }] : [];
             })()
-          : listSeatCandidates(
+          : unit.kind === "guard_pair"
+            ? listGuardPairCandidates(
+                unit,
+                state,
+                input.people,
+                input.issues,
+                peopleByName,
+                input.seed,
+              )
+                .slice(0, MAX_SEAT_BRANCH)
+                .map((people) => ({ kind: "guard_pair" as const, people }))
+            : listSeatCandidates(
               unit,
               state,
               input.people,
@@ -1090,6 +1240,9 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
         const seats =
           missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
         if (u.kind === "carmel" || u.kind === "basework") {
+          return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
+        }
+        if (u.kind === "guard_pair") {
           return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
         }
         return keepExisting && Boolean(seats[u.seatIndex]);
