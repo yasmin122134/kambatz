@@ -36,7 +36,7 @@ describe("effectiveBoardStartMin", () => {
     expect(effectiveBoardStartMin(mission)).toBe(8 * 60 + 30);
 
     const baseSlots = flattenMissionSlots(mission).filter(
-      (s) => s.baseWorkShiftIndex !== undefined && s.positionName === "עבודות בסיס",
+      (s) => s.baseWorkShiftIndex !== undefined,
     );
     expect(baseSlots.map((s) => s.startTime)).toEqual(["08:30", "13:30", "18:30"]);
     expect(baseSlots[0].cyclicStart).toBe(0);

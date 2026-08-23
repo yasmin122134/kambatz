@@ -1,11 +1,5 @@
 import type { MissionPosition, MissionSlot } from "@/lib/types";
 import { DEFAULT_KITCHEN_SCHEDULING_RULES } from "@/lib/types";
-import {
-  materializeSlotAbsoluteBounds,
-  resolveCanonicalSlotInterval,
-  wallClockIntervalOnCalendarDate,
-  type TimeInterval,
-} from "@/lib/time-interval";
 
 function uid() {
   return crypto.randomUUID();
@@ -23,71 +17,6 @@ export const DEFAULT_KITCHEN_SHIFTS: KitchenShiftDef[] = [
   { start: "15:00", end: "19:00", label: "אחה״צ" },
   { start: "19:00", end: "22:00", label: "ערב" },
 ];
-
-/** Canonical kitchen day window on mission_date (Israel wall clock). */
-export function kitchenMissionInterval(missionDate: string): TimeInterval | null {
-  return wallClockIntervalOnCalendarDate(missionDate.slice(0, 10), "06:00", "22:00");
-}
-
-export function normalizeKitchenMissionTimes(missionDate: string): {
-  starts_at: string;
-  ends_at: string;
-} {
-  const iv = kitchenMissionInterval(missionDate);
-  if (!iv) {
-    const date = missionDate.slice(0, 10);
-    return {
-      starts_at: `${date}T06:00:00+03:00`,
-      ends_at: `${date}T22:00:00+03:00`,
-    };
-  }
-  return {
-    starts_at: new Date(iv.startMs).toISOString(),
-    ends_at: new Date(iv.endMs).toISOString(),
-  };
-}
-
-/** מטבch — תמיד mission_date + שעות קיר (06:00–22:00), לא תלוי ב-starts_at שגוי. */
-export function resolveKitchenSlotInterval(
-  missionDate: string,
-  missionStartsAt: string,
-  missionEndsAt: string,
-  slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
-): TimeInterval | null {
-  const fixed = wallClockIntervalOnCalendarDate(
-    missionDate,
-    slot.start_time,
-    slot.end_time,
-  );
-  if (fixed) return fixed;
-  return resolveCanonicalSlotInterval(
-    { starts_at: missionStartsAt, ends_at: missionEndsAt },
-    slot,
-  );
-}
-
-export function materializeKitchenSlots(
-  slots: MissionSlot[],
-  missionStartsAt: string,
-  missionEndsAt: string,
-  missionDate: string,
-): MissionSlot[] {
-  return slots.map((slot) => {
-    const interval = resolveKitchenSlotInterval(
-      missionDate,
-      missionStartsAt,
-      missionEndsAt,
-      slot,
-    );
-    if (!interval) {
-      return { ...slot, starts_at: undefined, ends_at: undefined };
-    }
-    return {
-      ...slot,
-      ...materializeSlotAbsoluteBounds(slot, interval),
-    };
-  });
-}
 
 /**
  * תורנות מטבח — 35 צוערים בכל משמרת, 4 משמרות ביום (06–22).

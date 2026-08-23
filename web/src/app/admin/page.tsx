@@ -111,9 +111,7 @@ export default function AdminPage() {
       return;
     }
     setSyncMsg(
-      `סונכרנו ${data.total} צוערים (${data.updated} עודכנו, ${data.inserted} חדשים` +
-        (data.deleted ? `, ${data.deleted} הוסרו מהמערכת` : "") +
-        ")" +
+      `סונכרנו ${data.total} צוערים (${data.updated} עודכנו, ${data.inserted} חדשים)` +
         (data.errors?.length ? ` · ${data.errors.length} שגיאות` : ""),
     );
     loadPeople();

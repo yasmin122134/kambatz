@@ -28,7 +28,6 @@ import {
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
-import { kitchenMissionInterval } from "@/lib/kitchen-day-template";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
   DEFAULT_FAIRNESS_RULES,
@@ -111,7 +110,6 @@ export type ReplacementOption = {
   personName: string;
   cost: number;
   label: string;
-  swapMissionId?: string;
   swapSlotId?: string;
   swapSeatIndex?: number;
   swapLabel?: string;
@@ -338,25 +336,6 @@ function blockInterval(block: BusyBlock): TimeInterval {
   return { startMs: block.startAtMs, endMs: block.endAtMs };
 }
 
-type AssignmentKindRef = {
-  positionKind: MissionPositionKind;
-  missionType: MissionType;
-};
-
-/** Carmel B may serve base work during the same wall-clock window. */
-export function allowsParallelAssignmentOverlap(
-  a: AssignmentKindRef,
-  b: AssignmentKindRef,
-): boolean {
-  const carmelB = (x: AssignmentKindRef) => x.positionKind === "standby_carmel_b";
-  const baseWork = (x: AssignmentKindRef) =>
-    x.missionType === "base_work" && x.positionKind === "duty";
-  return (
-    (carmelB(a) && baseWork(b)) ||
-    (carmelB(b) && baseWork(a))
-  );
-}
-
 /** Canonical overlap check for assignment intervals — half-open [start, end). */
 export function assignmentIntervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
   return intervalsOverlap(a, b);
@@ -384,14 +363,6 @@ function overlapsSlot(
     if (b.slotId === slot.slotId) continue;
 
     const blockIv = blockInterval(b);
-    if (
-      allowsParallelAssignmentOverlap(
-        { positionKind: b.positionKind, missionType: b.missionType },
-        { positionKind: slot.positionKind, missionType: slot.missionType },
-      )
-    ) {
-      continue;
-    }
     const extraGap = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
@@ -1855,216 +1826,6 @@ export function assignBaseWorkShift(input: {
   };
 }
 
-export type SlotAssignmentCheck =
-  | { ok: true }
-  | { ok: false; reason: string };
-
-function assignmentFailureMessage(
-  personName: string,
-  slot: FlatSlot,
-  code: string | null,
-): string | null {
-  if (!code) return null;
-  if (code === "canAssignKind") return `${personName}: לא זכאי ל«${slot.positionName}»`;
-  if (code === "blockedByIssue") return `${personName}: חסימה מאושרת`;
-  if (code === "overlapsSlot") return `${personName}: חפיפה עם משמרת אחרת`;
-  if (code === "sameRoom") return `${personName}: לא אותו חדר`;
-  if (code === "sameGender") return `${personName}: לא אותו מגדר`;
-  if (code === "restOk") return `${personName}: מנוחה לא מספקת`;
-  if (code === "guardOk") return `${personName}: מרווח שמירות לא מתקיים`;
-  return `${personName}: לא עומד בכללים`;
-}
-
-/** Full rule check for assigning `person` to a seat (optionally replacing someone). */
-export function canAssignPersonToSlot(input: {
-  missions: MissionDay[];
-  rules: FairnessRules;
-  missionId: string;
-  slot: FlatSlot;
-  seatIndex: number;
-  person: Person;
-  issues: Issue[];
-  peopleByName: Record<string, Person>;
-  replaceName?: string | null;
-}): SlotAssignmentCheck {
-  const mission = input.missions.find((m) => m.id === input.missionId);
-  if (!mission) return { ok: false, reason: "משימה לא נמצאה" };
-
-  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-  const tracker = buildTrackerFromMissions(input.missions, input.rules);
-  const currentHolder =
-    input.replaceName !== undefined
-      ? input.replaceName
-      : mission.assignments[input.slot.slotId]?.[input.seatIndex] || null;
-
-  if (currentHolder) {
-    unplacePerson(
-      currentHolder,
-      input.slot,
-      input.missionId,
-      tracker,
-      input.rules,
-      scheduling,
-    );
-  }
-
-  const mates = (mission.assignments[input.slot.slotId] || []).filter(
-    (n, i) =>
-      Boolean(n) &&
-      i !== input.seatIndex &&
-      n !== input.person.name &&
-      n !== currentHolder,
-  );
-
-  if (
-    !fitsPerson(
-      input.person,
-      input.slot,
-      tracker,
-      input.issues,
-      scheduling,
-      mates,
-      input.peopleByName,
-    )
-  ) {
-    const why = explainFitsPersonFailure(
-      input.person,
-      input.slot,
-      tracker,
-      input.issues,
-      scheduling,
-      mates,
-      input.peopleByName,
-    );
-    return {
-      ok: false,
-      reason:
-        assignmentFailureMessage(input.person.name, input.slot, why) ??
-        `${input.person.name}: לא עומד בכללי השיבוץ`,
-    };
-  }
-  return { ok: true };
-}
-
-/** Validate a two-person swap before applying. */
-export function canSwapReplacementAssignments(input: {
-  missions: MissionDay[];
-  rules: FairnessRules;
-  missionId: string;
-  slot: FlatSlot;
-  seatIndex: number;
-  removeName: string;
-  swapMissionId: string;
-  swapSlot: FlatSlot;
-  swapSeatIndex: number;
-  swapPerson: Person;
-  issues: Issue[];
-  peopleByName: Record<string, Person>;
-}): SlotAssignmentCheck {
-  const mission = input.missions.find((m) => m.id === input.missionId);
-  const swapMission = input.missions.find((m) => m.id === input.swapMissionId);
-  if (!mission || !swapMission) return { ok: false, reason: "משימה לא נמצאה" };
-
-  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-  const swapScheduling = normalizeSchedulingRules(swapMission.scheduling_rules);
-  const tracker = buildTrackerFromMissions(input.missions, input.rules);
-
-  unplacePerson(
-    input.removeName,
-    input.slot,
-    input.missionId,
-    tracker,
-    input.rules,
-    scheduling,
-  );
-  unplacePerson(
-    input.swapPerson.name,
-    input.swapSlot,
-    input.swapMissionId,
-    tracker,
-    input.rules,
-    swapScheduling,
-  );
-
-  const removePerson = input.peopleByName[input.removeName];
-  if (!removePerson) {
-    return { ok: false, reason: `${input.removeName}: לא נמצא במחזור` };
-  }
-
-  const targetMates = (mission.assignments[input.slot.slotId] || []).filter(
-    (n, i) =>
-      Boolean(n) &&
-      i !== input.seatIndex &&
-      n !== input.swapPerson.name &&
-      n !== input.removeName,
-  );
-  const swapMates = (swapMission.assignments[input.swapSlot.slotId] || []).filter(
-    (n, i) =>
-      Boolean(n) &&
-      i !== input.swapSeatIndex &&
-      n !== input.swapPerson.name &&
-      n !== input.removeName,
-  );
-
-  if (
-    !fitsPerson(
-      input.swapPerson,
-      input.slot,
-      tracker,
-      input.issues,
-      scheduling,
-      targetMates,
-      input.peopleByName,
-    )
-  ) {
-    const why = explainFitsPersonFailure(
-      input.swapPerson,
-      input.slot,
-      tracker,
-      input.issues,
-      scheduling,
-      targetMates,
-      input.peopleByName,
-    );
-    return {
-      ok: false,
-      reason:
-        assignmentFailureMessage(input.swapPerson.name, input.slot, why) ??
-        `${input.swapPerson.name}: לא יכול לקחת את המשמרת`,
-    };
-  }
-
-  if (
-    !fitsPerson(
-      removePerson,
-      input.swapSlot,
-      tracker,
-      input.issues,
-      swapScheduling,
-      swapMates,
-      input.peopleByName,
-    )
-  ) {
-    const why = explainFitsPersonFailure(
-      removePerson,
-      input.swapSlot,
-      tracker,
-      input.issues,
-      swapScheduling,
-      swapMates,
-      input.peopleByName,
-    );
-    return {
-      ok: false,
-      reason:
-        assignmentFailureMessage(removePerson.name, input.swapSlot, why) ??
-        `${input.removeName}: לא יכול לקחת את משמרת ההחלפה`,
-    };
-  }
-
-  return { ok: true };
-}
-
 export function findReplacements(input: {
   missions: MissionDay[];
   people: Person[];
@@ -2185,7 +1946,6 @@ export function findReplacements(input: {
           personName: p.name,
           cost,
           label: `${p.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel}`,
-          swapMissionId: otherMission.id,
           swapSlotId: otherSlot.slotId,
           swapSeatIndex: oi,
           swapLabel: `${otherSlot.positionName} ${otherSlot.timeLabel}`,
@@ -2412,8 +2172,6 @@ type TrackedAssignment = {
   endMs: number;
   slotId: string;
   missionId: string;
-  positionKind: MissionPositionKind;
-  missionType: MissionType;
 };
 
 /** Global validator — every person must have zero overlapping assignment pairs. */
@@ -2432,8 +2190,6 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
           endMs: slot.endAtMs,
           slotId: slot.slotId,
           missionId: mission.id,
-          positionKind: slot.positionKind,
-          missionType: slot.missionType,
         });
         byPerson.set(name, list);
       }
@@ -2448,14 +2204,6 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
         const a = sorted[i];
         const b = sorted[j];
         if (a.slotId === b.slotId && a.missionId === b.missionId) continue;
-        if (
-          allowsParallelAssignmentOverlap(
-            { positionKind: a.positionKind, missionType: a.missionType },
-            { positionKind: b.positionKind, missionType: b.missionType },
-          )
-        ) {
-          continue;
-        }
         if (
           assignmentIntervalsOverlap(
             { startMs: a.startMs, endMs: a.endMs },
@@ -2496,15 +2244,8 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
 
   for (const mission of input.missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-    let missionStartMs = Date.parse(mission.starts_at);
-    let missionEndMs = Date.parse(mission.ends_at);
-    if (mission.mission_type === "kitchen") {
-      const kitchenIv = kitchenMissionInterval(mission.mission_date);
-      if (kitchenIv) {
-        missionStartMs = kitchenIv.startMs;
-        missionEndMs = kitchenIv.endMs;
-      }
-    }
+    const missionStartMs = Date.parse(mission.starts_at);
+    const missionEndMs = Date.parse(mission.ends_at);
 
     for (const slot of flattenMissionSlots(mission)) {
       if (slot.startAtMs >= slot.endAtMs) {

@@ -170,7 +170,7 @@ describe("overlap rejection across mission types", () => {
     ).toBe(false);
   });
 
-  it("Test B — Carmel B vs Base Work overlap is allowed in parallel", () => {
+  it("Test B — Carmel B vs Base Work overlap is invalid", () => {
     const guardMission = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const carmelId = carmelBSlot(guardMission).slotId;
     const guard = withCustomSlotTimes(guardMission, carmelId, "08:00", "12:00");
@@ -187,7 +187,7 @@ describe("overlap rejection across mission types", () => {
     const target = slotByLabel(baseSlot, "09:00–13:00");
 
     const tracker = trackerWith([{ slot: carmelSlot, missionId: "g1", missionType: "guards" }]);
-    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
   });
 
   it("Test C — consecutive Carmel B and Base Work is valid", () => {

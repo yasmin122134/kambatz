@@ -11,18 +11,7 @@
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
 import { isBaseWorkPosition, resolveBaseWorkSlotInterval } from "@/lib/base-work-template";
 import { officerDutySlotsValid } from "@/lib/guard-day-template";
-import {
-  kitchenMissionInterval,
-  resolveKitchenSlotInterval,
-} from "@/lib/kitchen-day-template";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
-
-function isKitchenSlot(
-  mission: Pick<MissionDay, "mission_type">,
-  pos: Pick<MissionPosition, "kind">,
-): boolean {
-  return mission.mission_type === "kitchen" || pos.kind === "kitchen";
-}
 
 export type MissionStructureSnapshot = {
   starts_at: string;
@@ -120,14 +109,7 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
             mission.ends_at,
             slot,
           )
-        : isKitchenSlot(mission, pos)
-          ? resolveKitchenSlotInterval(
-              mission.mission_date,
-              mission.starts_at,
-              mission.ends_at,
-              slot,
-            )
-          : resolveCanonicalSlotInterval(mission, slot);
+        : resolveCanonicalSlotInterval(mission, slot);
       if (!interval) {
         messages.push(
           `${pos.name} ${slot.start_time}–${slot.end_time}: cannot resolve absolute interval within mission window`,
@@ -138,20 +120,10 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
       if (interval.startMs >= interval.endMs) {
         messages.push(`${pos.name} ${slot.start_time}–${slot.end_time}: start >= end`);
       }
-      if (!isBaseWorkPosition(pos) && !isKitchenSlot(mission, pos)) {
+      if (!isBaseWorkPosition(pos)) {
         if (interval.startMs < missionStartMs || interval.endMs > missionEndMs) {
           messages.push(
             `${pos.name} ${slot.start_time}–${slot.end_time}: outside mission interval`,
-          );
-        }
-      } else if (isKitchenSlot(mission, pos)) {
-        const kitchenIv = kitchenMissionInterval(mission.mission_date);
-        if (
-          kitchenIv &&
-          (interval.startMs < kitchenIv.startMs || interval.endMs > kitchenIv.endMs)
-        ) {
-          messages.push(
-            `${pos.name} ${slot.start_time}–${slot.end_time}: outside kitchen day window`,
           );
         }
       }

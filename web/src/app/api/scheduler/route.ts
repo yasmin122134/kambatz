@@ -52,7 +52,6 @@ async function fetchPeople(supabase: Awaited<ReturnType<typeof createClient>>) {
   const { data, error } = await supabase
     .from("people")
     .select(select)
-    .eq("active", true)
     .order("name");
   return { data: data || [], error, withFlags };
 }

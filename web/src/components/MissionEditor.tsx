@@ -116,10 +116,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   ) {
     const isoStart = new Date(window.startsAt).toISOString();
     const isoEnd = new Date(window.endsAt).toISOString();
-    let scheduling: MissionSchedulingRules = {
-      ...defaultSchedulingForType(type, isoStart),
-      ...rules,
-    };
+    let scheduling = rules ?? defaultSchedulingForType(type, isoStart);
     const nextPositions = standardMissionPositions({
       missionType: type,
       startsAt: isoStart,
@@ -510,16 +507,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               type="date"
               required
               value={missionDate}
-              onChange={(e) => {
-                const newDate = e.target.value;
-                setMissionDate(newDate);
-                if (missionType === "kitchen" || missionType === "base_work") {
-                  const window = defaultMissionWindow(missionType, newDate);
-                  setStartsAt(formatDatetimeLocal(window.startsAt));
-                  setEndsAt(formatDatetimeLocal(window.endsAt));
-                  structureDirtyRef.current = true;
-                }
-              }}
+              onChange={(e) => setMissionDate(e.target.value)}
             />
           </div>
           <div className="field">
@@ -718,16 +706,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 ) {
                   return;
                 }
-                applyStandardTemplate(
-                  "guards",
-                  {
-                    missionDate: missionDate,
-                    startsAt,
-                    endsAt,
-                  },
-                  schedulingRules,
-                );
-                structureDirtyRef.current = true;
+                applyStandardTemplate("guards", {
+                  missionDate: missionDate,
+                  startsAt,
+                  endsAt,
+                });
               }}
             >
               טען יום שמירות סטנדרטי (כל העמדות)

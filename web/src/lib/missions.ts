@@ -14,10 +14,6 @@ import {
   syncAssignmentSeats,
   upcomingFromMissions,
 } from "@/lib/mission-utils";
-import {
-  materializeKitchenSlots,
-  normalizeKitchenMissionTimes,
-} from "@/lib/kitchen-day-template";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 export {
@@ -103,25 +99,8 @@ export async function saveMissionDay(
 ): Promise<SaveMissionDayResult> {
   const validateAssignments = options?.validateAssignments !== false;
   const supabase = await createClient();
-  let positions = payload.positions || [];
+  const positions = payload.positions || [];
   const assignments = syncAssignmentSeats(positions, payload.assignments || {});
-
-  let starts_at = payload.starts_at;
-  let ends_at = payload.ends_at;
-  if (payload.mission_type === "kitchen") {
-    const kitchenTimes = normalizeKitchenMissionTimes(payload.mission_date);
-    starts_at = kitchenTimes.starts_at;
-    ends_at = kitchenTimes.ends_at;
-    positions = positions.map((pos) => ({
-      ...pos,
-      slots: materializeKitchenSlots(
-        pos.slots || [],
-        starts_at,
-        ends_at,
-        payload.mission_date,
-      ),
-    }));
-  }
 
   if (payload.mission_type === "guards") {
     const draft: MissionDay = {
@@ -129,8 +108,8 @@ export async function saveMissionDay(
       title: payload.title,
       mission_type: payload.mission_type,
       mission_date: payload.mission_date,
-      starts_at,
-      ends_at,
+      starts_at: payload.starts_at,
+      ends_at: payload.ends_at,
       status: payload.status,
       positions,
       assignments,
@@ -160,8 +139,8 @@ export async function saveMissionDay(
     title: payload.title.trim(),
     mission_type: payload.mission_type,
     mission_date: payload.mission_date,
-    starts_at,
-    ends_at,
+    starts_at: payload.starts_at,
+    ends_at: payload.ends_at,
     status: payload.status,
     positions,
     assignments,

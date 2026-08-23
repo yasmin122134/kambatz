@@ -277,6 +277,64 @@ button:hover,
   background: var(--color-accent-bg);
 }
 
+.burden-roster-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 1.25rem;
+  font-size: 0.8125rem;
+  color: var(--color-ink2);
+  margin-bottom: 0.75rem;
+}
+
+.burden-roster-summary strong {
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.burden-roster-scroll {
+  max-height: min(70vh, 36rem);
+  overflow: auto;
+  border: 1px solid var(--color-line2);
+  border-radius: var(--radius-md);
+  background: var(--color-card);
+}
+
+.burden-roster-scroll .schedule-table {
+  width: 100%;
+}
+
+.burden-roster-scroll .schedule-table th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  box-shadow: 0 1px 0 var(--color-line2);
+}
+
+.burden-roster-row--idle {
+  color: var(--color-ink3);
+}
+
+.burden-roster-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 5.5rem;
+}
+
+.burden-roster-bar-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-line2);
+  overflow: hidden;
+}
+
+.burden-roster-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+}
+
 .schedule-table-wrap {
   background: var(--color-card);
   border-radius: var(--radius-md);
@@ -502,43 +560,6 @@ button:hover,
   flex-direction: column;
   padding: 0.35rem 0.45rem;
   overflow: hidden;
-}
-
-.guard-timeline-col-available {
-  flex: 0 0 11rem;
-  min-width: 9rem;
-}
-
-.guard-timeline-available-hour {
-  position: absolute;
-  inset-inline: 3px;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  padding: 0.2rem 0.35rem;
-  font-size: 10px;
-  line-height: 1.2;
-  overflow: hidden;
-  border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px dashed var(--color-line2);
-}
-
-.guard-timeline-available-time {
-  font-family: var(--font-mono);
-  font-weight: 600;
-  color: var(--color-ink3);
-  flex-shrink: 0;
-}
-
-.guard-timeline-available-names {
-  color: var(--color-ink2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
 }
 
 .slot-card-time {

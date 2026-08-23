@@ -96,6 +96,7 @@ function trackerWith(
       rules,
       scheduling,
       block.slot.seatCount,
+      "guards",
     );
   }
   return tracker;
