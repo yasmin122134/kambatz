@@ -242,7 +242,7 @@ function countSeatCandidates(
   return people.filter(
     (p) =>
       !mates.includes(p.name) &&
-      fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName),
+      fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName, undefined, unit.mission.id),
   ).length;
 }
 
@@ -369,7 +369,7 @@ function countGuardPairCandidates(
   if (need <= 0) return 0;
 
   const pool = people.filter((p) =>
-    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName),
+    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName, undefined, unit.mission.id),
   );
   if (need === 1) return pool.length;
 
@@ -379,8 +379,8 @@ function countGuardPairCandidates(
       const a = pool[i];
       const b = pool[j];
       if (
-        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName) &&
-        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName)
+        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName, undefined, unit.mission.id) &&
+        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName, undefined, unit.mission.id)
       ) {
         count += 1;
       }
@@ -404,7 +404,7 @@ function listGuardPairCandidates(
   if (need <= 0) return [];
 
   const pool = people.filter((p) =>
-    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName),
+    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName, undefined, unit.mission.id),
   );
 
   if (need === 1) {
@@ -417,8 +417,8 @@ function listGuardPairCandidates(
       const a = pool[i];
       const b = pool[j];
       if (
-        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName) &&
-        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName)
+        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName, undefined, unit.mission.id) &&
+        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName, undefined, unit.mission.id)
       ) {
         pairs.push([a, b]);
       }
@@ -566,7 +566,7 @@ function countPersonScarcity(
       const seats = state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
       const mates = matesForSeat(seats, unit.seatIndex);
       if (mates.includes(person.name)) continue;
-      if (fitsPerson(person, unit.slot, state.tracker, issues, scheduling, mates, peopleByName)) {
+      if (fitsPerson(person, unit.slot, state.tracker, issues, scheduling, mates, peopleByName, undefined, unit.mission.id)) {
         scarceSlots += 1;
       }
     }
@@ -594,7 +594,7 @@ function listSeatCandidates(
   const pool = people.filter(
     (p) =>
       !mates.includes(p.name) &&
-      fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName),
+      fitsPerson(p, unit.slot, state.tracker, issues, scheduling, mates, peopleByName, undefined, unit.mission.id),
   );
 
   let candidates = pool;
@@ -879,13 +879,14 @@ function pickDutyOfficerForSeed(
   issues: Issue[],
   scheduling: MissionSchedulingRules,
   peopleByName: Record<string, Person>,
+  missionId: string,
 ): Person | undefined {
   const pool = sibling ? officers.filter((o) => o.name !== sibling) : officers;
 
   const preferred = pool.find(
     (o) =>
       !mates.includes(o.name) &&
-      fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName),
+      fitsPerson(o, slot, state.tracker, issues, scheduling, mates, peopleByName, undefined, missionId),
   );
   if (preferred) return preferred;
 
@@ -1032,6 +1033,7 @@ function seedOfficerDutyInState(
           issues,
           scheduling,
           peopleByName,
+          mission.id,
         );
 
         if (!pick) continue;

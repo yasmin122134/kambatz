@@ -296,13 +296,14 @@ function workedRestMinutes(blocks: BusyBlock[]): number {
     .reduce((sum, b) => sum + b.durationMinutes, 0);
 }
 
-/** Minimum spacing between guard shifts — uses absolute time (not cyclic 24h wrap). */
+/** Minimum spacing between guard shifts — absolute time; scoped to one mission when assigning. */
 function guardOk(
   personName: string,
   slot: FlatSlot,
   tracker: ScheduleTracker,
   ratio: number,
   ignoreSlotId?: string,
+  scopeMissionId?: string,
 ): boolean {
   if (!ratio || !isGuardKind(slot.positionKind)) return true;
   const slotIv = slotInterval(slot);
@@ -310,6 +311,7 @@ function guardOk(
 
   for (const b of tracker.busy[personName] || []) {
     if (!isGuardKind(b.positionKind)) continue;
+    if (scopeMissionId && b.missionId !== scopeMissionId) continue;
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
 
@@ -806,11 +808,23 @@ export function explainFitsPersonFailure(
   mates: string[],
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
+  scopeMissionId?: string,
 ): string | null {
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
   if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
-  if (!guardOk(person.name, slot, tracker, scheduling.guard_ratio, ignoreSlotId)) return "guardOk";
+  if (
+    !guardOk(
+      person.name,
+      slot,
+      tracker,
+      scheduling.guard_ratio,
+      ignoreSlotId,
+      scopeMissionId,
+    )
+  ) {
+    return "guardOk";
+  }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
   if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
   if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
@@ -826,11 +840,21 @@ export function fitsPerson(
   mates: string[],
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
+  scopeMissionId?: string,
 ): boolean {
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
   if (blockedByIssue(person.name, slot, issues)) return false;
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
-  if (!guardOk(person.name, slot, tracker, scheduling.guard_ratio, ignoreSlotId)) {
+  if (
+    !guardOk(
+      person.name,
+      slot,
+      tracker,
+      scheduling.guard_ratio,
+      ignoreSlotId,
+      scopeMissionId,
+    )
+  ) {
     return false;
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return false;
@@ -937,6 +961,8 @@ export function repairGuardAssignmentGaps(input: {
             input.scheduling,
             mates,
             peopleByName,
+            undefined,
+            input.mission.id,
           ),
         );
         const chosen = pickBestCandidate(
@@ -997,6 +1023,8 @@ export function repairGuardAssignmentGaps(input: {
               input.scheduling,
               mates,
               peopleByName,
+              undefined,
+              input.mission.id,
             );
             if (!donorFitsTarget) {
               placePerson(
@@ -1025,6 +1053,8 @@ export function repairGuardAssignmentGaps(input: {
                     input.scheduling,
                     donorMates,
                     peopleByName,
+                    undefined,
+                    input.mission.id,
                   ),
               ),
               donorSlot,
@@ -1149,6 +1179,8 @@ export function rebalanceGuardAssignmentCounts(input: {
             input.scheduling,
             mates,
             peopleByName,
+            undefined,
+            input.mission.id,
           );
           if (!fits) {
             placePerson(
@@ -1352,6 +1384,8 @@ export function forceFillEmptySeats(input: {
             input.scheduling,
             mates,
             peopleByName,
+            undefined,
+            input.mission.id,
           ),
       );
       let chosen =

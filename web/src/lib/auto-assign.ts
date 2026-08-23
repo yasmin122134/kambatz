@@ -9,6 +9,7 @@ import {
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
+  forceFillEmptySeats,
 } from "@/lib/scheduling-engine";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
@@ -164,7 +165,20 @@ async function smartAssignScope(input: {
       scheduling,
       rules: input.rules,
     });
-    output.assignmentsByMission.set(mission.id, balanced);
+    const { assignments: filled, warnings: fillWarnings } = forceFillEmptySeats({
+      mission: { ...mission, assignments: balanced },
+      assignments: balanced,
+      people: input.people,
+      tracker,
+      issues: input.issues,
+      scheduling,
+      rules: input.rules,
+      meanPrior,
+    });
+    output.assignmentsByMission.set(mission.id, filled);
+    if (fillWarnings.length) {
+      output.warnings.push(...fillWarnings);
+    }
   }
 
   const draftMissions = input.scopeMissions.map((mission) => ({
