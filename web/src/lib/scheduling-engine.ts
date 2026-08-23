@@ -113,6 +113,7 @@ export type ReplacementOption = {
   personName: string;
   cost: number;
   label: string;
+  swapMissionId?: string;
   swapSlotId?: string;
   swapSeatIndex?: number;
   swapLabel?: string;
@@ -2888,6 +2889,7 @@ export function findReplacements(input: {
           personName: p.name,
           cost,
           label: `${p.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel}`,
+          swapMissionId: otherMission.id,
           swapSlotId: otherSlot.slotId,
           swapSeatIndex: oi,
           swapLabel: `${otherSlot.positionName} ${otherSlot.timeLabel}`,

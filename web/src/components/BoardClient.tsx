@@ -204,6 +204,13 @@ export function BoardClient({
       setMsg(data.error || "שגיאה");
       return null;
     }
+    if (Array.isArray(data.missions)) {
+      const byId = new Map(
+        (data.missions as MissionDay[]).map((m) => [m.id, m]),
+      );
+      setMissions((prev) => prev.map((m) => byId.get(m.id) ?? m));
+      return data.missions as MissionDay[];
+    }
     setMissions((prev) => prev.map((m) => (m.id === data.id ? data : m)));
     return data as MissionDay;
   }
@@ -252,6 +259,7 @@ export function BoardClient({
     missionId: string,
     slotId: string,
     seatIndex: number,
+    targetMissionId: string,
     targetSlotId: string,
     targetSeatIndex: number,
   ) {
@@ -259,6 +267,7 @@ export function BoardClient({
       action: "swap",
       slot_id: slotId,
       seat_index: seatIndex,
+      target_mission_id: targetMissionId,
       target_slot_id: targetSlotId,
       target_seat_index: targetSeatIndex,
     });
@@ -787,6 +796,7 @@ function GuardTimeline({
     missionId: string,
     slotId: string,
     seatIndex: number,
+    targetMissionId: string,
     targetSlotId: string,
     targetSeatIndex: number,
   ) => void;
@@ -900,6 +910,7 @@ function MissionPanel({
     missionId: string,
     slotId: string,
     seatIndex: number,
+    targetMissionId: string,
     targetSlotId: string,
     targetSeatIndex: number,
   ) => void;
@@ -972,7 +983,7 @@ function ReplacementPicker({
   seatIndex: number;
   currentName: string;
   onDirect: (name: string) => void;
-  onSwap: (targetSlotId: string, targetSeatIndex: number) => void;
+  onSwap: (targetMissionId: string, targetSlotId: string, targetSeatIndex: number) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap">("replace");
@@ -982,6 +993,7 @@ function ReplacementPicker({
       type: "direct" | "swap";
       personName: string;
       label: string;
+      swapMissionId?: string;
       swapSlotId?: string;
       swapSeatIndex?: number;
     }[]
@@ -1051,8 +1063,12 @@ function ReplacementPicker({
                     className="btn-sm w-full text-right"
                     onClick={() => {
                       if (o.type === "direct") onDirect(o.personName);
-                      else if (o.swapSlotId != null && o.swapSeatIndex != null) {
-                        onSwap(o.swapSlotId, o.swapSeatIndex);
+                      else if (
+                        o.swapMissionId &&
+                        o.swapSlotId != null &&
+                        o.swapSeatIndex != null
+                      ) {
+                        onSwap(o.swapMissionId, o.swapSlotId, o.swapSeatIndex);
                       }
                       setOpen(false);
                     }}
@@ -1109,6 +1125,7 @@ function SlotCard({
     missionId: string,
     slotId: string,
     seatIndex: number,
+    targetMissionId: string,
     targetSlotId: string,
     targetSeatIndex: number,
   ) => void;
@@ -1150,11 +1167,12 @@ function SlotCard({
                     seatIndex={seatIndex}
                     currentName={name}
                     onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
-                    onSwap={(targetSlotId, targetSeatIndex) =>
+                    onSwap={(targetMissionId, targetSlotId, targetSeatIndex) =>
                       onAdminReplacementSwap(
                         missionId,
                         slot.slotId,
                         seatIndex,
+                        targetMissionId,
                         targetSlotId,
                         targetSeatIndex,
                       )

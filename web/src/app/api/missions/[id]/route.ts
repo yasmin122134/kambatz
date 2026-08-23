@@ -215,8 +215,15 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const body = await request.json();
-  const { action, slot_id, seat_index, target_slot_id, target_seat_index, name } =
-    body;
+  const {
+    action,
+    slot_id,
+    seat_index,
+    target_mission_id,
+    target_slot_id,
+    target_seat_index,
+    name,
+  } = body;
 
   const admin = await isAdmin();
   const personName = session.person.name;
@@ -258,10 +265,23 @@ export async function PATCH(request: Request, { params }: Params) {
       assignments: { ...mission.assignments, [slot_id]: assignees },
     };
   } else if (action === "swap") {
+    const targetMissionId = String(target_mission_id || mission.id);
+    const targetMission =
+      targetMissionId === mission.id
+        ? mission
+        : sameDayMissions.find((m) => m.id === targetMissionId);
+    if (!targetMission) {
+      return NextResponse.json({ error: "משימת יעד לא נמצאה" }, { status: 404 });
+    }
+
     const srcSlot = slotById(mission, slot_id);
-    const dstSlot = slotById(mission, target_slot_id);
+    const dstSlot = slotById(targetMission, target_slot_id);
+    if (!srcSlot || !dstSlot) {
+      return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
+    }
+
     const src = [...(mission.assignments[slot_id] || [])];
-    const dst = [...(mission.assignments[target_slot_id] || [])];
+    const dst = [...(targetMission.assignments[target_slot_id] || [])];
     const srcName = src[seat_index];
     const dstName = dst[target_seat_index];
     if (srcName !== personName && !admin) {
@@ -274,11 +294,11 @@ export async function PATCH(request: Request, { params }: Params) {
       missions: sameDayMissions,
       rules,
       missionId: mission.id,
-      slot: srcSlot!,
+      slot: srcSlot,
       seatIndex: seat_index,
       removeName: srcName,
-      swapMissionId: mission.id,
-      swapSlot: dstSlot!,
+      swapMissionId: targetMissionId,
+      swapSlot: dstSlot,
       swapSeatIndex: target_seat_index,
       swapPerson: peopleByName[dstName]!,
       issues,
@@ -289,14 +309,43 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     src[seat_index] = dstName;
     dst[target_seat_index] = srcName;
-    updated = {
-      ...mission,
-      assignments: {
-        ...mission.assignments,
-        [slot_id]: src,
-        [target_slot_id]: dst,
-      },
-    };
+
+    try {
+      if (targetMissionId === mission.id) {
+        const updatedSame = {
+          ...mission,
+          assignments: {
+            ...mission.assignments,
+            [slot_id]: src,
+            [target_slot_id]: dst,
+          },
+        };
+        const { mission: saved } = await saveMissionDay({
+          ...updatedSame,
+          id: mission.id,
+        });
+        return NextResponse.json(saved);
+      }
+
+      const updatedSrc = {
+        ...mission,
+        assignments: { ...mission.assignments, [slot_id]: src },
+      };
+      const updatedDst = {
+        ...targetMission,
+        assignments: { ...targetMission.assignments, [target_slot_id]: dst },
+      };
+      const [{ mission: savedSrc }, { mission: savedDst }] = await Promise.all([
+        saveMissionDay({ ...updatedSrc, id: mission.id }),
+        saveMissionDay({ ...updatedDst, id: targetMission.id }),
+      ]);
+      return NextResponse.json({ missions: [savedSrc, savedDst] });
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "שגיאה" },
+        { status: 500 },
+      );
+    }
   } else if (action === "admin_set" && admin) {
     const slot = slotById(mission, slot_id);
     const nextName = String(name || "").trim();
