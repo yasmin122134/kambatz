@@ -5,9 +5,13 @@ import { flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { standardMissionPositions } from "@/lib/mission-templates";
 import {
   buildTrackerFromMissions,
+  evaluateSoftConstraints,
   explainFitsPersonFailure,
   fitsPerson,
+  fitsPersonStrict,
+  pickRelaxedCandidate,
   placePerson,
+  MIN_GUARD_RATIO,
 } from "@/lib/scheduling-engine";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import type { MissionDay, Person } from "@/lib/types";
@@ -232,7 +236,7 @@ describe("guard ratio scoped to current mission", () => {
     ).toBeNull();
   });
 
-  it("fills all guard seats in a full guard day (kitchen + cross-day context)", () => {
+  it("fills all guard seats without consecutive shifts on same person", () => {
     const people = Array.from({ length: 56 }, (_, i) =>
       person(`צוער ${i + 1}`),
     );
@@ -288,12 +292,168 @@ describe("guard ratio scoped to current mission", () => {
 
     let guardReq = 0;
     let guardFill = 0;
-    for (const s of flattenMissionSlots(guards)) {
-      if (s.positionKind !== "guard") continue;
+    const guardSlots = flattenMissionSlots(guards).filter((s) => s.positionKind === "guard");
+    for (const s of guardSlots) {
       guardReq += s.seatCount;
       const row = output.assignmentsByMission.get(guards.id)?.[s.slotId] || [];
       guardFill += row.filter(Boolean).length;
     }
     expect(guardFill).toBe(guardReq);
+
+    const minRatio = MIN_GUARD_RATIO;
+    for (const name of people.map((p) => p.name)) {
+      const assigned = guardSlots
+        .flatMap((slot) => {
+          const row = output.assignmentsByMission.get(guards.id)?.[slot.slotId] || [];
+          return row.includes(name) ? [slot] : [];
+        })
+        .sort((a, b) => a.startAtMs - b.startAtMs);
+      for (let i = 1; i < assigned.length; i++) {
+        const prevSlot = assigned[i - 1];
+        const slot = assigned[i];
+        const gapMs = slot.startAtMs - prevSlot.endAtMs;
+        const minGapMs = prevSlot.durationMinutes * minRatio * 60_000;
+        expect(gapMs).toBeGreaterThanOrEqual(minGapMs);
+      }
+    }
   }, 30_000);
+});
+
+describe("relaxed fill guard spacing", () => {
+  it("pickRelaxedCandidate allows hard-valid guard with soft spacing cost", () => {
+    const positions = [
+      {
+        id: "patrol",
+        name: "פטל",
+        kind: "guard" as const,
+        slots: [
+          { id: "g1", start_time: "08:00", end_time: "12:00", seat_count: 1 },
+          { id: "g2", start_time: "12:00", end_time: "16:00", seat_count: 1 },
+        ],
+      },
+    ];
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      status: "draft",
+      notes: "",
+      mission_type: "guards",
+      mission_date: "2026-08-26",
+      starts_at: "2026-08-25T20:00:00+03:00",
+      ends_at: "2026-08-26T20:00:00+03:00",
+      positions,
+      assignments: { g1: ["Alex"], g2: [""] },
+      created_at: "",
+      updated_at: "",
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, guard_ratio: 1 },
+    };
+
+    const slots = flattenMissionSlots(mission);
+    const first = slots.find((s) => s.slotId === "g1")!;
+    const second = slots.find((s) => s.slotId === "g2")!;
+    const tracker = buildTrackerFromMissions([], DEFAULT_FAIRNESS_RULES);
+    placePerson(
+      "Alex",
+      first,
+      mission.id,
+      tracker,
+      DEFAULT_FAIRNESS_RULES,
+      mission.scheduling_rules!,
+      1,
+    );
+
+    const p = person("Alex");
+    const chosen = pickRelaxedCandidate(
+      [p],
+      second,
+      tracker,
+      [],
+      mission.scheduling_rules!,
+      [],
+      { Alex: p },
+      DEFAULT_FAIRNESS_RULES,
+      0,
+      new Set(),
+      { scopeMissionId: mission.id, roster: [p] },
+    );
+    expect(chosen?.name).toBe("Alex");
+    const soft = evaluateSoftConstraints(
+      p,
+      second,
+      tracker,
+      mission.scheduling_rules!,
+      DEFAULT_FAIRNESS_RULES,
+      0,
+      1,
+      undefined,
+      mission.id,
+    );
+    expect(soft.restPenalty).toBeGreaterThan(0);
+  });
+
+  it("pickRelaxedCandidate accepts duty↔guard gap as soft cost when hard-valid", () => {
+    const baseWork = defaultBaseWorkPositions()[0];
+    const positions = [
+      baseWork,
+      {
+        id: "patrol",
+        name: "פטל",
+        kind: "guard" as const,
+        slots: [{ id: "g1", start_time: "12:00", end_time: "16:00", seat_count: 1 }],
+      },
+    ];
+    const scheduling = { ...DEFAULT_MISSION_SCHEDULING_RULES, duty_guard_gap_minutes: 70 };
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      status: "draft",
+      notes: "",
+      mission_type: "guards",
+      mission_date: "2026-08-26",
+      starts_at: "2026-08-25T20:00:00+03:00",
+      ends_at: "2026-08-26T20:00:00+03:00",
+      positions,
+      assignments: {},
+      created_at: "",
+      updated_at: "",
+      scheduling_rules: scheduling,
+    };
+
+    const slots = flattenMissionSlots(mission);
+    const baseSlot = slots.find((s) => s.missionType === "base_work")!;
+    const guardSlot = slots.find((s) => s.slotId === "g1")!;
+    const tracker = buildTrackerFromMissions([], DEFAULT_FAIRNESS_RULES);
+    placePerson(
+      "Alex",
+      baseSlot,
+      mission.id,
+      tracker,
+      DEFAULT_FAIRNESS_RULES,
+      scheduling,
+      baseSlot.seatCount,
+    );
+
+    const p = person("Alex");
+    expect(
+      fitsPerson(p, guardSlot, tracker, [], scheduling, [], { Alex: p }, undefined, mission.id),
+    ).toBe(true);
+    expect(
+      fitsPersonStrict(p, guardSlot, tracker, [], scheduling, [], { Alex: p }, undefined, mission.id),
+    ).toBe(false);
+
+    const chosen = pickRelaxedCandidate(
+      [p],
+      guardSlot,
+      tracker,
+      [],
+      scheduling,
+      [],
+      { Alex: p },
+      DEFAULT_FAIRNESS_RULES,
+      0,
+      new Set(),
+      { scopeMissionId: mission.id, roster: [p] },
+    );
+    expect(chosen?.name).toBe("Alex");
+  });
 });

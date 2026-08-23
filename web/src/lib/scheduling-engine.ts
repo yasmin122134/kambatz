@@ -5,6 +5,8 @@ import {
   calculateProjectedCandidateBurden,
   calculateProjectedKitchenBurden,
   guardSlotDifficultyRank,
+  blockFromFlatSlot,
+  getRestPenalty,
   type BurdenTimelineBlock,
   type PersonBurdenBreakdown,
 } from "@/lib/guard-burden";
@@ -305,9 +307,10 @@ function guardOk(
   ignoreSlotId?: string,
   scopeMissionId?: string,
 ): boolean {
-  if (!ratio || !isGuardKind(slot.positionKind)) return true;
+  if (!isGuardKind(slot.positionKind)) return true;
+  const effectiveRatio = ratio > 0 ? ratio : 1;
   const slotIv = slotInterval(slot);
-  const ratioMs = (minutes: number) => minutes * ratio * 60_000;
+  const ratioMs = (minutes: number) => minutes * effectiveRatio * 60_000;
 
   for (const b of tracker.busy[personName] || []) {
     if (!isGuardKind(b.positionKind)) continue;
@@ -350,6 +353,256 @@ function blockInterval(block: BusyBlock): TimeInterval {
   return { startMs: block.startAtMs, endMs: block.endAtMs };
 }
 
+/** True calendar overlap only — never relaxed by Smart Assignment. */
+export function hasHardTimeOverlap(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  ignoreSlotId?: string,
+): boolean {
+  const slotIv = slotInterval(slot);
+  for (const b of tracker.busy[personName] || []) {
+    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
+    if (b.slotId === slot.slotId) continue;
+    if (assignmentIntervalsOverlap(slotIv, blockInterval(b))) return true;
+  }
+  return false;
+}
+
+export type HardEligibilityReason =
+  | "canAssignKind"
+  | "blockedByIssue"
+  | "overlap"
+  | "sameRoom"
+  | "sameGender";
+
+export type HardEligibilityResult = {
+  allowed: boolean;
+  reason?: HardEligibilityReason;
+};
+
+/** Category A — never relaxed during Smart Assignment. */
+export function checkHardEligibility(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  ignoreSlotId?: string,
+): HardEligibilityResult {
+  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
+    return { allowed: false, reason: "canAssignKind" };
+  }
+  if (blockedByIssue(person.name, slot, issues)) {
+    return { allowed: false, reason: "blockedByIssue" };
+  }
+  if (hasHardTimeOverlap(person.name, slot, tracker, ignoreSlotId)) {
+    return { allowed: false, reason: "overlap" };
+  }
+  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) {
+    return { allowed: false, reason: "sameRoom" };
+  }
+  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) {
+    return { allowed: false, reason: "sameGender" };
+  }
+  return { allowed: true };
+}
+
+export type SoftConstraintEvaluation = {
+  restPenalty: number;
+  restViolationSevere: number;
+  restViolationSignificant: number;
+  guardSpacingPenalty: number;
+  dutyGuardGapPenalty: number;
+  dailyRestBudgetPenalty: number;
+  projectedDutyBurden: number;
+  totalSoftCost: number;
+};
+
+function guardSpacingRestHours(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  ratio: number,
+  ignoreSlotId?: string,
+  scopeMissionId?: string,
+): number | null {
+  if (!isGuardKind(slot.positionKind)) return null;
+  const effectiveRatio = ratio > 0 ? ratio : 1;
+  const slotIv = slotInterval(slot);
+  let worst: number | null = null;
+
+  for (const b of tracker.busy[personName] || []) {
+    if (!isGuardKind(b.positionKind)) continue;
+    if (scopeMissionId && b.missionId !== scopeMissionId) continue;
+    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
+    if (b.slotId === slot.slotId) continue;
+
+    const blockIv = blockInterval(b);
+    if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
+
+    if (blockIv.endMs <= slotIv.startMs) {
+      const requiredMs = b.durationMinutes * effectiveRatio * 60_000;
+      const gapMs = slotIv.startMs - blockIv.endMs;
+      if (gapMs < requiredMs) {
+        const restHours = gapMs / 3_600_000;
+        worst = worst == null ? restHours : Math.min(worst, restHours);
+      }
+    }
+    if (slotIv.endMs <= blockIv.startMs) {
+      const requiredMs = slot.durationMinutes * effectiveRatio * 60_000;
+      const gapMs = blockIv.startMs - slotIv.endMs;
+      if (gapMs < requiredMs) {
+        const restHours = gapMs / 3_600_000;
+        worst = worst == null ? restHours : Math.min(worst, restHours);
+      }
+    }
+  }
+  return worst;
+}
+
+function dutyGuardGapRestHours(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  scheduling: MissionSchedulingRules,
+  ignoreSlotId?: string,
+): number | null {
+  const gapMin =
+    scheduling.duty_guard_gap_minutes ??
+    DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
+    70;
+  const slotIv = slotInterval(slot);
+  let worst: number | null = null;
+
+  for (const b of tracker.busy[personName] || []) {
+    if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
+    if (b.slotId === slot.slotId) continue;
+    const extraGap = needsDutyGuardGap(
+      slot.positionKind,
+      slot.missionType,
+      b.positionKind,
+      b.missionType,
+    )
+      ? gapMin
+      : 0;
+    if (extraGap <= 0) continue;
+
+    const blockIv = blockInterval(b);
+    if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
+
+    if (blockIv.endMs <= slotIv.startMs) {
+      const gapMs = slotIv.startMs - blockIv.endMs;
+      if (gapMs < extraGap * 60_000) {
+        const restHours = gapMs / 3_600_000;
+        worst = worst == null ? restHours : Math.min(worst, restHours);
+      }
+    }
+    if (slotIv.endMs <= blockIv.startMs) {
+      const gapMs = blockIv.startMs - slotIv.endMs;
+      if (gapMs < extraGap * 60_000) {
+        const restHours = gapMs / 3_600_000;
+        worst = worst == null ? restHours : Math.min(worst, restHours);
+      }
+    }
+  }
+  return worst;
+}
+
+function dailyRestBudgetRestHours(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  restHoursRequired: number,
+): number | null {
+  if (!slotEatsRest(slot)) return null;
+  const restMin = restHoursRequired * 60;
+  const worked = workedRestMinutes(tracker.busy[personName] || []);
+  const available = 1440 - worked - slot.durationMinutes;
+  if (available >= restMin) return null;
+  return Math.max(0, available / 60);
+}
+
+/** Category B/C soft costs for ranking — never used to reject hard-valid candidates. */
+export function evaluateSoftConstraints(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  scheduling: MissionSchedulingRules,
+  rules: FairnessRules,
+  meanPrior: number,
+  seatCount?: number,
+  ignoreSlotId?: string,
+  scopeMissionId?: string,
+): SoftConstraintEvaluation {
+  const blocks = busyToBurdenBlocks(tracker.busy[person.name] || []);
+  const seats = seatCount ?? slot.seatCount;
+  const before = calculatePersonBurden(blocks, rules, scheduling);
+  const newBlock = blockFromFlatSlot(slot, slot.missionType, seats);
+  const after = calculatePersonBurden([...blocks, newBlock], rules, scheduling);
+  const restDelta = Math.max(0, after.restPenalties - before.restPenalties);
+
+  const guardGapHours = guardSpacingRestHours(
+    person.name,
+    slot,
+    tracker,
+    scheduling.guard_ratio,
+    ignoreSlotId,
+    scopeMissionId,
+  );
+  const guardSpacingPenalty =
+    guardGapHours != null ? getRestPenalty(guardGapHours, rules) : 0;
+
+  const dutyGapHours = dutyGuardGapRestHours(
+    person.name,
+    slot,
+    tracker,
+    scheduling,
+    ignoreSlotId,
+  );
+  const dutyGuardGapPenalty =
+    dutyGapHours != null ? getRestPenalty(dutyGapHours, rules) : 0;
+
+  const dailyRestHours = dailyRestBudgetRestHours(
+    person.name,
+    slot,
+    tracker,
+    scheduling.rest_hours,
+  );
+  const dailyRestBudgetPenalty =
+    dailyRestHours != null ? getRestPenalty(dailyRestHours, rules) : 0;
+
+  const projectedDutyBurden = projectedBurdenForSlot(
+    person,
+    slot,
+    tracker,
+    rules,
+    meanPrior,
+    scheduling,
+    seats,
+  );
+
+  const restPenalty =
+    restDelta + guardSpacingPenalty + dutyGuardGapPenalty + dailyRestBudgetPenalty;
+  const worstGapHours = [guardGapHours, dutyGapHours, dailyRestHours]
+    .filter((h): h is number => h != null)
+    .reduce<number | null>((min, h) => (min == null ? h : Math.min(min, h)), null);
+  const restViolationSevere = worstGapHours != null && worstGapHours < 4 ? 1 : 0;
+  const restViolationSignificant = worstGapHours != null && worstGapHours < 6 ? 1 : 0;
+
+  return {
+    restPenalty: Math.round(restPenalty * 100) / 100,
+    restViolationSevere,
+    restViolationSignificant,
+    guardSpacingPenalty,
+    dutyGuardGapPenalty,
+    dailyRestBudgetPenalty,
+    projectedDutyBurden,
+    totalSoftCost: Math.round((restPenalty + projectedDutyBurden) * 100) / 100,
+  };
+}
+
 /** Canonical overlap check for assignment intervals — half-open [start, end). */
 export function assignmentIntervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
   return intervalsOverlap(a, b);
@@ -365,18 +618,22 @@ function overlapsSlot(
   tracker: ScheduleTracker,
   scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
+  options?: { relaxDutyGuardGap?: boolean },
 ): boolean {
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
     70;
   const slotIv = slotInterval(slot);
+  const relaxDutyGuardGap = options?.relaxDutyGuardGap ?? false;
 
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
 
     const blockIv = blockInterval(b);
+    if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
+
     const extraGap = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
@@ -386,14 +643,12 @@ function overlapsSlot(
       ? gapMin
       : 0;
 
-    if (extraGap > 0) {
+    if (extraGap > 0 && !relaxDutyGuardGap) {
       if (
         assignmentSpacingConflict(slotIv, blockIv, extraGap, true)
       ) {
         return true;
       }
-    } else if (assignmentIntervalsOverlap(slotIv, blockIv)) {
-      return true;
     }
   }
   return false;
@@ -725,25 +980,6 @@ export function compareByFairnessThenBurden(
   seatCount?: number,
   preferHigh = false,
 ): number {
-  if (isGuardKind(slot.positionKind)) {
-    const countBase = rosterGuardCountByName(roster, tracker);
-    const names = activeRosterMembers(roster).map((p) => p.name);
-    const countSpreadA = spreadWithOverrides(
-      countBase,
-      names,
-      new Map([[a.name, (countBase.get(a.name) ?? 0) + 1]]),
-    );
-    const countSpreadB = spreadWithOverrides(
-      countBase,
-      names,
-      new Map([[b.name, (countBase.get(b.name) ?? 0) + 1]]),
-    );
-    if (countSpreadA !== countSpreadB) return countSpreadA - countSpreadB;
-    const ga = countBase.get(a.name) ?? 0;
-    const gb = countBase.get(b.name) ?? 0;
-    if (ga !== gb) return ga - gb;
-  }
-
   const bucket = fairnessBurdenBucketForSlot(slot);
   const base = rosterBurdenByName(roster, tracker, rules, scheduling, bucket);
   const names = activeRosterMembers(roster).map((p) => p.name);
@@ -766,6 +1002,11 @@ export function compareByFairnessThenBurden(
   const spreadA = spreadWithOverrides(base, names, new Map([[a.name, burdenA]]));
   const spreadB = spreadWithOverrides(base, names, new Map([[b.name, burdenB]]));
   if (spreadA !== spreadB) return spreadA - spreadB;
+
+  const maxA = Math.max(...names.map((n) => (n === a.name ? burdenA : base.get(n) ?? 0)));
+  const maxB = Math.max(...names.map((n) => (n === b.name ? burdenB : base.get(n) ?? 0)));
+  if (maxA !== maxB) return maxA - maxB;
+
   const scoreA = projectedBurdenForSlot(
     a,
     slot,
@@ -784,7 +1025,27 @@ export function compareByFairnessThenBurden(
     scheduling,
     seatCount,
   );
-  return preferHigh ? scoreB - scoreA : scoreA - scoreB;
+  if (scoreA !== scoreB) return preferHigh ? scoreB - scoreA : scoreA - scoreB;
+
+  if (isGuardKind(slot.positionKind)) {
+    const countBase = rosterGuardCountByName(roster, tracker);
+    const countSpreadA = spreadWithOverrides(
+      countBase,
+      names,
+      new Map([[a.name, (countBase.get(a.name) ?? 0) + 1]]),
+    );
+    const countSpreadB = spreadWithOverrides(
+      countBase,
+      names,
+      new Map([[b.name, (countBase.get(b.name) ?? 0) + 1]]),
+    );
+    if (countSpreadA !== countSpreadB) return countSpreadA - countSpreadB;
+    const ga = countBase.get(a.name) ?? 0;
+    const gb = countBase.get(b.name) ?? 0;
+    if (ga !== gb) return ga - gb;
+  }
+
+  return 0;
 }
 
 export function spreadAfterGroupAssign(
@@ -836,9 +1097,16 @@ export function explainFitsPersonFailure(
   ignoreSlotId?: string,
   scopeMissionId?: string,
 ): string | null {
-  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
-  if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
-  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
+  const hard = checkHardEligibility(
+    person,
+    slot,
+    tracker,
+    issues,
+    mates,
+    peopleByName,
+    ignoreSlotId,
+  );
+  if (!hard.allowed) return hard.reason ?? "hard";
   if (
     !guardOk(
       person.name,
@@ -852,11 +1120,10 @@ export function explainFitsPersonFailure(
     return "guardOk";
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
-  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
-  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
   return null;
 }
 
+/** Hard constraints only — rest and guard spacing are soft for Smart Assignment. */
 export function fitsPerson(
   person: Person,
   slot: FlatSlot,
@@ -868,9 +1135,46 @@ export function fitsPerson(
   ignoreSlotId?: string,
   scopeMissionId?: string,
 ): boolean {
-  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
-  if (blockedByIssue(person.name, slot, issues)) return false;
-  if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
+  void scheduling;
+  void scopeMissionId;
+  return checkHardEligibility(
+    person,
+    slot,
+    tracker,
+    issues,
+    mates,
+    peopleByName,
+    ignoreSlotId,
+  ).allowed;
+}
+
+/** Strict check including preferred rest and guard spacing — for validation warnings. */
+export function fitsPersonStrict(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  ignoreSlotId?: string,
+  scopeMissionId?: string,
+): boolean {
+  if (
+    !fitsPerson(
+      person,
+      slot,
+      tracker,
+      issues,
+      scheduling,
+      mates,
+      peopleByName,
+      ignoreSlotId,
+      scopeMissionId,
+    )
+  ) {
+    return false;
+  }
   if (
     !guardOk(
       person.name,
@@ -884,8 +1188,13 @@ export function fitsPerson(
     return false;
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return false;
-  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return false;
-  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return false;
+  if (
+    overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId, {
+      relaxDutyGuardGap: false,
+    })
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -1341,7 +1650,77 @@ function overlapAssignmentWarning(
   return null;
 }
 
-/** מועמדים כשאין מי שעומד בכל הכללים — עדיין אוסר חפיפות */
+/** Minimum guard spacing ratio when evaluating soft guard gaps. */
+export const MIN_GUARD_RATIO = 1;
+
+/** Progressive relaxation removed — only hard-valid candidates; soft costs rank choices. */
+export type AssignmentRelaxationLevel = 0 | 1 | 2 | 3 | 4;
+
+function personFitsAtRelaxationLevel(
+  person: Person,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  _scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  level: AssignmentRelaxationLevel,
+  _scopeMissionId?: string,
+): boolean {
+  if (level === 0) return false;
+  return checkHardEligibility(
+    person,
+    slot,
+    tracker,
+    issues,
+    mates,
+    peopleByName,
+  ).allowed;
+}
+
+export function pickCandidateAtRelaxationLevel(
+  people: Person[],
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+  issues: Issue[],
+  scheduling: MissionSchedulingRules,
+  mates: string[],
+  peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
+  exclude: Set<string>,
+  level: AssignmentRelaxationLevel,
+  pickOptions?: {
+    dutyOfficerAlreadyAssigned?: string;
+    roster?: Person[];
+    scopeMissionId?: string;
+  },
+): Person | null {
+  if (level === 0) return null;
+  const scopeMissionId = pickOptions?.scopeMissionId;
+  const candidates = people.filter(
+    (p) =>
+      !exclude.has(p.name) &&
+      !mates.includes(p.name) &&
+      personFitsAtRelaxationLevel(
+        p,
+        slot,
+        tracker,
+        issues,
+        scheduling,
+        mates,
+        peopleByName,
+        level,
+        scopeMissionId,
+      ),
+  );
+  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
+    scheduling,
+    roster: pickOptions?.roster ?? people,
+    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
+  });
+}
+/** Hard-valid candidates ranked by soft rest cost, then fairness. Never relaxes overlap or eligibility. */
 export function pickRelaxedCandidate(
   people: Person[],
   slot: FlatSlot,
@@ -1353,26 +1732,79 @@ export function pickRelaxedCandidate(
   rules: FairnessRules,
   meanPrior: number,
   exclude: Set<string>,
-  pickOptions?: { dutyOfficerAlreadyAssigned?: string; roster?: Person[] },
+  pickOptions?: {
+    dutyOfficerAlreadyAssigned?: string;
+    roster?: Person[];
+    scopeMissionId?: string;
+  },
 ): Person | null {
-  const candidates = people.filter((p) => {
-    if (exclude.has(p.name) || mates.includes(p.name)) return false;
-    if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
-    if (blockedByIssue(p.name, slot, issues)) return false;
-    if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
-    if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
-    if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
-    return true;
-  });
-  return pickBestCandidate(candidates, slot, tracker, rules, meanPrior, {
-    scheduling,
-    roster: pickOptions?.roster ?? people,
-    dutyOfficerAlreadyAssigned: pickOptions?.dutyOfficerAlreadyAssigned,
-  });
+  const scopeMissionId = pickOptions?.scopeMissionId;
+  const candidates = people
+    .filter(
+      (p) =>
+        !exclude.has(p.name) &&
+        !mates.includes(p.name) &&
+        checkHardEligibility(
+          p,
+          slot,
+          tracker,
+          issues,
+          mates,
+          peopleByName,
+        ).allowed,
+    )
+    .sort((a, b) => {
+      const softA = evaluateSoftConstraints(
+        a,
+        slot,
+        tracker,
+        scheduling,
+        rules,
+        meanPrior,
+        slot.seatCount,
+        undefined,
+        scopeMissionId,
+      );
+      const softB = evaluateSoftConstraints(
+        b,
+        slot,
+        tracker,
+        scheduling,
+        rules,
+        meanPrior,
+        slot.seatCount,
+        undefined,
+        scopeMissionId,
+      );
+      if (softA.restViolationSevere !== softB.restViolationSevere) {
+        return softA.restViolationSevere - softB.restViolationSevere;
+      }
+      if (softA.restViolationSignificant !== softB.restViolationSignificant) {
+        return softA.restViolationSignificant - softB.restViolationSignificant;
+      }
+      if (softA.restPenalty !== softB.restPenalty) return softA.restPenalty - softB.restPenalty;
+      const fairnessCmp = compareByFairnessThenBurden(
+        a,
+        b,
+        slot,
+        pickOptions?.roster ?? people,
+        tracker,
+        rules,
+        meanPrior,
+        scheduling,
+        slot.seatCount,
+      );
+      if (fairnessCmp !== 0) return fairnessCmp;
+      return a.name.localeCompare(b.name, "he");
+    });
+  return candidates[0] ?? null;
 }
 
-/** ממלא משבצות ריקות — ללא הפרת חפיפה */
-export function forceFillEmptySeats(input: {
+/** @deprecated Use fillUsingSoftConstraintViolations */
+export const forceFillEmptySeats = fillUsingSoftConstraintViolations;
+
+/** Fills empty seats using hard-valid candidates only; records soft-rule warnings. */
+export function fillUsingSoftConstraintViolations(input: {
   mission: MissionDay;
   assignments: Record<string, string[]>;
   people: Person[];
@@ -1444,6 +1876,7 @@ export function forceFillEmptySeats(input: {
           inSlot,
           {
             roster: input.people,
+            scopeMissionId: input.mission.id,
             dutyOfficerAlreadyAssigned: siblingDutyOfficerAssignee(
               input.mission,
               slot,
@@ -1453,13 +1886,13 @@ export function forceFillEmptySeats(input: {
         );
       if (!chosen) {
         warnings.push(
-          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי`,
+          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי (מגבלות קשיחות)`,
         );
         continue;
       }
 
       if (
-        !fitsPerson(
+        !fitsPersonStrict(
           chosen,
           slot,
           input.tracker,
@@ -1828,19 +2261,24 @@ function classifyCandidateRejection(
   slot: FlatSlot,
   tracker: ScheduleTracker,
   issues: Issue[],
-  scheduling: MissionSchedulingRules,
+  _scheduling: MissionSchedulingRules,
   mates: string[],
   peopleByName: Record<string, Person>,
 ): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
-  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "rejectedIneligible";
-  if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
-  if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
-  if (!guardOk(person.name, slot, tracker, scheduling.guard_ratio)) {
-    return "rejectedGuardRatio";
+  const hard = checkHardEligibility(
+    person,
+    slot,
+    tracker,
+    issues,
+    mates,
+    peopleByName,
+  );
+  if (!hard.allowed) {
+    if (hard.reason === "blockedByIssue") return "rejectedIssue";
+    if (hard.reason === "canAssignKind") return "rejectedIneligible";
+    if (hard.reason === "overlap") return "rejectedOverlap";
+    return "rejectedOther";
   }
-  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "rejectedRest";
-  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "rejectedOther";
-  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "rejectedOther";
   return null;
 }
 

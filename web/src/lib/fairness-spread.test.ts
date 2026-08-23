@@ -132,7 +132,7 @@ describe("compareByFairnessThenBurden", () => {
     expect(cmp).toBeLessThan(0);
   });
 
-  it("prefers guard candidate with fewer existing shifts (count spread)", () => {
+  it("uses guard count as secondary tie-break when duty burden is equal", () => {
     const roster = [person("א"), person("ב"), person("ג")];
     const tracker = createEmptyScheduleTracker();
     tracker.guardShifts = {
@@ -140,7 +140,7 @@ describe("compareByFairnessThenBurden", () => {
       ב: [],
       ג: [],
     };
-    tracker.dutyPoints = { א: 12, ב: 0, ג: 0 };
+    tracker.dutyPoints = { א: 5, ב: 5, ג: 0 };
     const slot: FlatSlot = {
       ...kitchenSlot("20:00", "00:00"),
       slotId: "g1",

@@ -33,6 +33,13 @@ export type SmartAssignObjectiveSummary = {
   carmelFilled: number;
   carmelRequired: number;
   fairnessSpread: number;
+  maxBurden?: number;
+  minBurden?: number;
+  burdenSpread?: number;
+  restSevereViolations?: number;
+  restSignificantViolations?: number;
+  totalRestPenalty?: number;
+  guardCountSpread?: number;
   searchNodes: number;
   attempts: number;
   timedOut?: boolean;

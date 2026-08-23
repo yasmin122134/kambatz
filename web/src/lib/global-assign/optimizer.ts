@@ -1,8 +1,7 @@
 import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
   compareByFairnessThenBurden,
-  rosterBurdenSpread,
-  rosterGuardCountSpread,
+  evaluateSoftConstraints,
   spreadAfterGroupAssign,
   spreadAfterGuardGroupAssign,
 } from "@/lib/scheduling-engine";
@@ -10,13 +9,20 @@ import {
   assignBaseWorkShift,
   buildTrackerFromMissions,
   fitsPerson,
-  forceFillEmptySeats,
+  fillUsingSoftConstraintViolations,
   pickRelaxedCandidate,
   placePerson,
   siblingDutyOfficerAssignee,
   unplacePerson,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
+import {
+  computeScheduleQuality,
+  formatScheduleQualitySummary,
+  lexBetter,
+  scheduleLexScore,
+  type ScheduleLexScore,
+} from "@/lib/schedule-quality";
 import {
   flattenMissionSlots,
   isGuardKind,
@@ -428,18 +434,28 @@ function listGuardPairCandidates(
   }
 
   return pairs.sort((groupA, groupB) => {
-    const spreadA = spreadAfterGuardGroupAssign(groupA, people, state.tracker);
-    const spreadB = spreadAfterGuardGroupAssign(groupB, people, state.tracker);
+    const spreadA = spreadAfterGroupAssign(
+      groupA,
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+    );
+    const spreadB = spreadAfterGroupAssign(
+      groupB,
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+    );
     if (spreadA !== spreadB) return spreadA - spreadB;
-    const sumA = groupA.reduce(
-      (s, p) => s + (state.tracker.guardShifts[p.name]?.length ?? 0),
-      0,
-    );
-    const sumB = groupB.reduce(
-      (s, p) => s + (state.tracker.guardShifts[p.name]?.length ?? 0),
-      0,
-    );
-    if (sumA !== sumB) return sumA - sumB;
+    const guardSpreadA = spreadAfterGuardGroupAssign(groupA, people, state.tracker);
+    const guardSpreadB = spreadAfterGuardGroupAssign(groupB, people, state.tracker);
+    if (guardSpreadA !== guardSpreadB) return guardSpreadA - guardSpreadB;
     const fairnessCmp = compareByFairnessThenBurden(
       groupA[0],
       groupB[0],
@@ -617,6 +633,36 @@ function listSeatCandidates(
       if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
       if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
     }
+    const softA = evaluateSoftConstraints(
+      a,
+      unit.slot,
+      state.tracker,
+      scheduling,
+      rules,
+      meanPrior,
+      unit.slot.seatCount,
+      undefined,
+      unit.mission.id,
+    );
+    const softB = evaluateSoftConstraints(
+      b,
+      unit.slot,
+      state.tracker,
+      scheduling,
+      rules,
+      meanPrior,
+      unit.slot.seatCount,
+      undefined,
+      unit.mission.id,
+    );
+    if (softA.restViolationSevere !== softB.restViolationSevere) {
+      return softA.restViolationSevere - softB.restViolationSevere;
+    }
+    if (softA.restViolationSignificant !== softB.restViolationSignificant) {
+      return softA.restViolationSignificant - softB.restViolationSignificant;
+    }
+    if (softA.restPenalty !== softB.restPenalty) return softA.restPenalty - softB.restPenalty;
+
     const guardSlot = unit.slot.positionKind === "guard";
     const eligibleA = scarcity.get(a.name) ?? 0;
     const eligibleB = scarcity.get(b.name) ?? 0;
@@ -672,6 +718,7 @@ function pickRelaxedSeatPerson(
     inSlot,
     {
       roster: people,
+      scopeMissionId: unit.mission.id,
       dutyOfficerAlreadyAssigned:
         siblingDutyOfficerAssignee(unit.mission, unit.slot, missionAssignments) ?? undefined,
     },
@@ -1097,46 +1144,18 @@ function evaluateLex(
   people: Person[],
   rules: FairnessRules,
   meanPrior: number,
-): number[] {
+): ScheduleLexScore {
   const filled = countFilledSeats(units, state.assignmentsByMission);
   const required = countRequiredSeats(units);
-  let carmelFilled = 0;
-  for (const unit of units) {
-    if (unit.kind !== "carmel") continue;
-    const seats = state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
-    carmelFilled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
-  }
-  const fairnessSpread = rosterBurdenSpread(
+  const metrics = computeScheduleQuality({
+    tracker: state.tracker,
     people,
-    state.tracker,
     rules,
-    undefined,
-    "duty",
-  );
-  const kitchenSpread = rosterBurdenSpread(
-    people,
-    state.tracker,
-    rules,
-    undefined,
-    "kitchen",
-  );
-  const guardCountSpread = rosterGuardCountSpread(people, state.tracker);
-  return [
-    filled,
-    filled >= required ? 1 : 0,
-    carmelFilled,
-    -guardCountSpread,
-    -fairnessSpread,
-    -kitchenSpread,
-  ];
-}
-
-function lexBetter(a: number[], b: number[]): boolean {
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    if ((a[i] ?? 0) > (b[i] ?? 0)) return true;
-    if ((a[i] ?? 0) < (b[i] ?? 0)) return false;
-  }
-  return false;
+    meanPrior,
+    filledSeats: filled,
+    requiredSeats: required,
+  });
+  return scheduleLexScore(metrics);
 }
 
 function solveGreedy(input: {
@@ -1546,8 +1565,9 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   };
 
   if (bestResult.score[0] >= requiredSeats && bestResult.score[1] === 1) {
-    // Greedy already filled everything — skip expensive backtracking.
-  } else if (units.length <= BACKTRACK_UNIT_LIMIT) {
+    // Greedy filled all seats — still run search to improve rest/fairness.
+  }
+  if (units.length <= BACKTRACK_UNIT_LIMIT) {
   for (let seed = 0; seed < maxAttempts; seed++) {
     const result = solveBacktracking({
       units,
@@ -1565,7 +1585,6 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     if (!bestResult || lexBetter(result.score, bestResult.score)) {
       bestResult = result;
     }
-    if (bestResult.score[0] >= requiredSeats && bestResult.score[1] === 1) break;
     if (timedOut) break;
   }
   }
@@ -1586,7 +1605,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       new Set(),
     );
     const scheduling = schedulingFor(mission);
-    const { assignments: filled, warnings } = forceFillEmptySeats({
+    const { assignments: filled, warnings } = fillUsingSoftConstraintViolations({
       mission: { ...mission, assignments: syncAssignmentSeats(mission.positions, { ...assignments }) },
       assignments: syncAssignmentSeats(mission.positions, { ...assignments }),
       people: input.people,
@@ -1643,21 +1662,18 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     carmelFilled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
   }
 
-  const dutySpread = rosterBurdenSpread(
-    input.people,
-    finalState.tracker,
-    input.rules,
-    undefined,
-    "duty",
-  );
-  const kitchenSpread = rosterBurdenSpread(
-    input.people,
-    finalState.tracker,
-    input.rules,
-    undefined,
-    "kitchen",
-  );
+  const quality = computeScheduleQuality({
+    tracker: finalState.tracker,
+    people: input.people,
+    rules: input.rules,
+    meanPrior: input.meanPrior,
+    filledSeats: filled,
+    requiredSeats,
+  });
+  const dutySpread = quality.burdenMad;
+  const kitchenSpread = quality.kitchenSpread;
   const fairnessSpread = Math.round((dutySpread + kitchenSpread) * 1000) / 1000;
+  const qualitySummary = formatScheduleQualitySummary(quality);
 
   const status = deriveStatus(filled, requiredSeats, []);
 
@@ -1668,7 +1684,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     skipped: 0,
     requiredSeats,
     unresolved,
-    warnings,
+    warnings: [...qualitySummary, ...warnings],
     carmelSnapshots,
     objectiveSummary: {
       filledSeats: filled,
@@ -1676,6 +1692,13 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       carmelFilled,
       carmelRequired,
       fairnessSpread,
+      maxBurden: quality.maxBurden,
+      minBurden: quality.minBurden,
+      burdenSpread: quality.burdenSpread,
+      restSevereViolations: quality.restViolations.severe,
+      restSignificantViolations: quality.restViolations.significant,
+      totalRestPenalty: quality.totalRestPenalty,
+      guardCountSpread: quality.guardCountSpread,
       searchNodes: totalNodes,
       attempts: maxAttempts,
       timedOut,

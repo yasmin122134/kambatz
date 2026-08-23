@@ -228,7 +228,7 @@ export type FairnessRules = Record<FairnessBucket, number> & {
   guard_hours_factor: number;
   /** Six 4-hour wall-clock bands — scores for a full band before hours factor. */
   guard_bands: GuardBandRule[];
-  /** Rest-penalty tiers: ≥16h, ≥12h, …, under 4h (mirrors getRestPenalty). */
+  /** Rest-penalty tiers: ≥12h, ≥10h, …, under 1h (mirrors getRestPenalty / טבלת צדק). */
   rest_penalties: number[];
 };
 
@@ -241,6 +241,7 @@ export const DEFAULT_GUARD_BANDS: GuardBandRule[] = [
   { solo: 8, paired: 6 }, // 20:00–00:00 — late hours
 ];
 
+/** ≥12h, >10–12h, >8–10h, >6–8h, >4–6h, >3–4h, >2–3h, >1–2h, 0–1h */
 export const DEFAULT_REST_PENALTIES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 
 export type BaseWorkShiftRule = {

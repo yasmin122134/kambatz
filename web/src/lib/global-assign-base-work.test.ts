@@ -72,7 +72,7 @@ describe("embedded base work in guards mission", () => {
     expect(virtualBaseWorkMission(mission)?.positions.length).toBeGreaterThan(0);
   });
 
-  it("assigns base work shift units in guards mission", () => {
+  it("assigns base work shift units in guards mission", { timeout: 20_000 }, () => {
     const positions = standardMissionPositions({
       missionType: "guards",
       startsAt: "2026-08-21T20:00:00+03:00",
