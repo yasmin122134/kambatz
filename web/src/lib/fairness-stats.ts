@@ -262,6 +262,10 @@ export function statsFromStoredHistory(
   const otherMissionPoints =
     Math.round((periodPoints - guardBaseBurden - restPenalties) * 100) / 100;
   const guardAssignmentCount = history.filter((h) => h.burdenBase != null).length;
+  const kitchenPoints = Math.round(
+    history.filter((h) => h.bucket === "kitchen").reduce((sum, h) => sum + h.points, 0) * 100,
+  ) / 100;
+  const dutyPoints = Math.round((periodPoints - kitchenPoints) * 100) / 100;
 
   return {
     rules,
@@ -273,6 +277,8 @@ export function statsFromStoredHistory(
       guardBaseBurden,
       restPenalties,
       otherMissionPoints,
+      kitchenPoints,
+      dutyPoints,
       guardAssignmentCount,
       totalBurden: periodPoints,
     },

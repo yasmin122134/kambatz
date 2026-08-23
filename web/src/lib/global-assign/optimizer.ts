@@ -71,6 +71,8 @@ function cloneTracker(tracker: ScheduleTracker): ScheduleTracker {
     busy,
     guardShifts,
     periodPoints: { ...tracker.periodPoints },
+    kitchenPoints: { ...tracker.kitchenPoints },
+    dutyPoints: { ...tracker.dutyPoints },
   };
 }
 
@@ -178,11 +180,14 @@ function seedExistingAssignments(
 
   for (const name of Object.keys(tracker.busy)) {
     const missionScheduling = schedulingFor(missions[0]);
-    tracker.periodPoints[name] = calculatePersonBurden(
+    const breakdown = calculatePersonBurden(
       tracker.busy[name] || [],
       rules,
       missionScheduling,
-    ).totalBurden;
+    );
+    tracker.periodPoints[name] = breakdown.totalBurden;
+    tracker.kitchenPoints[name] = breakdown.kitchenPoints;
+    tracker.dutyPoints[name] = breakdown.dutyPoints;
   }
 
   return tracker;
@@ -783,9 +788,17 @@ function evaluateLex(
     people,
     state.tracker,
     rules,
-    meanPrior,
+    undefined,
+    "duty",
   );
-  return [filled, filled >= required ? 1 : 0, carmelFilled, -fairnessSpread];
+  const kitchenSpread = rosterBurdenSpread(
+    people,
+    state.tracker,
+    rules,
+    undefined,
+    "kitchen",
+  );
+  return [filled, filled >= required ? 1 : 0, carmelFilled, -fairnessSpread, -kitchenSpread];
 }
 
 function lexBetter(a: number[], b: number[]): boolean {
@@ -1180,12 +1193,21 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     carmelFilled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
   }
 
-  const fairnessSpread = rosterBurdenSpread(
+  const dutySpread = rosterBurdenSpread(
     input.people,
     finalState.tracker,
     input.rules,
-    input.meanPrior,
+    undefined,
+    "duty",
   );
+  const kitchenSpread = rosterBurdenSpread(
+    input.people,
+    finalState.tracker,
+    input.rules,
+    undefined,
+    "kitchen",
+  );
+  const fairnessSpread = Math.round((dutySpread + kitchenSpread) * 1000) / 1000;
 
   const status = deriveStatus(filled, requiredSeats, []);
 

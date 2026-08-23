@@ -78,6 +78,8 @@ export function BoardClient({
     Array<{
       personName: string;
       totalBurden: number;
+      dutyPoints: number;
+      kitchenPoints: number;
       guardAssignmentCount: number;
       guardBaseBurden: number;
       restPenalties: number;
@@ -280,16 +282,22 @@ export function BoardClient({
     loadAdminData();
   }
 
-  async function runAutoAssign() {
-    if (!activeDate || !confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")) {
-      return;
-    }
+  async function runAutoAssign(keepExisting: boolean) {
+    if (!activeDate) return;
+    const confirmed = keepExisting
+      ? confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")
+      : confirm(
+          "לשבץ מחדש את כל היום מאפס?\n\n" +
+            "כל השיבוצים הקיימים יימחקו ויחולקו מחדש לפי האלגוריתם המעודכן (כולל איזון עומס נפרד למטבח ולשמירה+עב״ס).",
+        );
+    if (!confirmed) return;
+
     setAutoAssigning(true);
     setMsg("");
     const res = await fetch("/api/missions/auto-assign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mission_date: activeDate, keep_existing: true }),
+      body: JSON.stringify({ mission_date: activeDate, keep_existing: keepExisting }),
     });
     const data = await res.json();
     setAutoAssigning(false);
@@ -307,7 +315,7 @@ export function BoardClient({
     const warnings: string[] = data.warnings || [];
     const statusLine =
       status === "complete"
-        ? `שיבוץ הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+        ? `${keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
         : status === "infeasible"
           ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
           : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
@@ -368,9 +376,18 @@ export function BoardClient({
                 type="button"
                 className="btn-pri btn-sm"
                 disabled={autoAssigning || !activeDate}
-                onClick={runAutoAssign}
+                onClick={() => runAutoAssign(true)}
               >
                 {autoAssigning ? "משבץ…" : "שיבוץ חכם ליום"}
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={autoAssigning || !activeDate}
+                onClick={() => runAutoAssign(false)}
+                title="מוחק שיבוצים קיימים ומחלק מחדש את כל היום"
+              >
+                {autoAssigning ? "משבץ…" : "שיבוץ מחדש"}
               </button>
               <button
                 type="button"
@@ -1321,6 +1338,8 @@ function BurdenSummaryPanel({
   roster: Array<{
     personName: string;
     totalBurden: number;
+    dutyPoints: number;
+    kitchenPoints: number;
     guardAssignmentCount: number;
     guardBaseBurden: number;
     restPenalties: number;
@@ -1361,7 +1380,7 @@ function BurdenSummaryPanel({
         </button>
       </div>
       <p className="text-xs text-ink3 mb-2">
-        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח/כוננות/עב״ס לפי טבלת הצדק.
+        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח ושמירה+עב״ס נספרים בנפרד לשיבוץ הוגן.
         ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).
       </p>
       <div className="burden-roster-summary">
@@ -1389,7 +1408,9 @@ function BurdenSummaryPanel({
               <th>שמירות</th>
               <th title="עומס בסיס שמירות">בסיס</th>
               <th title="עונש מנוחה">מנוחה</th>
-              <th title="מטבח/עב״ס/כוננות">אחר</th>
+              <th title="שמירות + עב״ס + כוננות">שמירה+עב״ס</th>
+              <th title="תורנות מטבח">מטבח</th>
+              <th title="עב״ס/כוננות (לא כולל שמירות)">עב״ס/כוננ</th>
               <th title="התאמת ניקוד קודם">היסט׳</th>
             </tr>
           </thead>
@@ -1421,6 +1442,8 @@ function BurdenSummaryPanel({
                   <td className="mono">{row.guardAssignmentCount}</td>
                   <td className="mono text-ink2">{row.guardBaseBurden.toFixed(1)}</td>
                   <td className="mono text-ink2">{row.restPenalties.toFixed(1)}</td>
+                  <td className="mono text-ink2">{row.dutyPoints.toFixed(1)}</td>
+                  <td className="mono text-ink2">{row.kitchenPoints.toFixed(1)}</td>
                   <td className="mono text-ink2">{row.otherMissionPoints.toFixed(1)}</td>
                   <td className="mono text-ink2">
                     {row.historicalAdjustment >= 0 ? "+" : ""}

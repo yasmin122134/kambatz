@@ -3,6 +3,7 @@ import { spreadWithOverrides } from "@/lib/fairness-spread";
 import {
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
+  calculateProjectedKitchenBurden,
   guardSlotDifficultyRank,
   type BurdenTimelineBlock,
   type PersonBurdenBreakdown,
@@ -72,14 +73,37 @@ function syncPersonPeriodPoints(
   scheduling?: MissionSchedulingRules,
 ) {
   const blocks = tracker.busy[personName] || [];
-  tracker.periodPoints[personName] = calculatePersonBurden(blocks, rules, scheduling).totalBurden;
+  const breakdown = calculatePersonBurden(blocks, rules, scheduling);
+  tracker.periodPoints[personName] = breakdown.totalBurden;
+  tracker.kitchenPoints[personName] = breakdown.kitchenPoints;
+  tracker.dutyPoints[personName] = breakdown.dutyPoints;
+}
+
+export type FairnessBurdenBucket = "kitchen" | "duty";
+
+export function fairnessBurdenBucketForSlot(slot: FlatSlot): FairnessBurdenBucket {
+  if (slot.positionKind === "kitchen" || slot.missionType === "kitchen") return "kitchen";
+  return "duty";
 }
 
 export type ScheduleTracker = {
   busy: Record<string, BusyBlock[]>;
   guardShifts: Record<string, { start: number; duration: number }[]>;
+  /** Total day points (duty + kitchen) — kept for compatibility */
   periodPoints: Record<string, number>;
+  kitchenPoints: Record<string, number>;
+  dutyPoints: Record<string, number>;
 };
+
+export function createEmptyScheduleTracker(): ScheduleTracker {
+  return {
+    busy: {},
+    guardShifts: {},
+    periodPoints: {},
+    kitchenPoints: {},
+    dutyPoints: {},
+  };
+}
 
 export type ReplacementOption = {
   type: "direct" | "swap";
@@ -434,9 +458,16 @@ export function workScore(
   rules: FairnessRules,
   meanPrior: number,
   scheduling?: MissionSchedulingRules,
+  bucket?: FairnessBurdenBucket,
 ): number {
   const priorAdj = ((person.prior_score || 0) - meanPrior) * rules.hist;
-  const burden = periodBurdenOnly(person, tracker, rules, scheduling);
+  const burden = periodBurdenForBucket(
+    person,
+    tracker,
+    rules,
+    scheduling,
+    bucket ?? "duty",
+  );
   return burden + priorAdj;
 }
 
@@ -450,6 +481,26 @@ export function periodBurdenOnly(
     tracker.periodPoints[person.name] ??
     calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling).totalBurden
   );
+}
+
+export function periodBurdenForBucket(
+  person: Person,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  scheduling: MissionSchedulingRules | undefined,
+  bucket: FairnessBurdenBucket,
+): number {
+  if (bucket === "kitchen") {
+    if (tracker.kitchenPoints[person.name] != null) {
+      return tracker.kitchenPoints[person.name];
+    }
+    return calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling)
+      .kitchenPoints;
+  }
+  if (tracker.dutyPoints[person.name] != null) {
+    return tracker.dutyPoints[person.name];
+  }
+  return calculatePersonBurden(tracker.busy[person.name] || [], rules, scheduling).dutyPoints;
 }
 
 export function personBurdenBreakdown(
@@ -490,12 +541,15 @@ export function rosterBurdenByName(
   roster: Person[],
   tracker: ScheduleTracker,
   rules: FairnessRules,
-  _meanPrior: number,
-  scheduling?: MissionSchedulingRules,
+  scheduling: MissionSchedulingRules | undefined,
+  bucket: FairnessBurdenBucket,
 ): Map<string, number> {
   const map = new Map<string, number>();
   for (const person of activeRosterMembers(roster)) {
-    map.set(person.name, periodBurdenOnly(person, tracker, rules, scheduling));
+    map.set(
+      person.name,
+      periodBurdenForBucket(person, tracker, rules, scheduling, bucket),
+    );
   }
   return map;
 }
@@ -504,11 +558,11 @@ export function rosterBurdenSpread(
   roster: Person[],
   tracker: ScheduleTracker,
   rules: FairnessRules,
-  meanPrior: number,
-  scheduling?: MissionSchedulingRules,
+  scheduling: MissionSchedulingRules | undefined,
+  bucket: FairnessBurdenBucket,
   overrides?: Map<string, number>,
 ): number {
-  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const base = rosterBurdenByName(roster, tracker, rules, scheduling, bucket);
   const names = activeRosterMembers(roster).map((p) => p.name);
   return spreadWithOverrides(base, names, overrides ?? new Map());
 }
@@ -521,17 +575,29 @@ export function projectedPeriodBurdenForSlot(
   scheduling?: MissionSchedulingRules,
   seatCount?: number,
 ): number {
-  if (isGuardKind(slot.positionKind)) {
-    return calculateProjectedCandidateBurden(
+  const bucket = fairnessBurdenBucketForSlot(slot);
+  const blocks = busyToBurdenBlocks(tracker.busy[person.name] || []);
+  if (bucket === "kitchen") {
+    return calculateProjectedKitchenBurden(
       person.name,
       slot,
-      busyToBurdenBlocks(tracker.busy[person.name] || []),
+      blocks,
       rules,
       scheduling,
       seatCount,
     );
   }
-  const base = periodBurdenOnly(person, tracker, rules, scheduling);
+  if (isGuardKind(slot.positionKind)) {
+    return calculateProjectedCandidateBurden(
+      person.name,
+      slot,
+      blocks,
+      rules,
+      scheduling,
+      seatCount,
+    );
+  }
+  const base = periodBurdenForBucket(person, tracker, rules, scheduling, "duty");
   const increment = pointsForSlot(slot, seatCount ?? slot.seatCount, rules, {
     missionType: slot.missionType,
     scheduling,
@@ -583,7 +649,8 @@ export function compareByFairnessThenBurden(
   seatCount?: number,
   preferHigh = false,
 ): number {
-  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const bucket = fairnessBurdenBucketForSlot(slot);
+  const base = rosterBurdenByName(roster, tracker, rules, scheduling, bucket);
   const names = activeRosterMembers(roster).map((p) => p.name);
   const burdenA = projectedPeriodBurdenForSlot(
     a,
@@ -634,7 +701,7 @@ export function spreadAfterGroupAssign(
   meanPrior: number,
   scheduling?: MissionSchedulingRules,
 ): number {
-  const base = rosterBurdenByName(roster, tracker, rules, meanPrior, scheduling);
+  const base = rosterBurdenByName(roster, tracker, rules, scheduling, "duty");
   const names = activeRosterMembers(roster).map((p) => p.name);
   const overrides = new Map<string, number>();
   for (const person of group) {
@@ -1214,11 +1281,7 @@ export function buildTrackerFromMissions(
   rules: FairnessRules,
   excludeMissionIds: Set<string> = new Set(),
 ): ScheduleTracker {
-  const tracker: ScheduleTracker = {
-    busy: {},
-    guardShifts: {},
-    periodPoints: {},
-  };
+  const tracker = createEmptyScheduleTracker();
 
   for (const mission of missions) {
     if (excludeMissionIds.has(mission.id)) continue;
@@ -1360,8 +1423,12 @@ export function assignStandbyRoom(
     const avg = (rn: string) => {
       const pool = byRoom[rn];
       return (
-        pool.reduce((s, p) => s + workScore(p, tracker, rules, meanPrior), 0) /
-        pool.length
+        pool.reduce(
+          (s, p) =>
+            s +
+            workScore(p, tracker, rules, meanPrior, scheduling, "duty"),
+          0,
+        ) / pool.length
       );
     };
     return avg(a) - avg(b);
@@ -1458,10 +1525,18 @@ export function assignKitchenShift(input: {
     const sorted = [...pool]
       .filter(canPick)
       .sort((a, b) => {
-        const wa = workScore(a, input.tracker, input.rules, input.meanPrior);
-        const wb = workScore(b, input.tracker, input.rules, input.meanPrior);
-        if (wa !== wb) return wa - wb;
-        return a.name.localeCompare(b.name, "he");
+        const cmp = compareByFairnessThenBurden(
+          a,
+          b,
+          input.slot,
+          input.people,
+          input.tracker,
+          input.rules,
+          input.meanPrior,
+          input.scheduling,
+          input.slot.seatCount,
+        );
+        return cmp || a.name.localeCompare(b.name, "he");
       });
     for (const p of sorted) {
       if (assigned.length >= targetTotal || added >= limit) break;
@@ -1971,7 +2046,7 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
       a.mission.id.localeCompare(b.mission.id),
   );
 
-  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const tracker: ScheduleTracker = createEmptyScheduleTracker();
   const rules = VALIDATION_FAIRNESS_RULES;
 
   for (const { mission, slot, names } of entries) {
@@ -2045,7 +2120,7 @@ export function findAssignmentConflicts(
     }
   }
 
-  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const tracker: ScheduleTracker = createEmptyScheduleTracker();
   const rules = VALIDATION_FAIRNESS_RULES;
 
   for (const slot of slots) {
@@ -2165,7 +2240,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
   const issues = input.issues ?? [];
   const peopleByName = input.peopleByName ?? {};
   const rules = VALIDATION_FAIRNESS_RULES;
-  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const tracker: ScheduleTracker = createEmptyScheduleTracker();
 
   for (const mission of input.missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);

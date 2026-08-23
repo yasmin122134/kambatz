@@ -99,7 +99,7 @@ describe("constraints end-to-end", () => {
 
     expect(blockedByIssue(blocked.name, guardSlot, issues)).toBe(false);
     expect(
-      fitsPerson(blocked, guardSlot, { busy: {}, guardShifts: {}, periodPoints: {} }, issues, scheduling, [], peopleByName),
+      fitsPerson(blocked, guardSlot, createEmptyScheduleTracker(), issues, scheduling, [], peopleByName),
     ).toBe(true);
   });
 

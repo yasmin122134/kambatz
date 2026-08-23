@@ -96,7 +96,12 @@ export type GuardAssignmentBurdenDetail = {
 export type PersonBurdenBreakdown = {
   guardBaseBurden: number;
   restPenalties: number;
+  /** Non-guard, non-kitchen missions (עב״ס, כוננות, וכו׳) */
   otherMissionPoints: number;
+  /** Kitchen-only points for the day */
+  kitchenPoints: number;
+  /** Guard + rest + עב״ס/כוננות — excludes kitchen */
+  dutyPoints: number;
   guardAssignmentCount: number;
   totalBurden: number;
   guardDetails: GuardAssignmentBurdenDetail[];
@@ -259,13 +264,17 @@ function isRestRelevantBlock(block: BurdenTimelineBlock): boolean {
   return block.eatsRest;
 }
 
+function isKitchenBlock(block: BurdenTimelineBlock): boolean {
+  return block.positionKind === "kitchen" || block.missionType === "kitchen";
+}
+
 function legacyPointsForBlock(
   block: BurdenTimelineBlock,
   rules: FairnessRules,
   scheduling?: MissionSchedulingRules,
 ): number {
   const hours = slotDurationHours(block.startTime, block.endTime);
-  if (block.positionKind === "kitchen" || block.missionType === "kitchen") {
+  if (isKitchenBlock(block)) {
     const perShift =
       scheduling?.kitchen?.points_per_shift !== false &&
       block.missionType === "kitchen";
@@ -401,6 +410,7 @@ export function calculatePersonBurden(
   let guardBaseBurden = 0;
   let restPenalties = 0;
   let otherMissionPoints = 0;
+  let kitchenPoints = 0;
   let guardAssignmentCount = 0;
   const guardDetails: GuardAssignmentBurdenDetail[] = [];
 
@@ -412,18 +422,23 @@ export function calculatePersonBurden(
       guardBaseBurden += detail.baseBurden;
       restPenalties += detail.restPenaltyBefore;
       guardDetails.push(detail);
+    } else if (isKitchenBlock(block)) {
+      kitchenPoints += legacyPointsForBlock(block, rules, scheduling);
     } else {
       otherMissionPoints += legacyPointsForBlock(block, rules, scheduling);
     }
   }
 
-  const totalBurden =
+  const dutyPoints =
     Math.round((guardBaseBurden + restPenalties + otherMissionPoints) * 100) / 100;
+  const totalBurden = Math.round((dutyPoints + kitchenPoints) * 100) / 100;
 
   return {
     guardBaseBurden: Math.round(guardBaseBurden * 100) / 100,
     restPenalties: Math.round(restPenalties * 100) / 100,
     otherMissionPoints: Math.round(otherMissionPoints * 100) / 100,
+    kitchenPoints: Math.round(kitchenPoints * 100) / 100,
+    dutyPoints,
     guardAssignmentCount,
     totalBurden,
     guardDetails,
@@ -460,7 +475,21 @@ export function calculateProjectedCandidateBurden(
   void personName;
   const newBlock = blockFromFlatSlot(slot, slot.missionType, seatCount);
   const combined = [...existingBlocks, newBlock];
-  return calculatePersonBurden(combined, rules, scheduling).totalBurden;
+  return calculatePersonBurden(combined, rules, scheduling).dutyPoints;
+}
+
+export function calculateProjectedKitchenBurden(
+  personName: string,
+  slot: FlatSlot,
+  existingBlocks: BurdenTimelineBlock[],
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+  seatCount?: number,
+): number {
+  void personName;
+  const newBlock = blockFromFlatSlot(slot, slot.missionType, seatCount);
+  const combined = [...existingBlocks, newBlock];
+  return calculatePersonBurden(combined, rules, scheduling).kitchenPoints;
 }
 
 /** Slot difficulty for guard auto-assign ordering (higher = fill first). */

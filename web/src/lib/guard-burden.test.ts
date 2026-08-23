@@ -3,6 +3,7 @@ import {
   calculateGuardAssignmentBurden,
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
+  blockFromFlatSlot,
   getGuardBaseBurden,
   getRestHoursBetween,
   getRestPenalty,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/guard-burden";
 import {
   canAssignKind,
+  createEmptyScheduleTracker,
   fitsPerson,
   pickBestCandidate,
   type ScheduleTracker,
@@ -142,6 +144,24 @@ describe("rest hours between blocks", () => {
   });
 });
 
+describe("kitchen vs duty burden buckets", () => {
+  it("splits kitchen points from guard and base work", () => {
+    const kitchen: BurdenTimelineBlock = {
+      ...guardBlock("08:00", "12:00", 1),
+      missionType: "kitchen",
+      positionKind: "kitchen",
+    };
+    const guard = guardBlock("20:00", "00:00", 1);
+    const breakdown = calculatePersonBurden([kitchen, guard], rules, scheduling);
+    expect(breakdown.kitchenPoints).toBe(rules.kitchen);
+    expect(breakdown.dutyPoints).toBeGreaterThan(0);
+    expect(breakdown.totalBurden).toBe(
+      Math.round((breakdown.dutyPoints + breakdown.kitchenPoints) * 100) / 100,
+    );
+    expect(breakdown.otherMissionPoints).toBe(0);
+  });
+});
+
 describe("no double-counting rest penalties", () => {
   it("two guards share one gap penalty total", () => {
     const a = guardBlock("00:00", "04:00", 1, "a");
@@ -208,6 +228,8 @@ describe("fairness candidate selection", () => {
       },
       guardShifts: {},
       periodPoints: {},
+      kitchenPoints: {},
+      dutyPoints: { "א׳": 20, "ב׳": 2 },
     };
 
     const slot = flatSlot("00:00", "04:00", 1, "next-hard");
@@ -225,7 +247,7 @@ describe("fairness candidate selection", () => {
 
 describe("hard constraints still gate eligibility", () => {
   const slot = flatSlot("08:00", "12:00", 1);
-  const emptyTracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const emptyTracker = createEmptyScheduleTracker();
   const peopleByName: Record<string, Person> = {};
 
   const basePerson = (overrides: Partial<Person> = {}): Person => ({
@@ -366,6 +388,7 @@ describe("projected burden with cross-mission rest", () => {
       positionKind: "kitchen",
     };
     const guardSlot = flatSlot("14:00", "18:00", 1);
+    guardSlot.calendarDayOffset = 0;
     const projected = calculateProjectedCandidateBurden(
       "cadet",
       guardSlot,
@@ -374,6 +397,13 @@ describe("projected burden with cross-mission rest", () => {
       scheduling,
     );
     const baseOnly = getGuardBaseBurden("14:00", "18:00", 1);
-    expect(projected).toBeGreaterThan(baseOnly);
+    const breakdown = calculatePersonBurden(
+      [kitchen, blockFromFlatSlot(guardSlot, guardSlot.missionType, 1)],
+      rules,
+      scheduling,
+    );
+    expect(breakdown.restPenalties).toBeGreaterThan(0);
+    expect(breakdown.dutyPoints).toBeGreaterThan(baseOnly);
+    expect(projected).toBe(breakdown.dutyPoints);
   });
 });

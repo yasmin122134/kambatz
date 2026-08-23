@@ -314,6 +314,8 @@ export type PersonFairnessStats = {
     guardBaseBurden: number;
     restPenalties: number;
     otherMissionPoints: number;
+    kitchenPoints: number;
+    dutyPoints: number;
     guardAssignmentCount: number;
     totalBurden: number;
   };
