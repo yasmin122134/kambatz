@@ -567,6 +567,42 @@ export function rosterBurdenSpread(
   return spreadWithOverrides(base, names, overrides ?? new Map());
 }
 
+/** Guard shift counts per person — for even distribution of שמירות. */
+export function rosterGuardCountByName(
+  roster: Person[],
+  tracker: ScheduleTracker,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const person of activeRosterMembers(roster)) {
+    map.set(person.name, (tracker.guardShifts[person.name] || []).length);
+  }
+  return map;
+}
+
+export function rosterGuardCountSpread(
+  roster: Person[],
+  tracker: ScheduleTracker,
+  overrides?: Map<string, number>,
+): number {
+  const base = rosterGuardCountByName(roster, tracker);
+  const names = activeRosterMembers(roster).map((p) => p.name);
+  return spreadWithOverrides(base, names, overrides ?? new Map());
+}
+
+export function spreadAfterGuardGroupAssign(
+  group: Person[],
+  roster: Person[],
+  tracker: ScheduleTracker,
+): number {
+  const base = rosterGuardCountByName(roster, tracker);
+  const names = activeRosterMembers(roster).map((p) => p.name);
+  const overrides = new Map<string, number>();
+  for (const person of group) {
+    overrides.set(person.name, (base.get(person.name) ?? 0) + 1);
+  }
+  return spreadWithOverrides(base, names, overrides);
+}
+
 export function projectedPeriodBurdenForSlot(
   person: Person,
   slot: FlatSlot,
@@ -649,6 +685,25 @@ export function compareByFairnessThenBurden(
   seatCount?: number,
   preferHigh = false,
 ): number {
+  if (isGuardKind(slot.positionKind)) {
+    const countBase = rosterGuardCountByName(roster, tracker);
+    const names = activeRosterMembers(roster).map((p) => p.name);
+    const countSpreadA = spreadWithOverrides(
+      countBase,
+      names,
+      new Map([[a.name, (countBase.get(a.name) ?? 0) + 1]]),
+    );
+    const countSpreadB = spreadWithOverrides(
+      countBase,
+      names,
+      new Map([[b.name, (countBase.get(b.name) ?? 0) + 1]]),
+    );
+    if (countSpreadA !== countSpreadB) return countSpreadA - countSpreadB;
+    const ga = countBase.get(a.name) ?? 0;
+    const gb = countBase.get(b.name) ?? 0;
+    if (ga !== gb) return ga - gb;
+  }
+
   const bucket = fairnessBurdenBucketForSlot(slot);
   const base = rosterBurdenByName(roster, tracker, rules, scheduling, bucket);
   const names = activeRosterMembers(roster).map((p) => p.name);
@@ -1018,6 +1073,114 @@ export function repairGuardAssignmentGaps(input: {
   }
 
   return { assignments, filled };
+}
+
+/** מעביר שמירות ממי שכבר קיבל 2+ למי שעדיין בלי — כשאפשר לפי כללים. */
+export function rebalanceGuardAssignmentCounts(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+  people: Person[];
+  tracker: ScheduleTracker;
+  issues: Issue[];
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+}): { assignments: Record<string, string[]>; moved: number } {
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  let moved = 0;
+
+  const guardCount = (name: string) => (input.tracker.guardShifts[name] || []).length;
+
+  const slots = flattenMissionSlots(input.mission).filter(
+    (s) => s.positionKind === "guard" && s.seatCount > 0,
+  );
+
+  let progress = true;
+  let guard = 0;
+  while (progress && guard < 120) {
+    progress = false;
+    guard += 1;
+
+    const counts = new Map(input.people.map((p) => [p.name, guardCount(p.name)]));
+    const values = [...counts.values()];
+    const maxCount = values.length ? Math.max(...values) : 0;
+    const minCount = values.length ? Math.min(...values) : 0;
+    if (maxCount - minCount <= 1) break;
+
+    const overloaded = input.people
+      .filter((p) => (counts.get(p.name) ?? 0) >= maxCount && maxCount >= 2)
+      .sort((a, b) => (counts.get(a.name) ?? 0) - (counts.get(b.name) ?? 0));
+    const underloaded = input.people
+      .filter((p) => (counts.get(p.name) ?? 0) <= minCount)
+      .sort((a, b) => (counts.get(a.name) ?? 0) - (counts.get(b.name) ?? 0));
+
+    for (const slot of slots) {
+      const seats = assignments[slot.slotId] || [];
+      for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+        const current = seats[seatIndex];
+        if (!current || !overloaded.some((p) => p.name === current)) continue;
+
+        const mates = seats.filter((n, idx) => n && idx !== seatIndex);
+        for (const candidate of underloaded) {
+          if (candidate.name === current || mates.includes(candidate.name)) continue;
+
+          unplacePerson(
+            current,
+            slot,
+            input.mission.id,
+            input.tracker,
+            input.rules,
+            input.scheduling,
+          );
+          const fits = fitsPerson(
+            candidate,
+            slot,
+            input.tracker,
+            input.issues,
+            input.scheduling,
+            mates,
+            peopleByName,
+          );
+          if (!fits) {
+            placePerson(
+              current,
+              slot,
+              input.mission.id,
+              input.tracker,
+              input.rules,
+              input.scheduling,
+              slot.seatCount,
+              input.mission.mission_type,
+            );
+            continue;
+          }
+
+          seats[seatIndex] = candidate.name;
+          placePerson(
+            candidate.name,
+            slot,
+            input.mission.id,
+            input.tracker,
+            input.rules,
+            input.scheduling,
+            slot.seatCount,
+            input.mission.mission_type,
+          );
+          assignments[slot.slotId] = seats;
+          moved += 1;
+          progress = true;
+          break;
+        }
+        if (progress) break;
+      }
+      if (progress) break;
+    }
+  }
+
+  return { assignments, moved };
 }
 
 /** אזהרות על הפרות כללים — לשיבוץ כפוי עם הודעות */

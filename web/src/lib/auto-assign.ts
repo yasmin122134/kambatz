@@ -4,6 +4,7 @@ import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import {
   findAssignmentConflicts,
+  rebalanceGuardAssignmentCounts,
   repairGuardAssignmentGaps,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
@@ -154,7 +155,16 @@ async function smartAssignScope(input: {
       rules: input.rules,
       meanPrior,
     });
-    output.assignmentsByMission.set(mission.id, repaired);
+    const { assignments: balanced } = rebalanceGuardAssignmentCounts({
+      mission: { ...mission, assignments: repaired },
+      assignments: repaired,
+      people: input.people,
+      tracker,
+      issues: input.issues,
+      scheduling,
+      rules: input.rules,
+    });
+    output.assignmentsByMission.set(mission.id, balanced);
   }
 
   const draftMissions = input.scopeMissions.map((mission) => ({

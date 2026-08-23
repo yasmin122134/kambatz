@@ -4,6 +4,7 @@ import {
   compareByFairnessThenBurden,
   createEmptyScheduleTracker,
   rosterBurdenSpread,
+  rosterGuardCountSpread,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
 import type { FlatSlot } from "@/lib/mission-utils";
@@ -129,5 +130,39 @@ describe("compareByFairnessThenBurden", () => {
       0,
     );
     expect(cmp).toBeLessThan(0);
+  });
+
+  it("prefers guard candidate with fewer existing shifts (count spread)", () => {
+    const roster = [person("א"), person("ב"), person("ג")];
+    const tracker = createEmptyScheduleTracker();
+    tracker.guardShifts = {
+      א: [{ start: 480, duration: 240 }],
+      ב: [],
+      ג: [],
+    };
+    tracker.dutyPoints = { א: 12, ב: 0, ג: 0 };
+    const slot: FlatSlot = {
+      ...kitchenSlot("20:00", "00:00"),
+      slotId: "g1",
+      positionKind: "guard",
+      missionType: "guards",
+      positionName: "פטל",
+    };
+
+    const cmp = compareByFairnessThenBurden(
+      person("ב"),
+      person("א"),
+      slot,
+      roster,
+      tracker,
+      DEFAULT_FAIRNESS_RULES,
+      0,
+    );
+    expect(cmp).toBeLessThan(0);
+    expect(
+      rosterGuardCountSpread(roster, tracker, new Map([["ב", 1]])),
+    ).toBeLessThan(
+      rosterGuardCountSpread(roster, tracker, new Map([["א", 2]])),
+    );
   });
 });

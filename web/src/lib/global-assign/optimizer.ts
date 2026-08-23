@@ -2,7 +2,9 @@ import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
   compareByFairnessThenBurden,
   rosterBurdenSpread,
+  rosterGuardCountSpread,
   spreadAfterGroupAssign,
+  spreadAfterGuardGroupAssign,
 } from "@/lib/scheduling-engine";
 import {
   assignBaseWorkShift,
@@ -338,14 +340,29 @@ function countGuardPairCandidates(
   issues: Issue[],
   peopleByName: Record<string, Person>,
 ): number {
-  return listGuardPairCandidates(
-    unit,
-    state,
-    people,
-    issues,
-    peopleByName,
-    0,
-  ).length;
+  const scheduling = schedulingFor(unit.mission);
+  const need = unit.seatIndices.length;
+  if (need <= 0) return 0;
+
+  const pool = people.filter((p) =>
+    fitsPerson(p, unit.slot, state.tracker, issues, scheduling, [], peopleByName),
+  );
+  if (need === 1) return pool.length;
+
+  let count = 0;
+  for (let i = 0; i < pool.length; i++) {
+    for (let j = i + 1; j < pool.length; j++) {
+      const a = pool[i];
+      const b = pool[j];
+      if (
+        fitsPerson(a, unit.slot, state.tracker, issues, scheduling, [b.name], peopleByName) &&
+        fitsPerson(b, unit.slot, state.tracker, issues, scheduling, [a.name], peopleByName)
+      ) {
+        count += 1;
+      }
+    }
+  }
+  return count;
 }
 
 function listGuardPairCandidates(
@@ -354,6 +371,8 @@ function listGuardPairCandidates(
   people: Person[],
   issues: Issue[],
   peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
   seed: number,
 ): Person[][] {
   const scheduling = schedulingFor(unit.mission);
@@ -383,6 +402,30 @@ function listGuardPairCandidates(
   }
 
   return pairs.sort((groupA, groupB) => {
+    const spreadA = spreadAfterGuardGroupAssign(groupA, people, state.tracker);
+    const spreadB = spreadAfterGuardGroupAssign(groupB, people, state.tracker);
+    if (spreadA !== spreadB) return spreadA - spreadB;
+    const sumA = groupA.reduce(
+      (s, p) => s + (state.tracker.guardShifts[p.name]?.length ?? 0),
+      0,
+    );
+    const sumB = groupB.reduce(
+      (s, p) => s + (state.tracker.guardShifts[p.name]?.length ?? 0),
+      0,
+    );
+    if (sumA !== sumB) return sumA - sumB;
+    const fairnessCmp = compareByFairnessThenBurden(
+      groupA[0],
+      groupB[0],
+      unit.slot,
+      people,
+      state.tracker,
+      rules,
+      meanPrior,
+      scheduling,
+      unit.slot.seatCount,
+    );
+    if (fairnessCmp !== 0) return fairnessCmp;
     const tieA = (groupA[0].name.charCodeAt(0) + seed) % 7;
     const tieB = (groupB[0].name.charCodeAt(0) + seed) % 7;
     if (tieA !== tieB) return tieA - tieB;
@@ -547,9 +590,9 @@ function listSeatCandidates(
       if (a.name === siblingOfficer && b.name !== siblingOfficer) return 1;
       if (b.name === siblingOfficer && a.name !== siblingOfficer) return -1;
     }
+    const guardSlot = unit.slot.positionKind === "guard";
     const eligibleA = scarcity.get(a.name) ?? 0;
     const eligibleB = scarcity.get(b.name) ?? 0;
-    if (eligibleA !== eligibleB) return eligibleA - eligibleB;
     const fairnessCmp = compareByFairnessThenBurden(
       a,
       b,
@@ -561,7 +604,13 @@ function listSeatCandidates(
       scheduling,
       unit.slot.seatCount,
     );
-    if (fairnessCmp !== 0) return fairnessCmp;
+    if (guardSlot) {
+      if (fairnessCmp !== 0) return fairnessCmp;
+      if (eligibleA !== eligibleB) return eligibleA - eligibleB;
+    } else {
+      if (eligibleA !== eligibleB) return eligibleA - eligibleB;
+      if (fairnessCmp !== 0) return fairnessCmp;
+    }
     const tie = (a.name.charCodeAt(0) + seed) % 7;
     const tie2 = (b.name.charCodeAt(0) + seed) % 7;
     if (tie !== tie2) return tie - tie2;
@@ -927,7 +976,15 @@ function evaluateLex(
     undefined,
     "kitchen",
   );
-  return [filled, filled >= required ? 1 : 0, carmelFilled, -fairnessSpread, -kitchenSpread];
+  const guardCountSpread = rosterGuardCountSpread(people, state.tracker);
+  return [
+    filled,
+    filled >= required ? 1 : 0,
+    carmelFilled,
+    -guardCountSpread,
+    -fairnessSpread,
+    -kitchenSpread,
+  ];
 }
 
 function lexBetter(a: number[], b: number[]): boolean {
@@ -1001,6 +1058,8 @@ function solveGreedy(input: {
                   input.people,
                   input.issues,
                   peopleByName,
+                  input.rules,
+                  input.meanPrior,
                   input.seed,
                 )[0];
                 return group?.length
@@ -1135,6 +1194,8 @@ function solveBacktracking(input: {
                 input.people,
                 input.issues,
                 peopleByName,
+                input.rules,
+                input.meanPrior,
                 input.seed,
               )
                 .slice(0, MAX_SEAT_BRANCH)
