@@ -7,6 +7,7 @@ import {
   syncPublishedFairnessPoints,
 } from "@/lib/fairness-persistence";
 import type { MissionDay, Person } from "@/lib/types";
+import type { CalendarInviteSummary } from "@/lib/calendar-invites";
 import {
   emptyAssignments,
   newPosition,
@@ -89,10 +90,15 @@ export async function getUpcomingForPersonFromMissions(personName: string) {
   return upcomingFromMissions(missions, personName);
 }
 
+export type SaveMissionDayResult = {
+  mission: MissionDay;
+  calendarInvites: CalendarInviteSummary | null;
+};
+
 export async function saveMissionDay(
   payload: Omit<MissionDay, "id" | "created_at" | "updated_at"> & { id?: string },
   options?: { validateAssignments?: boolean },
-): Promise<MissionDay> {
+): Promise<SaveMissionDayResult> {
   const validateAssignments = options?.validateAssignments !== false;
   const supabase = await createClient();
   const positions = payload.positions || [];
@@ -157,8 +163,8 @@ export async function saveMissionDay(
       .single();
     if (error) throw new Error(error.message);
     const saved = rowFromDb(data);
-    await afterMissionSave(saved, previous);
-    return saved;
+    const calendarInvites = await afterMissionSave(saved, previous);
+    return { mission: saved, calendarInvites };
   }
 
   const { data, error } = await supabase
@@ -168,14 +174,14 @@ export async function saveMissionDay(
     .single();
   if (error) throw new Error(error.message);
   const saved = rowFromDb(data);
-  await afterMissionSave(saved, null);
-  return saved;
+  const calendarInvites = await afterMissionSave(saved, null);
+  return { mission: saved, calendarInvites };
 }
 
 async function afterMissionSave(
   mission: MissionDay,
   previous: MissionDay | null,
-): Promise<void> {
+): Promise<CalendarInviteSummary | null> {
   try {
     if (mission.status !== "published") {
       await deleteFairnessPointsForMission(mission.id);
@@ -187,9 +193,14 @@ async function afterMissionSave(
 
   try {
     const { sendCalendarInvitesForMission } = await import("@/lib/calendar-invites");
-    await sendCalendarInvitesForMission(mission, previous);
+    const justPublished =
+      mission.status === "published" && previous?.status !== "published";
+    return await sendCalendarInvitesForMission(mission, previous, {
+      forceAll: justPublished,
+    });
   } catch (e) {
     console.error("[calendar-invite] mission save", e);
+    return null;
   }
 }
 

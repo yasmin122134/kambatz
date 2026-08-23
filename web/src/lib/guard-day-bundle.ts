@@ -76,7 +76,7 @@ export async function createGuardDayBundle(
     guard_day_bundle_id: bundleId,
   };
 
-  const guards = await saveMissionDay({
+  const { mission: guards } = await saveMissionDay({
     title: input.title?.trim() || `${mission_date} · שמירות+עב״ס`,
     mission_type: "guards",
     mission_date,
@@ -149,7 +149,7 @@ export async function consolidateGuardDayMission(
   };
   delete scheduling.linked_mission_id;
 
-  const saved = await saveMissionDay({
+  const { mission: saved } = await saveMissionDay({
     ...guards,
     positions,
     assignments,

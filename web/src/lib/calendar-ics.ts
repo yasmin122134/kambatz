@@ -101,6 +101,7 @@ export function buildIcsCalendar(
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsEscape(calendarName)}`,
     `X-WR-TIMEZONE:${MISSION_WALL_TZ}`,
+    "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
   ];
 
   for (const e of events) {
@@ -135,6 +136,15 @@ export function buildCalendarInviteIcs(
   organizerEmail: string,
   sequence = 0,
 ): string {
+  return buildGroupedCalendarInviteIcs([event], attendee, organizerEmail, sequence);
+}
+
+export function buildGroupedCalendarInviteIcs(
+  events: CalendarEvent[],
+  attendee: { name: string; email: string },
+  organizerEmail: string,
+  sequence = 0,
+): string {
   const stamp = icsStamp(new Date());
   const lines: string[] = [
     "BEGIN:VCALENDAR",
@@ -142,19 +152,26 @@ export function buildCalendarInviteIcs(
     "PRODID:-//Kambatz//Mission Scheduler//HE",
     "CALSCALE:GREGORIAN",
     "METHOD:REQUEST",
-    "BEGIN:VEVENT",
-    `UID:${event.uid}`,
-    `SEQUENCE:${sequence}`,
-    `DTSTAMP:${stamp}`,
-    `DTSTART:${icsStamp(new Date(event.startMs))}`,
-    `DTEND:${icsStamp(new Date(event.endMs))}`,
-    `SUMMARY:${icsEscape(event.summary)}`,
-    `ORGANIZER;CN=Kambatz:mailto:${organizerEmail}`,
-    `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${icsEscape(attendee.name)}:mailto:${attendee.email}`,
-    "STATUS:CONFIRMED",
-    "TRANSP:OPAQUE",
   ];
-  if (event.description) lines.push(`DESCRIPTION:${icsEscape(event.description)}`);
-  lines.push("END:VEVENT", "END:VCALENDAR");
+
+  for (const event of events) {
+    lines.push("BEGIN:VEVENT");
+    lines.push(`UID:${event.uid}`);
+    lines.push(`SEQUENCE:${sequence}`);
+    lines.push(`DTSTAMP:${stamp}`);
+    lines.push(`DTSTART:${icsStamp(new Date(event.startMs))}`);
+    lines.push(`DTEND:${icsStamp(new Date(event.endMs))}`);
+    lines.push(`SUMMARY:${icsEscape(event.summary)}`);
+    lines.push(`ORGANIZER;CN=Kambatz:mailto:${organizerEmail}`);
+    lines.push(
+      `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${icsEscape(attendee.name)}:mailto:${attendee.email}`,
+    );
+    lines.push("STATUS:CONFIRMED");
+    lines.push("TRANSP:OPAQUE");
+    if (event.description) lines.push(`DESCRIPTION:${icsEscape(event.description)}`);
+    lines.push("END:VEVENT");
+  }
+
+  lines.push("END:VCALENDAR");
   return lines.map(icsFold).join("\r\n") + "\r\n";
 }

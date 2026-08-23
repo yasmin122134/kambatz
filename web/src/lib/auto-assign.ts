@@ -163,7 +163,7 @@ async function smartAssignScope(input: {
       if (!missionWarnings.includes(msg)) missionWarnings.push(msg);
     }
 
-    const saved = await saveMissionDay(
+    const { mission: saved } = await saveMissionDay(
       applyAssignmentsOnly(mission, assignments),
       { validateAssignments: status === "complete" },
     );

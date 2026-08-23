@@ -276,7 +276,15 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     }
 
     loadedTimesRef.current = { startsAt: isoStart, endsAt: isoEnd };
-    setMsg(missionTimesChanged ? "נשמר — מבנה המשמרות סונכרן לשעות החדשות" : "נשמר");
+    const inviteNote =
+      typeof data.calendar_invite_message === "string"
+        ? data.calendar_invite_message
+        : "";
+    setMsg(
+      [missionTimesChanged ? "נשמר — מבנה המשמרות סונכרן לשעות החדשות" : "נשמר", inviteNote]
+        .filter(Boolean)
+        .join(" · "),
+    );
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }
@@ -470,6 +478,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 </option>
               ))}
             </select>
+            {status === "published" && (
+              <p className="hint text-xs mt-1">
+                בפרסום — נשלחות הזמנות אוטומטית למייל של כל משובץ (דורש Resend ב-Vercel)
+              </p>
+            )}
           </div>
         </div>
 
