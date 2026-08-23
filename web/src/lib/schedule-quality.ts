@@ -155,7 +155,6 @@ export function computeScheduleQuality(input: {
     input.people,
     input.tracker,
     input.rules,
-    undefined,
     "duty",
   );
   const guardCountSpread = rosterGuardCountSpread(input.people, input.tracker);
@@ -163,7 +162,6 @@ export function computeScheduleQuality(input: {
     input.people,
     input.tracker,
     input.rules,
-    undefined,
     "kitchen",
   );
 

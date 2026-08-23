@@ -116,7 +116,10 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   ) {
     const isoStart = new Date(window.startsAt).toISOString();
     const isoEnd = new Date(window.endsAt).toISOString();
-    let scheduling = rules ?? defaultSchedulingForType(type, isoStart);
+    let scheduling: MissionSchedulingRules = {
+      ...defaultSchedulingForType(type, isoStart),
+      ...rules,
+    };
     const nextPositions = standardMissionPositions({
       missionType: type,
       startsAt: isoStart,
@@ -715,11 +718,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 ) {
                   return;
                 }
-                applyStandardTemplate("guards", {
-                  missionDate: missionDate,
-                  startsAt,
-                  endsAt,
-                });
+                applyStandardTemplate(
+                  "guards",
+                  {
+                    missionDate: missionDate,
+                    startsAt,
+                    endsAt,
+                  },
+                  schedulingRules,
+                );
+                structureDirtyRef.current = true;
               }}
             >
               טען יום שמירות סטנדרטי (כל העמדות)

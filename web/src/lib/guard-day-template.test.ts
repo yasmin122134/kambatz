@@ -1,3 +1,4 @@
+import { parseTimeMinutes } from "@/lib/time-interval";
 import { describe, expect, it } from "vitest";
 import {
   buildGuardDayPositions,
@@ -102,6 +103,25 @@ describe("mission-relative guard grid", () => {
     const frontKeys = front.slots.map((s) => `${s.start_time}-${s.end_time}`);
     expect(footKeys).not.toEqual(frontKeys);
     expect(foot.slots.every((s) => s.seat_count === 1)).toBe(true);
+  });
+
+  it("buildGuardDayPositions uses shiftHours from options", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "20:00",
+      shiftHours: 3,
+      season: "summer",
+      missionStartsAt: "2026-08-21T20:00:00",
+      missionEndsAt: "2026-08-22T20:00:00",
+    });
+    const patrol = positions.find((p) => p.name.includes("פטל"))!;
+    expect(patrol.slots.length).toBeGreaterThan(4);
+    for (const slot of patrol.slots) {
+      const start = parseTimeMinutes(slot.start_time)!;
+      const end = parseTimeMinutes(slot.end_time)!;
+      const dur = end > start ? end - start : end + 1440 - start;
+      expect(dur).toBeLessThanOrEqual(180);
+      expect(dur).toBeGreaterThan(0);
+    }
   });
 
   it("sync preserves slot ids when windows match", () => {
