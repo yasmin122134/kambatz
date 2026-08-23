@@ -10,7 +10,9 @@ import type {
 export function countRequiredSeats(units: AssignmentUnit[]): number {
   return units.reduce((sum, u) => {
     if (u.kind === "carmel") return sum + u.need;
-    if (u.kind === "basework") return sum + u.seatIndices.length;
+    if (u.kind === "basework" || u.kind === "guard_pair") {
+      return sum + u.seatIndices.length;
+    }
     return sum + 1;
   }, 0);
 }
@@ -22,7 +24,7 @@ export function countFilledSeats(
   let filled = 0;
   for (const unit of units) {
     const seats = assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
-    if (unit.kind === "carmel" || unit.kind === "basework") {
+    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "guard_pair") {
       filled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
     } else if (seats[unit.seatIndex]) {
       filled += 1;
@@ -43,9 +45,10 @@ export function buildUnresolvedRequirements(input: {
     const seats = input.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
     const key = `${unit.mission.id}:${unit.slot.slotId}`;
 
-    if (unit.kind === "carmel" || unit.kind === "basework") {
+    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "guard_pair") {
       const assigned = unit.seatIndices.filter((i) => Boolean(seats[i])).length;
-      const required = unit.kind === "carmel" ? unit.need : unit.seatIndices.length;
+      const required =
+        unit.kind === "carmel" ? unit.need : unit.seatIndices.length;
       if (assigned >= required) continue;
       const snapshot =
         unit.kind === "carmel"

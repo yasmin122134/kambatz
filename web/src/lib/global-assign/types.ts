@@ -66,10 +66,19 @@ export type BaseWorkAssignmentUnit = {
   fixedNames: string[];
 };
 
+export type GuardPairAssignmentUnit = {
+  kind: "guard_pair";
+  id: string;
+  mission: MissionDay;
+  slot: FlatSlot;
+  seatIndices: number[];
+};
+
 export type AssignmentUnit =
   | CarmelAssignmentUnit
   | SeatAssignmentUnit
-  | BaseWorkAssignmentUnit;
+  | BaseWorkAssignmentUnit
+  | GuardPairAssignmentUnit;
 
 export type GlobalAssignInput = {
   missions: MissionDay[];
