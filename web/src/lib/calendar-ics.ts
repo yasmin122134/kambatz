@@ -1,6 +1,6 @@
-import { flattenMissionSlots } from "@/lib/mission-utils";
+import { flattenMissionSlots, type FlatSlot } from "@/lib/mission-utils";
 import { MISSION_WALL_TZ } from "@/lib/time-interval";
-import { MISSION_TYPE_LABELS, type MissionDay } from "@/lib/types";
+import { MISSION_TYPE_LABELS, type MissionDay, type MissionType } from "@/lib/types";
 
 /** שם היומן ב-Google Calendar / Apple Calendar */
 export const KAMBATZ_CALENDAR_NAME = "הגנם ועבס";
@@ -12,6 +12,47 @@ export type CalendarEvent = {
   summary: string;
   description?: string;
 };
+
+const MISSION_ID_RE =
+  /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-(.+)@kambatz$/i;
+
+export function calendarShiftId(missionId: string, slotId: string): string {
+  return `${missionId}:${slotId}`;
+}
+
+export function calendarEventUid(missionId: string, slotId: string): string {
+  return `${missionId}-${slotId}@kambatz`;
+}
+
+export function shiftIdFromCalendarUid(uid: string): string | null {
+  const match = uid.match(MISSION_ID_RE);
+  return match ? calendarShiftId(match[1], match[2]) : null;
+}
+
+export function calendarEventFromFlatSlot(
+  mission: Pick<MissionDay, "id" | "title" | "mission_date" | "mission_type">,
+  slot: Pick<
+    FlatSlot,
+    "slotId" | "positionName" | "timeLabel" | "startAtMs" | "endAtMs" | "missionType"
+  >,
+): CalendarEvent | null {
+  if (
+    slot.startAtMs == null ||
+    slot.endAtMs == null ||
+    slot.endAtMs <= slot.startAtMs
+  ) {
+    return null;
+  }
+  const missionType = (slot.missionType ?? mission.mission_type) as MissionType;
+  const typeLabel = MISSION_TYPE_LABELS[missionType];
+  return {
+    uid: calendarEventUid(mission.id, slot.slotId),
+    startMs: slot.startAtMs,
+    endMs: slot.endAtMs,
+    summary: `${slot.positionName} — ${typeLabel}`,
+    description: `${mission.title} · ${slot.timeLabel} · ${mission.mission_date}`,
+  };
+}
 
 function icsEscape(text: string): string {
   return text
@@ -76,7 +117,7 @@ export function calendarEventsForPerson(
       }
       const typeLabel = MISSION_TYPE_LABELS[mission.mission_type];
       events.push({
-        uid: `${mission.id}-${slot.slotId}@kambatz`,
+        uid: calendarEventUid(mission.id, slot.slotId),
         startMs: slot.startAtMs,
         endMs: slot.endAtMs,
         summary: `${slot.positionName} — ${typeLabel}`,

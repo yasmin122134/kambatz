@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { AddToCalendarLink } from "@/components/AddToCalendarLink";
 import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
@@ -19,6 +20,7 @@ import { formatFairnessRulesDiff } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
+import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
@@ -816,6 +818,7 @@ function GuardTimeline({
                       }}
                     >
                       <SlotCard
+                        mission={mission}
                         missionId={mission.id}
                         slot={slot}
                         personName={personName}
@@ -917,6 +920,7 @@ function MissionPanel({
       {slots.map((slot) => (
           <SlotCard
             key={slot.slotId}
+            mission={mission}
             missionId={mission.id}
             slot={slot}
             personName={personName}
@@ -1049,6 +1053,7 @@ function ReplacementPicker({
 }
 
 function SlotCard({
+  mission,
   missionId,
   slot,
   personName,
@@ -1067,6 +1072,7 @@ function SlotCard({
   onAdminReplacementSwap,
   onCancelSwap,
 }: {
+  mission: MissionDay;
   missionId: string;
   slot: FlatSlot;
   personName: string;
@@ -1092,6 +1098,7 @@ function SlotCard({
   onCancelSwap: () => void;
 }) {
   const isMine = slot.assignees.includes(personName);
+  const calendarEvent = isMine ? calendarEventFromFlatSlot(mission, slot) : null;
   const isSwapPicking =
     swapTarget &&
     swapMode === "swap" &&
@@ -1180,6 +1187,11 @@ function SlotCard({
             </div>
           )}
           {assigneeList}
+          {calendarEvent && (
+            <div className="mt-1">
+              <AddToCalendarLink event={calendarEvent} className="btn-sm" />
+            </div>
+          )}
         </div>
         <div className="slot-card-time slot-card-time-end">{slot.endTime}</div>
       </div>
@@ -1188,7 +1200,10 @@ function SlotCard({
 
   return (
     <div className={`slot-card ${isMine ? "mine" : ""}`}>
-      <div className="mono text-sm font-medium">{slot.timeLabel}</div>
+      <div className="flex items-start justify-between gap-2">
+        <div className="mono text-sm font-medium">{slot.timeLabel}</div>
+        {calendarEvent && <AddToCalendarLink event={calendarEvent} className="btn-sm" />}
+      </div>
       {isGuardKind(slot.positionKind) && (
         <div className="text-xs text-ink3 mt-0.5" title={guardSlotBurdenTitle(slot, fairnessRules)}>
           {guardSlotBurdenLabel(slot, fairnessRules)}

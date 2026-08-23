@@ -12,7 +12,6 @@ import {
   saveMissionDay,
   syncAssignmentSeats,
 } from "@/lib/missions";
-import { formatCalendarInviteMessage } from "@/lib/calendar-invites";
 import { fetchActivePeople } from "@/lib/people";
 import { loadApprovedIssues } from "@/lib/issues";
 import { canAssignKind, blockedByIssue, issueBlockMessage } from "@/lib/scheduling-engine";
@@ -125,7 +124,7 @@ export async function PUT(request: Request, { params }: Params) {
   );
 
   try {
-    const { mission: saved, calendarInvites } = await saveMissionDay({
+    const { mission: saved } = await saveMissionDay({
       id,
       title: body.title ?? existing.title,
       mission_type,
@@ -142,14 +141,7 @@ export async function PUT(request: Request, { params }: Params) {
       mission_type === "guards"
         ? await consolidateGuardDayMission(saved)
         : saved;
-    const inviteMsg = calendarInvites
-      ? formatCalendarInviteMessage(calendarInvites)
-      : null;
-    return NextResponse.json({
-      ...out,
-      calendar_invites: calendarInvites,
-      calendar_invite_message: inviteMsg,
-    });
+    return NextResponse.json(out);
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

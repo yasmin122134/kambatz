@@ -11,7 +11,6 @@ import {
   normalizeSchedulingRules,
   saveMissionDay,
 } from "@/lib/missions";
-import { formatCalendarInviteMessage } from "@/lib/calendar-invites";
 import type { MissionType } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -71,7 +70,7 @@ export async function POST(request: Request) {
   });
 
   try {
-    const { mission: saved, calendarInvites } = await saveMissionDay({
+    const { mission: saved } = await saveMissionDay({
       title,
       mission_type,
       mission_date,
@@ -84,20 +83,12 @@ export async function POST(request: Request) {
       notes: body.notes || null,
     });
 
-    const inviteMsg = calendarInvites
-      ? formatCalendarInviteMessage(calendarInvites)
-      : null;
-    const extras = {
-      calendar_invites: calendarInvites,
-      calendar_invite_message: inviteMsg,
-    };
-
     if (mission_type === "guards" && body.standalone !== true) {
       const consolidated = await consolidateGuardDayMission(saved);
-      return NextResponse.json({ ...consolidated, ...extras }, { status: 201 });
+      return NextResponse.json(consolidated, { status: 201 });
     }
 
-    return NextResponse.json({ ...saved, ...extras }, { status: 201 });
+    return NextResponse.json(saved, { status: 201 });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "שגיאה";
     if (msg.includes("mission_days")) {

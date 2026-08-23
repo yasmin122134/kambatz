@@ -7,7 +7,6 @@ import {
   syncPublishedFairnessPoints,
 } from "@/lib/fairness-persistence";
 import type { MissionDay, Person } from "@/lib/types";
-import type { CalendarInviteSummary } from "@/lib/calendar-invites";
 import {
   emptyAssignments,
   newPosition,
@@ -92,7 +91,6 @@ export async function getUpcomingForPersonFromMissions(personName: string) {
 
 export type SaveMissionDayResult = {
   mission: MissionDay;
-  calendarInvites: CalendarInviteSummary | null;
 };
 
 export async function saveMissionDay(
@@ -154,7 +152,6 @@ export async function saveMissionDay(
   };
 
   if (payload.id) {
-    const previous = await getMissionDay(payload.id);
     const { data, error } = await supabase
       .from("mission_days")
       .update(row)
@@ -163,8 +160,8 @@ export async function saveMissionDay(
       .single();
     if (error) throw new Error(error.message);
     const saved = rowFromDb(data);
-    const calendarInvites = await afterMissionSave(saved, previous);
-    return { mission: saved, calendarInvites };
+    await afterMissionSave(saved);
+    return { mission: saved };
   }
 
   const { data, error } = await supabase
@@ -174,14 +171,11 @@ export async function saveMissionDay(
     .single();
   if (error) throw new Error(error.message);
   const saved = rowFromDb(data);
-  const calendarInvites = await afterMissionSave(saved, null);
-  return { mission: saved, calendarInvites };
+  await afterMissionSave(saved);
+  return { mission: saved };
 }
 
-async function afterMissionSave(
-  mission: MissionDay,
-  previous: MissionDay | null,
-): Promise<CalendarInviteSummary | null> {
+async function afterMissionSave(mission: MissionDay): Promise<void> {
   try {
     if (mission.status !== "published") {
       await deleteFairnessPointsForMission(mission.id);
@@ -189,18 +183,6 @@ async function afterMissionSave(
     await syncPublishedFairnessPoints();
   } catch {
     // טבלת fairness_assignment_points עדיין לא קיימת — לא חוסם שמירה
-  }
-
-  try {
-    const { sendCalendarInvitesForMission } = await import("@/lib/calendar-invites");
-    const justPublished =
-      mission.status === "published" && previous?.status !== "published";
-    return await sendCalendarInvitesForMission(mission, previous, {
-      forceAll: justPublished,
-    });
-  } catch (e) {
-    console.error("[calendar-invite] mission save", e);
-    return null;
   }
 }
 
