@@ -1,4 +1,8 @@
-import { flattenMissionSlots, syncAssignmentSeats } from "@/lib/mission-utils";
+import {
+  flattenMissionSlots,
+  resolveMissionForSlot,
+  syncAssignmentSeats,
+} from "@/lib/mission-utils";
 import { saveMissionDay } from "@/lib/missions";
 import {
   canAssignPersonToSlot,
@@ -14,6 +18,8 @@ export type ReplacementApplyOption =
       swapSlotId: string;
       swapSeatIndex: number;
     };
+
+export { resolveMissionForSlot } from "@/lib/mission-utils";
 
 function slotById(mission: MissionDay, slotId: string) {
   return flattenMissionSlots(mission).find((s) => s.slotId === slotId);
@@ -40,6 +46,11 @@ export async function applyReplacementAssignment(input: {
   }
 
   const sourceMission =
+    resolveMissionForSlot(
+      input.sameDayMissions,
+      input.sourceMission.id,
+      input.slotId,
+    ) ??
     input.sameDayMissions.find((m) => m.id === input.sourceMission.id) ??
     input.sourceMission;
   const srcSlot = slotById(sourceMission, input.slotId);
@@ -75,15 +86,23 @@ export async function applyReplacementAssignment(input: {
       ...sourceMission,
       assignments: { ...sourceMission.assignments, [input.slotId]: seats },
     };
-    const { mission: saved } = await saveMissionDay({ ...updated, id: sourceMission.id });
+    const { mission: saved } = await saveMissionDay(
+      { ...updated, id: sourceMission.id },
+      { validateAssignments: false },
+    );
     return { missions: [saved] };
   }
 
   const targetMissionId = input.option.swapMissionId;
   const targetMission =
-    targetMissionId === sourceMission.id
+    resolveMissionForSlot(
+      input.sameDayMissions,
+      targetMissionId,
+      input.option.swapSlotId,
+    ) ??
+    (targetMissionId === sourceMission.id
       ? sourceMission
-      : input.sameDayMissions.find((m) => m.id === targetMissionId);
+      : input.sameDayMissions.find((m) => m.id === targetMissionId));
   if (!targetMission) throw new Error("משימת יעד לא נמצאה");
 
   const dstSlot = slotById(targetMission, input.option.swapSlotId);
@@ -106,7 +125,7 @@ export async function applyReplacementAssignment(input: {
     slot: srcSlot,
     seatIndex,
     removeName: srcName,
-    swapMissionId: targetMissionId,
+    swapMissionId: targetMission.id,
     swapSlot: dstSlot,
     swapSeatIndex,
     swapPerson,
@@ -123,7 +142,10 @@ export async function applyReplacementAssignment(input: {
       ...sourceMission,
       assignments: { ...sourceMission.assignments, [input.slotId]: seats },
     };
-    const { mission: saved } = await saveMissionDay({ ...updated, id: sourceMission.id });
+    const { mission: saved } = await saveMissionDay(
+      { ...updated, id: sourceMission.id },
+      { validateAssignments: false },
+    );
     return { missions: [saved] };
   }
 
@@ -151,13 +173,16 @@ export async function applyReplacementAssignment(input: {
         [input.option.swapSlotId]: dstSeats,
       },
     };
-    const { mission: saved } = await saveMissionDay({ ...merged, id: sourceMission.id });
+    const { mission: saved } = await saveMissionDay(
+      { ...merged, id: sourceMission.id },
+      { validateAssignments: false },
+    );
     return { missions: [saved] };
   }
 
   const [{ mission: savedSrc }, { mission: savedDst }] = await Promise.all([
-    saveMissionDay({ ...updatedSrc, id: sourceMission.id }),
-    saveMissionDay({ ...updatedDst, id: targetMission.id }),
+    saveMissionDay({ ...updatedSrc, id: sourceMission.id }, { validateAssignments: false }),
+    saveMissionDay({ ...updatedDst, id: targetMission.id }, { validateAssignments: false }),
   ]);
   return { missions: [savedSrc, savedDst] };
 }

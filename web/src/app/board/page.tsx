@@ -8,6 +8,8 @@ import { fetchActivePeople } from "@/lib/people";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
 
+export const dynamic = "force-dynamic";
+
 export default async function BoardPage() {
   const session = await getSessionPerson();
   if (!session) {

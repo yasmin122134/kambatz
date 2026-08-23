@@ -15,9 +15,11 @@ import {
   flattenMissionSlots,
   isGuardKind,
   isObservationPost,
+  isReserveForceBlock,
   isStandbyKind,
   normalizeSchedulingRules,
   parseTimeMinutes,
+  resolveMissionForSlot,
   resolvePositionKind,
   slotDurationMinutes,
 } from "@/lib/mission-utils";
@@ -365,6 +367,23 @@ function effectiveGuardRatio(scheduling: MissionSchedulingRules): number {
   return ratio > 0 ? ratio : 2;
 }
 
+/** כוח עתודה בין/צמוד לשמירות — לא מפר יחס 2:1 (מותר לשמור ↔ עתודה ↔ לשמור). */
+function reserveForceBetweenGuards(
+  personName: string,
+  earlierGuardEndMs: number,
+  laterGuardStartMs: number,
+  tracker: ScheduleTracker,
+): boolean {
+  if (laterGuardStartMs <= earlierGuardEndMs) return false;
+  for (const block of tracker.busy[personName] || []) {
+    if (!isReserveForceBlock(block)) continue;
+    if (block.startAtMs < laterGuardStartMs && block.endAtMs > earlierGuardEndMs) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** מרווח שמירות לפי זמן אמת (ms) — לא ציר מחזורי שיכול לזוז עם תחילת לוח עב״ס. */
 function guardOk(
   personName: string,
@@ -382,10 +401,24 @@ function guardOk(
 
     if (slot.startAtMs >= block.endAtMs) {
       const gapMin = (slot.startAtMs - block.endAtMs) / 60_000;
-      if (gapMin < block.durationMinutes * ratio) return false;
+      if (gapMin < block.durationMinutes * ratio) {
+        if (
+          reserveForceBetweenGuards(personName, block.endAtMs, slot.startAtMs, tracker)
+        ) {
+          continue;
+        }
+        return false;
+      }
     } else if (block.startAtMs >= slot.endAtMs) {
       const gapMin = (block.startAtMs - slot.endAtMs) / 60_000;
-      if (gapMin < slot.durationMinutes * ratio) return false;
+      if (gapMin < slot.durationMinutes * ratio) {
+        if (
+          reserveForceBetweenGuards(personName, slot.endAtMs, block.startAtMs, tracker)
+        ) {
+          continue;
+        }
+        return false;
+      }
     } else {
       return false;
     }
@@ -2277,7 +2310,9 @@ export function findReplacements(input: {
   removeName: string;
   mode: "replace" | "swap";
 }): ReplacementOption[] {
-  const mission = input.missions.find((m) => m.id === input.missionId);
+  const mission =
+    resolveMissionForSlot(input.missions, input.missionId, input.slotId) ??
+    input.missions.find((m) => m.id === input.missionId);
   if (!mission) return [];
 
   const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
@@ -2292,7 +2327,7 @@ export function findReplacements(input: {
 
   const tracker = buildTrackerFromMissions(input.missions, input.rules);
   const removeBlocks = (tracker.busy[input.removeName] || []).filter(
-    (b) => !(b.missionId === input.missionId && b.slotId === input.slotId),
+    (b) => !(b.missionId === mission.id && b.slotId === input.slotId),
   );
   tracker.busy[input.removeName] = removeBlocks;
   rebuildGuardShiftsForPerson(input.removeName, tracker);
@@ -2339,7 +2374,7 @@ export function findReplacements(input: {
         const check = canSwapReplacementAssignments({
           missions: input.missions,
           rules: input.rules,
-          missionId: input.missionId,
+          missionId: mission.id,
           slot: target,
           seatIndex: input.seatIndex,
           removeName: input.removeName,
@@ -2356,7 +2391,7 @@ export function findReplacements(input: {
         unplacePerson(
           input.removeName,
           target,
-          input.missionId,
+          mission.id,
           perRemove,
           input.rules,
           scheduling,

@@ -114,7 +114,7 @@ export function BoardClient({
     (guardsMission && virtualBaseWorkMission(guardsMission)) ||
     dayMissions.find((m) => m.mission_type === "base_work") ||
     null;
-  const baseWorkMissionId = guardsMission?.id ?? baseMission?.id;
+  const baseWorkMissionId = baseMission?.id ?? guardsMission?.id;
   const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
 
   const rosterWarnings = useMemo(() => {
@@ -216,7 +216,7 @@ export function BoardClient({
       setMsg(data.error || "שגיאה");
       return null;
     }
-    setMissions((prev) => prev.map((m) => (m.id === data.id ? data : m)));
+    await loadMissions();
     return data as MissionDay;
   }
 
@@ -252,7 +252,7 @@ export function BoardClient({
     seatIndex: number,
     removeName: string,
     option: ReplacementApplyOption,
-  ) {
+  ): Promise<boolean> {
     setMsg("");
     const res = await fetch(`/api/missions/${missionId}/replacements/apply`, {
       method: "POST",
@@ -267,15 +267,11 @@ export function BoardClient({
     const data = await res.json();
     if (!res.ok) {
       setMsg(data.error || "שגיאה בשמירת החלפה");
-      return;
+      return false;
     }
-    const saved: MissionDay[] = data.missions || [];
-    if (saved.length) {
-      setMissions((prev) => {
-        const byId = new Map(saved.map((m) => [m.id, m]));
-        return prev.map((m) => byId.get(m.id) ?? m);
-      });
-    }
+    await loadMissions();
+    setMsg("ההחלפה נשמרה");
+    return true;
   }
 
   async function adminSetName(
@@ -817,7 +813,7 @@ function GuardTimeline({
     seatIndex: number,
     removeName: string,
     option: ReplacementApplyOption,
-  ) => void;
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const positions = mission.positions || [];
@@ -930,7 +926,7 @@ function MissionPanel({
     seatIndex: number,
     removeName: string,
     option: ReplacementApplyOption,
-  ) => void;
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
@@ -998,11 +994,12 @@ function ReplacementPicker({
   slotId: string;
   seatIndex: number;
   currentName: string;
-  onApply: (option: ReplacementApplyOption) => void;
+  onApply: (option: ReplacementApplyOption) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap">("replace");
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState<
     {
       type: "direct" | "swap";
@@ -1076,25 +1073,29 @@ function ReplacementPicker({
                   <button
                     type="button"
                     className="btn-sm w-full text-right"
-                    onClick={() => {
+                    disabled={saving}
+                    onClick={async () => {
+                      setSaving(true);
+                      let ok = false;
                       if (o.type === "direct") {
-                        onApply({ type: "direct", personName: o.personName });
+                        ok = await onApply({ type: "direct", personName: o.personName });
                       } else if (
                         o.swapMissionId &&
                         o.swapSlotId != null &&
                         o.swapSeatIndex != null
                       ) {
-                        onApply({
+                        ok = await onApply({
                           type: "swap",
                           swapMissionId: o.swapMissionId,
                           swapSlotId: o.swapSlotId,
                           swapSeatIndex: o.swapSeatIndex,
                         });
                       }
-                      setOpen(false);
+                      setSaving(false);
+                      if (ok) setOpen(false);
                     }}
                   >
-                    {o.label}
+                    {saving ? "שומר…" : o.label}
                   </button>
                 </li>
               ))}
@@ -1148,7 +1149,7 @@ function SlotCard({
     seatIndex: number,
     removeName: string,
     option: ReplacementApplyOption,
-  ) => void;
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const isMine = slot.assignees.includes(personName);

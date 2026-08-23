@@ -9,6 +9,7 @@ import {
   sameDayMissionsFor,
   type ReplacementApplyOption,
 } from "@/lib/replacement-apply";
+import { resolveMissionForSlot } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
 
 type Params = { params: Promise<{ id: string }> };
@@ -54,9 +55,11 @@ export async function POST(request: Request, { params }: Params) {
     ]);
     const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
     const sameDayMissions = sameDayMissionsFor(mission, allMissions);
+    const hostMission =
+      resolveMissionForSlot(sameDayMissions, mission.id, slotId) ?? mission;
 
     const result = await applyReplacementAssignment({
-      sourceMission: mission,
+      sourceMission: hostMission,
       sameDayMissions,
       slotId,
       seatIndex,

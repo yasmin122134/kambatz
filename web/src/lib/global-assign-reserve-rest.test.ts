@@ -140,6 +140,8 @@ describe("Reserve Force rest semantics", () => {
       { id: "r", name: "כוח עתודה", kind: "duty", start: "08:00", end: "12:00", seats: 1 },
       { id: "g2", name: "בונקר", kind: "guard", start: "16:00", end: "20:00", seats: 1 },
     ]);
+    mission.starts_at = "2026-08-21T00:00:00";
+    mission.ends_at = "2026-08-22T00:00:00";
     const first = slotByName(mission, "פטל");
     const reserve = slotByName(mission, "עתודה");
     const third = slotByName(mission, "בונקר");
@@ -164,6 +166,39 @@ describe("Reserve Force rest semantics", () => {
     const tracker = trackerWith([{ slot: reserveSlot, missionId: "g1" }]);
     expect(
       fitsPerson(p, guardSlot, tracker, [], scheduling, [], { [p.name]: p }),
+    ).toBe(false);
+  });
+
+  it("Case E — guard, reserve, guard with short wall gap is allowed (ratio 2:1)", () => {
+    const ratio2 = { ...scheduling, guard_ratio: 2 };
+    const mission = missionWithSlots([
+      { id: "g1", name: "פטל", kind: "guard", start: "08:00", end: "12:00", seats: 1 },
+      { id: "r", name: "כוח עתודה", kind: "duty", start: "12:00", end: "16:00", seats: 1 },
+      { id: "g2", name: "בונקר", kind: "guard", start: "16:00", end: "20:00", seats: 1 },
+    ]);
+    const first = slotByName(mission, "פטל");
+    const reserve = slotByName(mission, "עתודה");
+    const third = slotByName(mission, "בונקר");
+    const tracker = trackerWith([
+      { slot: first, missionId: "g1" },
+      { slot: reserve, missionId: "g1" },
+    ]);
+    expect(
+      fitsPerson(p, third, tracker, [], ratio2, [], { [p.name]: p }),
+    ).toBe(true);
+  });
+
+  it("Case F — two guards back-to-back without reserve still blocked at ratio 2:1", () => {
+    const ratio2 = { ...scheduling, guard_ratio: 2 };
+    const mission = missionWithSlots([
+      { id: "g1", name: "פטל", kind: "guard", start: "08:00", end: "12:00", seats: 1 },
+      { id: "g2", name: "בונקר", kind: "guard", start: "12:00", end: "16:00", seats: 1 },
+    ]);
+    const first = slotByName(mission, "פטל");
+    const second = slotByName(mission, "בונקר");
+    const tracker = trackerWith([{ slot: first, missionId: "g1" }]);
+    expect(
+      fitsPerson(p, second, tracker, [], ratio2, [], { [p.name]: p }),
     ).toBe(false);
   });
 });

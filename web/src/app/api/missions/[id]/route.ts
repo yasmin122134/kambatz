@@ -25,7 +25,11 @@ import {
   canSwapReplacementAssignments,
 } from "@/lib/scheduling-engine";
 import { sameDayMissionsFor } from "@/lib/replacement-apply";
-import { flattenMissionSlots, reconcileAssignmentsOnStructureChange } from "@/lib/mission-utils";
+import {
+  flattenMissionSlots,
+  reconcileAssignmentsOnStructureChange,
+  resolveMissionForSlot,
+} from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionPerson } from "@/lib/session";
 import type { Person } from "@/lib/types";
@@ -207,29 +211,39 @@ export async function PATCH(request: Request, { params }: Params) {
   const personName = session.person.name;
   const peopleByName = await peopleByNameMap();
   const issues = await loadApprovedIssues();
+  const [allMissions, rules] = await Promise.all([
+    listMissionDays(false),
+    getFairnessRules(),
+  ]);
+  const sameDay = sameDayMissionsFor(mission, allMissions);
+  const hostMission =
+    resolveMissionForSlot(sameDay, mission.id, String(slot_id || "")) ?? mission;
 
-  let updated = mission;
+  let updated = hostMission;
 
   if (action === "take") {
-    const slot = slotById(mission, slot_id);
+    const slot = slotById(hostMission, slot_id);
     const err = assertCanAssign(session.person, slot, personName, issues);
     if (err) {
       return NextResponse.json({ error: err }, { status: 400 });
     }
-    const assignees = [...(mission.assignments[slot_id] || [])];
+    const assignees = [...(hostMission.assignments[slot_id] || [])];
     if (assignees[seat_index] && assignees[seat_index] !== personName) {
       return NextResponse.json({ error: "המשבצת תפוסה" }, { status: 400 });
     }
     assignees[seat_index] = personName;
     updated = {
-      ...mission,
-      assignments: { ...mission.assignments, [slot_id]: assignees },
+      ...hostMission,
+      assignments: { ...hostMission.assignments, [slot_id]: assignees },
     };
   } else if (action === "swap") {
-    const srcSlot = slotById(mission, slot_id);
-    const dstSlot = slotById(mission, target_slot_id);
-    const src = [...(mission.assignments[slot_id] || [])];
-    const dst = [...(mission.assignments[target_slot_id] || [])];
+    const swapHostMission =
+      resolveMissionForSlot(sameDay, hostMission.id, String(target_slot_id || "")) ??
+      hostMission;
+    const srcSlot = slotById(hostMission, slot_id);
+    const dstSlot = slotById(swapHostMission, target_slot_id);
+    const src = [...(hostMission.assignments[slot_id] || [])];
+    const dst = [...(swapHostMission.assignments[target_slot_id] || [])];
     const srcName = src[seat_index];
     const dstName = dst[target_seat_index];
     if (srcName !== personName && !admin) {
@@ -242,19 +256,14 @@ export async function PATCH(request: Request, { params }: Params) {
     if (!srcSlot || !dstSlot || !swapPerson) {
       return NextResponse.json({ error: "משמרת או צוער לא נמצאו" }, { status: 400 });
     }
-    const [allMissions, rules] = await Promise.all([
-      listMissionDays(false),
-      getFairnessRules(),
-    ]);
-    const sameDay = sameDayMissionsFor(mission, allMissions);
     const swapCheck = canSwapReplacementAssignments({
       missions: sameDay,
       rules,
-      missionId: mission.id,
+      missionId: hostMission.id,
       slot: srcSlot,
       seatIndex: seat_index,
       removeName: srcName,
-      swapMissionId: mission.id,
+      swapMissionId: swapHostMission.id,
       swapSlot: dstSlot,
       swapSeatIndex: target_seat_index,
       swapPerson,
@@ -266,35 +275,52 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     src[seat_index] = dstName;
     dst[target_seat_index] = srcName;
-    updated = {
-      ...mission,
-      assignments: {
-        ...mission.assignments,
-        [slot_id]: src,
-        [target_slot_id]: dst,
-      },
-    };
+    if (hostMission.id === swapHostMission.id) {
+      updated = {
+        ...hostMission,
+        assignments: {
+          ...hostMission.assignments,
+          [slot_id]: src,
+          [target_slot_id]: dst,
+        },
+      };
+    } else {
+      const [{ mission: savedSrc }, { mission: savedDst }] = await Promise.all([
+        saveMissionDay(
+          {
+            ...hostMission,
+            assignments: { ...hostMission.assignments, [slot_id]: src },
+            id: hostMission.id,
+          },
+          { validateAssignments: false },
+        ),
+        saveMissionDay(
+          {
+            ...swapHostMission,
+            assignments: { ...swapHostMission.assignments, [target_slot_id]: dst },
+            id: swapHostMission.id,
+          },
+          { validateAssignments: false },
+        ),
+      ]);
+      return NextResponse.json(savedSrc);
+    }
   } else if (action === "admin_set" && admin) {
-    const slot = slotById(mission, slot_id);
+    const slot = slotById(hostMission, slot_id);
     if (!slot) {
       return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
     }
     const nextName = String(name || "").trim();
-    const currentName = String((mission.assignments[slot_id] || [])[seat_index] || "").trim();
+    const currentName = String((hostMission.assignments[slot_id] || [])[seat_index] || "").trim();
     if (nextName) {
       const person = peopleByName[nextName];
       if (!person) {
         return NextResponse.json({ error: `${nextName}: לא נמצא במחזור` }, { status: 400 });
       }
-      const [allMissions, rules] = await Promise.all([
-        listMissionDays(false),
-        getFairnessRules(),
-      ]);
-      const sameDay = sameDayMissionsFor(mission, allMissions);
       const check = canAssignPersonToSlot({
         missions: sameDay,
         rules,
-        missionId: mission.id,
+        missionId: hostMission.id,
         slot,
         seatIndex: seat_index,
         person,
@@ -306,18 +332,21 @@ export async function PATCH(request: Request, { params }: Params) {
         return NextResponse.json({ error: check.reason }, { status: 400 });
       }
     }
-    const seats = [...(mission.assignments[slot_id] || [])];
+    const seats = [...(hostMission.assignments[slot_id] || [])];
     seats[seat_index] = String(name || "").trim();
     updated = {
-      ...mission,
-      assignments: { ...mission.assignments, [slot_id]: seats },
+      ...hostMission,
+      assignments: { ...hostMission.assignments, [slot_id]: seats },
     };
   } else {
     return NextResponse.json({ error: "פעולה לא תקינה" }, { status: 400 });
   }
 
   try {
-    const { mission: saved } = await saveMissionDay({ ...updated, id: mission.id });
+    const { mission: saved } = await saveMissionDay(
+      { ...updated, id: updated.id },
+      { validateAssignments: false },
+    );
     return NextResponse.json(saved);
   } catch (e) {
     return NextResponse.json(

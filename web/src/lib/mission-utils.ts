@@ -133,6 +133,12 @@ export function isReserveForceSlot(
   );
 }
 
+export function isReserveForceBlock(
+  block: Pick<FlatSlot, "positionName" | "positionKind" | "missionType">,
+): boolean {
+  return isReserveForceSlot(block);
+}
+
 /** האם השיבוץ צורך מנוחה (נפרד מחסימת זמן) */
 export function slotEatsRest(slot: FlatSlot): boolean {
   if (isStandbyKind(slot.positionKind)) return false;
@@ -377,6 +383,21 @@ export function syncAssignmentSeats(
     }
   }
   return out;
+}
+
+/** מוצא את המשימה שבה באמת נמצא slot_id (למשל עב״ס נפרד מול guards). */
+export function resolveMissionForSlot(
+  missions: MissionDay[],
+  preferredMissionId: string,
+  slotId: string,
+): MissionDay | undefined {
+  const preferred = missions.find((m) => m.id === preferredMissionId);
+  if (preferred && flattenMissionSlots(preferred).some((s) => s.slotId === slotId)) {
+    return preferred;
+  }
+  return missions.find((m) =>
+    flattenMissionSlots(m).some((s) => s.slotId === slotId),
+  );
 }
 
 /** Keep assignments only for slots whose window did not change after structure sync. */

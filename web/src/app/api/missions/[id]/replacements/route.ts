@@ -5,6 +5,7 @@ import { listMissionDays } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { findReplacements } from "@/lib/scheduling-engine";
 import { sameDayMissionsFor } from "@/lib/replacement-apply";
+import { resolveMissionForSlot } from "@/lib/mission-utils";
 import { isAdmin } from "@/lib/auth";
 import type { Issue, Person } from "@/lib/types";
 
@@ -58,12 +59,13 @@ export async function POST(request: Request, { params }: Params) {
     }
 
     const sameDay = sameDayMissionsFor(mission, missions);
+    const hostMission = resolveMissionForSlot(sameDay, id, slotId) ?? mission;
     const options = findReplacements({
       missions: sameDay,
       people,
       issues,
       rules,
-      missionId: id,
+      missionId: hostMission.id,
       slotId,
       seatIndex,
       removeName,
