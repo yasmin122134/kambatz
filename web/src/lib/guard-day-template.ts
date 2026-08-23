@@ -1,5 +1,7 @@
 import {
   defaultBaseWorkPositions,
+  isBaseWorkOfficerPosition,
+  isBaseWorkPanelPosition,
   isBaseWorkPosition,
   materializeBaseWorkPositions,
 } from "@/lib/base-work-template";
@@ -568,7 +570,7 @@ export function syncGuardShiftSlots(
 
   return ensureUniqueSlotIds(
     positions.map((pos) => {
-      if (isBaseWorkPosition(pos)) {
+      if (isBaseWorkPanelPosition(pos)) {
         return {
           ...pos,
           slots: materializeBaseWorkPositions([pos], ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate)[0]
@@ -626,16 +628,21 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
   ];
 
   const synced = syncGuardShiftSlots(positions, options);
-  const hasBaseWork = synced.some((p) => isBaseWorkPosition(p));
-  if (hasBaseWork) return synced;
+  const hasBulk = synced.some((p) => isBaseWorkPosition(p));
+  const hasOfficer = synced.some((p) => isBaseWorkOfficerPosition(p));
+  const materialized = (list: ReturnType<typeof defaultBaseWorkPositions>) =>
+    materializeBaseWorkPositions(list, ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate);
 
-  const baseWork = defaultBaseWorkPositions({
-    seatsPerShift: options?.baseWorkSeatsPerShift,
-  });
-  return [
-    ...synced,
-    ...materializeBaseWorkPositions(baseWork, ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate),
-  ];
+  if (!hasBulk) {
+    return [...synced, ...materialized(defaultBaseWorkPositions({ seatsPerShift: options?.baseWorkSeatsPerShift }))];
+  }
+  if (!hasOfficer) {
+    const officerOnly = defaultBaseWorkPositions({ seatsPerShift: options?.baseWorkSeatsPerShift }).filter(
+      (p) => isBaseWorkOfficerPosition(p),
+    );
+    return [...synced, ...materialized(officerOnly)];
+  }
+  return synced;
 }
 
 export function defaultGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
@@ -648,7 +655,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "standby_carmel_a":
       return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל למטבח.";
     case "standby_carmel_b":
-      return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (רס״ר) ולמטבח.";
+      return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (כולל חפיפה בזמן) ולמטבח.";
     case "officer_duty":
       return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
     case "duty":
@@ -657,6 +664,9 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       }
       if (pos.name.includes("עבודות בסיס") || pos.name.includes("עב״ס")) {
         return "3 חלונות (בוקר/צהריים/ערב) — צוות שלם 13–15 בכל חלון, צוות אחד במנוחה.";
+      }
+      if (/אחראי/.test(pos.name) && pos.name.includes("עב")) {
+        return "אחראי עב״ס אחד בכל חלון — מוביל את הצוות באותם 3 חלונות.";
       }
       return null;
     default:

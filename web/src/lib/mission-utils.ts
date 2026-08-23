@@ -17,6 +17,8 @@ import {
   type KitchenSchedulingRules,
 } from "@/lib/types";
 import {
+  isBaseWorkOfficerPositionName,
+  isBaseWorkPanelPosition,
   isBaseWorkPosition,
   isBaseWorkPositionName,
   materializeBaseWorkPositions,
@@ -91,6 +93,7 @@ export function defaultPositionKind(
   if (/כרמל\s*ב/.test(n)) return "standby_carmel_b";
   if (missionType === "guards" && /קצין\s*תורן/.test(n)) return "officer_duty";
   if (missionType === "guards" && /עתודה/.test(n)) return "duty";
+  if (isBaseWorkOfficerPositionName(n)) return "duty";
   if (isBaseWorkPositionName(n)) return "duty";
   if (missionType === "kitchen") return "kitchen";
   if (missionType === "base_work") return "duty";
@@ -276,7 +279,7 @@ export function flattenMissionSlots(
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
       const isBaseWorkSlot =
-        mission.mission_type === "base_work" || isBaseWorkPosition(pos);
+        mission.mission_type === "base_work" || isBaseWorkPanelPosition(pos);
       const slotMissionType: MissionType = isBaseWorkSlot ? "base_work" : mission.mission_type;
       const abs = isBaseWorkSlot
         ? resolveBaseWorkSlotInterval(
@@ -416,7 +419,7 @@ export function reconcileAssignmentsOnStructureChange(
 
 /** תצוגת עב״ס מהעמדות המוטמעות ביום שמירות (ללוח). */
 export function virtualBaseWorkMission(guards: MissionDay): MissionDay | null {
-  const positions = (guards.positions || []).filter((p) => isBaseWorkPosition(p));
+  const positions = (guards.positions || []).filter((p) => isBaseWorkPanelPosition(p));
   if (!positions.length) return null;
   return {
     ...guards,

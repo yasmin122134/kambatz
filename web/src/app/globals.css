@@ -562,6 +562,43 @@ button:hover,
   overflow: hidden;
 }
 
+.guard-timeline-col-available {
+  flex: 0 0 11rem;
+  min-width: 9rem;
+}
+
+.guard-timeline-available-hour {
+  position: absolute;
+  inset-inline: 3px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0.35rem;
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px dashed var(--color-line2);
+}
+
+.guard-timeline-available-time {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-ink3);
+  flex-shrink: 0;
+}
+
+.guard-timeline-available-names {
+  color: var(--color-ink2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
 .slot-card-time {
   font-family: var(--font-mono);
   font-size: 10px;

@@ -4,6 +4,7 @@ import { getFairnessRules } from "@/lib/fairness";
 import { listMissionDays } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { findReplacements } from "@/lib/scheduling-engine";
+import { sameDayMissionsFor } from "@/lib/replacement-apply";
 import { isAdmin } from "@/lib/auth";
 import type { Issue, Person } from "@/lib/types";
 
@@ -56,7 +57,7 @@ export async function POST(request: Request, { params }: Params) {
       return NextResponse.json({ error: "לא נמצא" }, { status: 404 });
     }
 
-    const sameDay = missions.filter((m) => m.mission_date === mission.mission_date);
+    const sameDay = sameDayMissionsFor(mission, missions);
     const options = findReplacements({
       missions: sameDay,
       people,

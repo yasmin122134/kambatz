@@ -354,7 +354,26 @@ function blockInterval(block: BusyBlock): TimeInterval {
   return { startMs: block.startAtMs, endMs: block.endAtMs };
 }
 
-/** True calendar overlap only — never relaxed by Smart Assignment. */
+type AssignmentKindRef = {
+  positionKind: MissionPositionKind;
+  missionType: MissionType;
+};
+
+/** Carmel B may serve base work during the same wall-clock window. */
+export function allowsParallelAssignmentOverlap(
+  a: AssignmentKindRef,
+  b: AssignmentKindRef,
+): boolean {
+  const carmelB = (x: AssignmentKindRef) => x.positionKind === "standby_carmel_b";
+  const baseWork = (x: AssignmentKindRef) =>
+    x.missionType === "base_work" && x.positionKind === "duty";
+  return (
+    (carmelB(a) && baseWork(b)) ||
+    (carmelB(b) && baseWork(a))
+  );
+}
+
+/** True calendar overlap only — never relaxed by Smart Assignment (except allowed pairs). */
 export function hasHardTimeOverlap(
   personName: string,
   slot: FlatSlot,
@@ -365,6 +384,14 @@ export function hasHardTimeOverlap(
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
+    if (
+      allowsParallelAssignmentOverlap(
+        { positionKind: b.positionKind, missionType: b.missionType },
+        { positionKind: slot.positionKind, missionType: slot.missionType },
+      )
+    ) {
+      continue;
+    }
     if (assignmentIntervalsOverlap(slotIv, blockInterval(b))) return true;
   }
   return false;
@@ -3114,6 +3141,8 @@ type TrackedAssignment = {
   endMs: number;
   slotId: string;
   missionId: string;
+  positionKind: MissionPositionKind;
+  missionType: MissionType;
 };
 
 /** Global validator — every person must have zero overlapping assignment pairs. */
@@ -3132,6 +3161,8 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
           endMs: slot.endAtMs,
           slotId: slot.slotId,
           missionId: mission.id,
+          positionKind: slot.positionKind,
+          missionType: slot.missionType,
         });
         byPerson.set(name, list);
       }
@@ -3146,6 +3177,14 @@ export function validateNoPersonOverlaps(missions: MissionDay[]): string[] {
         const a = sorted[i];
         const b = sorted[j];
         if (a.slotId === b.slotId && a.missionId === b.missionId) continue;
+        if (
+          allowsParallelAssignmentOverlap(
+            { positionKind: a.positionKind, missionType: a.missionType },
+            { positionKind: b.positionKind, missionType: b.missionType },
+          )
+        ) {
+          continue;
+        }
         if (
           assignmentIntervalsOverlap(
             { startMs: a.startMs, endMs: a.endMs },

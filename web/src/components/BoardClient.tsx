@@ -19,6 +19,7 @@ import {
 import { formatFairnessRulesDiff } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
+import { computeHourlyAvailability } from "@/lib/hourly-availability";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
@@ -241,6 +242,45 @@ export function BoardClient({
     setSwapMode(null);
   }
 
+  async function applyReplacement(
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    removeName: string,
+    option:
+      | { type: "direct"; personName: string }
+      | {
+          type: "swap";
+          swapMissionId: string;
+          swapSlotId: string;
+          swapSeatIndex: number;
+        },
+  ) {
+    setMsg("");
+    const res = await fetch(`/api/missions/${missionId}/replacements/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        slot_id: slotId,
+        seat_index: seatIndex,
+        remove_name: removeName,
+        option,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMsg(data.error || "שגיאה בשמירת החלפה");
+      return false;
+    }
+    if (Array.isArray(data.missions)) {
+      const byId = new Map(
+        (data.missions as MissionDay[]).map((m) => [m.id, m]),
+      );
+      setMissions((prev) => prev.map((m) => byId.get(m.id) ?? m));
+    }
+    return true;
+  }
+
   async function adminSetName(
     missionId: string,
     slotId: string,
@@ -252,24 +292,6 @@ export function BoardClient({
       slot_id: slotId,
       seat_index: seatIndex,
       name,
-    });
-  }
-
-  async function adminReplacementSwap(
-    missionId: string,
-    slotId: string,
-    seatIndex: number,
-    targetMissionId: string,
-    targetSlotId: string,
-    targetSeatIndex: number,
-  ) {
-    await patchAssignment(missionId, {
-      action: "swap",
-      slot_id: slotId,
-      seat_index: seatIndex,
-      target_mission_id: targetMissionId,
-      target_slot_id: targetSlotId,
-      target_seat_index: targetSeatIndex,
     });
   }
 
@@ -474,6 +496,8 @@ export function BoardClient({
           {guardsMission && (
             <MissionPanel
               mission={guardsMission}
+              dayMissions={dayMissions}
+              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -503,7 +527,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -516,6 +540,8 @@ export function BoardClient({
           {baseMission && baseWorkMissionId && (
             <MissionPanel
               mission={baseMission}
+              dayMissions={dayMissions}
+              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -544,7 +570,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -557,6 +583,8 @@ export function BoardClient({
           {kitchenMission && (
             <MissionPanel
               mission={kitchenMission}
+              dayMissions={dayMissions}
+              rosterPeople={Object.values(peopleByName)}
               personName={personName}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
@@ -585,7 +613,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onAdminReplacementSwap={adminReplacementSwap}
+              onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -762,6 +790,8 @@ function GuardTimeline({
   mission,
   slots,
   boardStartMin,
+  dayMissions,
+  rosterPeople,
   personName,
   isAdmin,
   fairnessRules,
@@ -774,12 +804,14 @@ function GuardTimeline({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
   slots: FlatSlot[];
   boardStartMin: number;
+  dayMissions: MissionDay[];
+  rosterPeople: Person[];
   personName: string;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
@@ -792,14 +824,20 @@ function GuardTimeline({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetMissionId: string,
-    targetSlotId: string,
-    targetSeatIndex: number,
-  ) => void;
+    removeName: string,
+    option:
+      | { type: "direct"; personName: string }
+      | {
+          type: "swap";
+          swapMissionId: string;
+          swapSlotId: string;
+          swapSeatIndex: number;
+        },
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const positions = mission.positions || [];
@@ -813,6 +851,20 @@ function GuardTimeline({
     ["--timeline-height" as string]: `${TIMELINE_HEIGHT_PX}px`,
     ["--timeline-hour-step" as string]: `${hourStepPx}px`,
   };
+
+  const hourlyAvailable = useMemo(
+    () =>
+      isAdmin
+        ? computeHourlyAvailability({
+            missions: dayMissions,
+            people: rosterPeople,
+            missionDate: mission.mission_date,
+            boardStartMin,
+            stepMinutes: 60,
+          })
+        : [],
+    [isAdmin, dayMissions, rosterPeople, mission.mission_date, boardStartMin],
+  );
 
   return (
     <div className="guard-timeline-wrap">
@@ -861,7 +913,7 @@ function GuardTimeline({
                         onTake={onTake}
                         onSwap={onSwap}
                         onAdminSet={onAdminSet}
-                        onAdminReplacementSwap={onAdminReplacementSwap}
+                        onApplyReplacement={onApplyReplacement}
                         onCancelSwap={onCancelSwap}
                       />
                     </div>
@@ -870,6 +922,29 @@ function GuardTimeline({
               </div>
             );
           })}
+          {isAdmin && (
+            <div className="guard-timeline-col guard-timeline-col-available">
+              <div className="guard-timeline-col-header">פנויים</div>
+              <div className="guard-timeline-col-body">
+                {hourlyAvailable.map((row) => (
+                  <div
+                    key={row.cyclicStart}
+                    className="guard-timeline-available-hour"
+                    style={{
+                      top: `${cyclicToPx(row.cyclicStart)}px`,
+                      height: `${durationToPx(60)}px`,
+                    }}
+                    title={row.names.join(", ") || "—"}
+                  >
+                    <span className="guard-timeline-available-time">{row.wallLabel}</span>
+                    <span className="guard-timeline-available-names">
+                      {row.names.length ? row.names.join(" · ") : "—"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -878,6 +953,8 @@ function GuardTimeline({
 
 function MissionPanel({
   mission,
+  dayMissions,
+  rosterPeople,
   personName,
   isAdmin,
   fairnessRules,
@@ -890,10 +967,12 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
+  dayMissions: MissionDay[];
+  rosterPeople: Person[];
   personName: string;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
@@ -906,14 +985,20 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetMissionId: string,
-    targetSlotId: string,
-    targetSeatIndex: number,
-  ) => void;
+    removeName: string,
+    option:
+      | { type: "direct"; personName: string }
+      | {
+          type: "swap";
+          swapMissionId: string;
+          swapSlotId: string;
+          swapSeatIndex: number;
+        },
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
@@ -925,6 +1010,8 @@ function MissionPanel({
         mission={mission}
         slots={slots}
         boardStartMin={boardStartMin}
+        dayMissions={dayMissions}
+        rosterPeople={rosterPeople}
         personName={personName}
         isAdmin={isAdmin}
         fairnessRules={fairnessRules}
@@ -937,7 +1024,7 @@ function MissionPanel({
         onTake={onTake}
         onSwap={onSwap}
         onAdminSet={onAdminSet}
-        onAdminReplacementSwap={onAdminReplacementSwap}
+        onApplyReplacement={onApplyReplacement}
         onCancelSwap={onCancelSwap}
       />
     );
@@ -962,7 +1049,7 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
-            onAdminReplacementSwap={onAdminReplacementSwap}
+            onApplyReplacement={onApplyReplacement}
             onCancelSwap={onCancelSwap}
           />
         ))}
@@ -975,19 +1062,28 @@ function ReplacementPicker({
   slotId,
   seatIndex,
   currentName,
-  onDirect,
-  onSwap,
+  onApply,
 }: {
   missionId: string;
   slotId: string;
   seatIndex: number;
   currentName: string;
-  onDirect: (name: string) => void;
-  onSwap: (targetMissionId: string, targetSlotId: string, targetSeatIndex: number) => void;
+  onApply: (
+    option:
+      | { type: "direct"; personName: string }
+      | {
+          type: "swap";
+          swapMissionId: string;
+          swapSlotId: string;
+          swapSeatIndex: number;
+        },
+  ) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap">("replace");
   const [loading, setLoading] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [pickerError, setPickerError] = useState("");
   const [options, setOptions] = useState<
     {
       type: "direct" | "swap";
@@ -1017,6 +1113,26 @@ function ReplacementPicker({
     setLoading(false);
     if (res.ok) setOptions(data.options || []);
     else setOptions([]);
+  }
+
+  async function pickOption(o: (typeof options)[number]) {
+    setPickerError("");
+    setApplying(true);
+    let ok = false;
+    if (o.type === "direct") {
+      ok = await onApply({ type: "direct", personName: o.personName });
+    } else if (o.swapMissionId && o.swapSlotId != null && o.swapSeatIndex != null) {
+      ok = await onApply({
+        type: "swap",
+        swapMissionId: o.swapMissionId,
+        swapSlotId: o.swapSlotId,
+        swapSeatIndex: o.swapSeatIndex,
+      });
+    } else {
+      setPickerError("לא ניתן להחיל החלפה זו — נסו לרענן את הרשימה");
+    }
+    setApplying(false);
+    if (ok) setOpen(false);
   }
 
   if (!currentName) return null;
@@ -1052,6 +1168,8 @@ function ReplacementPicker({
           </div>
           {loading ? (
             <p className="hint">מחפש…</p>
+          ) : applying ? (
+            <p className="hint">שומר…</p>
           ) : options.length === 0 ? (
             <p className="hint">אין מחליף שעומד בכללים</p>
           ) : (
@@ -1061,17 +1179,8 @@ function ReplacementPicker({
                   <button
                     type="button"
                     className="btn-sm w-full text-right"
-                    onClick={() => {
-                      if (o.type === "direct") onDirect(o.personName);
-                      else if (
-                        o.swapMissionId &&
-                        o.swapSlotId != null &&
-                        o.swapSeatIndex != null
-                      ) {
-                        onSwap(o.swapMissionId, o.swapSlotId, o.swapSeatIndex);
-                      }
-                      setOpen(false);
-                    }}
+                    disabled={applying}
+                    onClick={() => void pickOption(o)}
                   >
                     {o.label}
                   </button>
@@ -1079,6 +1188,7 @@ function ReplacementPicker({
               ))}
             </ul>
           )}
+          {pickerError && <p className="msg-err mt-2 text-xs">{pickerError}</p>}
         </div>
       )}
     </div>
@@ -1102,7 +1212,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
-  onAdminReplacementSwap,
+  onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
@@ -1121,14 +1231,20 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
-  onAdminReplacementSwap: (
+  onApplyReplacement: (
     missionId: string,
     slotId: string,
     seatIndex: number,
-    targetMissionId: string,
-    targetSlotId: string,
-    targetSeatIndex: number,
-  ) => void;
+    removeName: string,
+    option:
+      | { type: "direct"; personName: string }
+      | {
+          type: "swap";
+          swapMissionId: string;
+          swapSlotId: string;
+          swapSeatIndex: number;
+        },
+  ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
   const isMine = slot.assignees.includes(personName);
@@ -1166,16 +1282,8 @@ function SlotCard({
                     slotId={slot.slotId}
                     seatIndex={seatIndex}
                     currentName={name}
-                    onDirect={(n) => onAdminSet(missionId, slot.slotId, seatIndex, n)}
-                    onSwap={(targetMissionId, targetSlotId, targetSeatIndex) =>
-                      onAdminReplacementSwap(
-                        missionId,
-                        slot.slotId,
-                        seatIndex,
-                        targetMissionId,
-                        targetSlotId,
-                        targetSeatIndex,
-                      )
+                    onApply={(option) =>
+                      onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
                     }
                   />
                 )}

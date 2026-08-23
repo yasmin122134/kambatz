@@ -22,7 +22,22 @@ function newSlot(start: string, end: string, seats = 1): MissionSlot {
 export function isBaseWorkPositionName(name: string): boolean {
   const n = name.trim();
   if (n.includes("עתודה")) return false;
+  if (isBaseWorkOfficerPositionName(n)) return false;
   return n.includes("עבודות בסיס") || n.includes("עב״ס");
+}
+
+export function isBaseWorkOfficerPositionName(name: string): boolean {
+  const n = name.trim();
+  return /אחראי/.test(n) && (n.includes("עב") || n.includes("עב״ס"));
+}
+
+export function isBaseWorkOfficerPosition(pos: Pick<MissionPosition, "name">): boolean {
+  return isBaseWorkOfficerPositionName(pos.name);
+}
+
+/** עמדות שמוצגות בלוח/עורך תחת «עב״ס». */
+export function isBaseWorkPanelPosition(pos: Pick<MissionPosition, "name">): boolean {
+  return isBaseWorkPosition(pos) || isBaseWorkOfficerPosition(pos);
 }
 
 export function isBaseWorkPosition(pos: Pick<MissionPosition, "name">): boolean {
@@ -99,7 +114,7 @@ export function materializeBaseWorkPositions(
   missionDate?: string,
 ): MissionPosition[] {
   return positions.map((pos) =>
-    isBaseWorkPosition(pos)
+    isBaseWorkPanelPosition(pos)
       ? {
           ...pos,
           slots: materializeBaseWorkSlots(
@@ -113,13 +128,18 @@ export function materializeBaseWorkPositions(
   );
 }
 
-/** עבודות בסיס — 3 חלונות; צוות שלם (~13–15) בכל חלון */
+/** עבודות בסיס — 3 חלונות; צוות שלם (~13–15) + אחראי עב״ס (1 בכל חלון) */
 export function defaultBaseWorkPositions(options?: { seatsPerShift?: number }): MissionPosition[] {
   const seats = options?.seatsPerShift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift;
-  const slots: MissionSlot[] = [
+  const bulkSlots: MissionSlot[] = [
     newSlot("08:30", "11:30", seats),
     newSlot("13:30", "17:30", seats),
     newSlot("18:30", "20:00", seats),
+  ];
+  const officerSlots: MissionSlot[] = [
+    newSlot("08:30", "11:30", 1),
+    newSlot("13:30", "17:30", 1),
+    newSlot("18:30", "20:00", 1),
   ];
 
   return [
@@ -127,7 +147,13 @@ export function defaultBaseWorkPositions(options?: { seatsPerShift?: number }): 
       id: uid(),
       name: "עבודות בסיס",
       kind: "duty",
-      slots,
+      slots: bulkSlots,
+    },
+    {
+      id: uid(),
+      name: "אחראי עב״ס",
+      kind: "duty",
+      slots: officerSlots,
     },
   ];
 }

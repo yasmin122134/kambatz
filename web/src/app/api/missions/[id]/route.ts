@@ -311,6 +311,22 @@ export async function PATCH(request: Request, { params }: Params) {
     dst[target_seat_index] = srcName;
 
     try {
+      if (targetMissionId === mission.id && slot_id === target_slot_id) {
+        const seats = [...(mission.assignments[slot_id] || [])];
+        while (seats.length <= Math.max(seat_index, target_seat_index)) seats.push("");
+        seats[seat_index] = dstName;
+        seats[target_seat_index] = srcName;
+        const updatedSame = {
+          ...mission,
+          assignments: { ...mission.assignments, [slot_id]: seats },
+        };
+        const { mission: saved } = await saveMissionDay({
+          ...updatedSame,
+          id: mission.id,
+        });
+        return NextResponse.json(saved);
+      }
+
       if (targetMissionId === mission.id) {
         const updatedSame = {
           ...mission,
