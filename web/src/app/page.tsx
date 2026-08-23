@@ -3,7 +3,10 @@ import { AppShell } from "@/components/AppShell";
 import { CalendarAutoSync } from "@/components/CalendarAutoSync";
 import { HomeGuest } from "@/components/HomeGuest";
 import { HomeUnknownUser } from "@/components/HomeUnknownUser";
-import { getUpcomingForPersonFromMissions } from "@/lib/missions";
+import { calendarEventsForPerson } from "@/lib/calendar-ics";
+import { googleCalendarEventUrl } from "@/lib/calendar-google";
+import { calendarEmailInvitesEnabled } from "@/lib/calendar-invites";
+import { getUpcomingForPersonFromMissions, listMissionDays } from "@/lib/missions";
 import { getAuthUser, getSessionPerson, peopleEmailReady } from "@/lib/session";
 
 export default async function HomePage() {
@@ -14,6 +17,23 @@ export default async function HomePage() {
   const upcoming = session
     ? await getUpcomingForPersonFromMissions(session.person.name)
     : [];
+
+  const calendarEvents = session
+    ? calendarEventsForPerson(await listMissionDays(true), session.person.name)
+    : [];
+
+  const calendarPreview = session
+    ? {
+        count: calendarEvents.length,
+        email: session.person.email,
+        emailInvitesEnabled: calendarEmailInvitesEnabled(),
+        events: calendarEvents.map((event) => ({
+          uid: event.uid,
+          summary: event.summary,
+          googleUrl: googleCalendarEventUrl(event),
+        })),
+      }
+    : null;
 
   return (
     <AppShell>
@@ -56,7 +76,7 @@ export default async function HomePage() {
               לרשימה המלאה
             </Link>
 
-            <CalendarAutoSync />
+            {calendarPreview && <CalendarAutoSync preview={calendarPreview} />}
           </section>
         )}
       </main>

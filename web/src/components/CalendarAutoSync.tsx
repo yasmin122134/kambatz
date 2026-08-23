@@ -1,33 +1,27 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
-type PreviewEvent = {
+export type CalendarPreviewEvent = {
   uid: string;
   summary: string;
-  description?: string;
   googleUrl: string;
 };
 
-type Preview = {
+export type CalendarPreview = {
   count: number;
   email: string | null;
   emailInvitesEnabled: boolean;
-  events: PreviewEvent[];
+  events: CalendarPreviewEvent[];
 };
 
-export function CalendarAutoSync() {
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [error, setError] = useState("");
+type Props = {
+  preview: CalendarPreview;
+};
+
+export function CalendarAutoSync({ preview }: Props) {
   const [emailStatus, setEmailStatus] = useState("");
   const [sending, setSending] = useState(false);
-
-  useEffect(() => {
-    fetch("/api/me/calendar/preview")
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setPreview)
-      .catch(() => setError("לא ניתן לטעון משמרות ליומן"));
-  }, []);
 
   const sendEmailInvites = useCallback(async () => {
     setSending(true);
@@ -47,14 +41,6 @@ export function CalendarAutoSync() {
     }
   }, []);
 
-  if (error) {
-    return <p className="hint text-xs text-center">{error}</p>;
-  }
-
-  if (!preview) {
-    return <p className="hint text-xs text-center">טוען יומן…</p>;
-  }
-
   if (preview.count === 0) {
     return (
       <p className="hint text-xs text-center">
@@ -68,7 +54,7 @@ export function CalendarAutoSync() {
     <div className="space-y-3 border-t border-bone2 pt-4">
       <p className="font-display text-base text-center">יומן — הגנם ועבס</p>
       <p className="hint text-xs text-center">
-        {preview.count} משמרות · לחצו «הוסף» — Google Calendar יפתח עם האירוע
+        {preview.count} משמרות · לחצי «הוסף» — Google Calendar יפתח עם האירוע
         המוכן
       </p>
 
@@ -91,7 +77,7 @@ export function CalendarAutoSync() {
         ))}
       </ul>
 
-      {preview.emailInvitesEnabled && preview.email && (
+      {preview.emailInvitesEnabled && preview.email ? (
         <div className="space-y-1">
           <button
             type="button"
@@ -102,9 +88,13 @@ export function CalendarAutoSync() {
             {sending ? "שולח…" : `שלח ${preview.count} הזמנות ל-${preview.email}`}
           </button>
           <p className="hint text-xs text-center">
-            הכי אמין — הזמנות ישירות ל-Gmail (בלי מנוי ללוח)
+            הכי אמין — הזמנות ישירות ל-Gmail
           </p>
         </div>
+      ) : (
+        <p className="hint text-xs text-center">
+          אחרי פרסום לוח — המנהלת שולחת הזמנות אוטומטית למייל (כש-Resend מוגדר)
+        </p>
       )}
 
       {emailStatus && (
