@@ -15,6 +15,7 @@ import type {
   MissionType,
 } from "@/lib/types";
 import {
+  DEFAULT_BASE_WORK_SHIFTS,
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
@@ -162,8 +163,9 @@ export function getGuardTimeBandScore(
 }
 
 /**
- * Time-of-day guard burden — proportional to shift length (like כרמל / עב״ס):
- * guard_hours_factor × שעות × (ציון רצועת 4ש׳ ÷ 4).
+ * Time-of-day guard burden — proportional to shift length:
+ * sum(band_points × overlap_hours ÷ 4), optionally × guard_hours_factor.
+ * Cross-band shifts (e.g. 02:00–05:00) split by overlap with each 4h wall-clock band.
  */
 export function getGuardBaseBurden(
   startTime: string,
@@ -188,7 +190,7 @@ export function getGuardBaseBurden(
     if (overlap <= 0) continue;
     const overlapHours = overlap / 60;
     const bandScore = isSolo ? band.solo : band.paired;
-    total += overlapHours * guardBandPointsPerHour(bandScore, hoursFactor);
+    total += (overlapHours / BAND_WIDTH_HOURS) * bandScore * hoursFactor;
   }
   return Math.round(total * 100) / 100;
 }
@@ -209,28 +211,28 @@ export function getGuardBaseBurdenForSlot(
 /** Rest penalty from hours of rest between assignments (fairness metric, not hard constraint). */
 export function getRestPenalty(restHours: number, rules?: FairnessRules): number {
   const penalties = resolveRestPenalties(rules);
-  if (restHours >= 16) return penalties[0];
-  if (restHours >= 12) return penalties[1];
-  if (restHours >= 10) return penalties[2];
-  if (restHours >= 8) return penalties[3];
-  if (restHours >= 7) return penalties[4];
-  if (restHours >= 6) return penalties[5];
-  if (restHours >= 5) return penalties[6];
-  if (restHours >= 4) return penalties[7];
+  if (restHours >= 12) return penalties[0];
+  if (restHours >= 10) return penalties[1];
+  if (restHours >= 8) return penalties[2];
+  if (restHours >= 6) return penalties[3];
+  if (restHours >= 4) return penalties[4];
+  if (restHours >= 3) return penalties[5];
+  if (restHours >= 2) return penalties[6];
+  if (restHours >= 1) return penalties[7];
   return penalties[8];
 }
 
 /** Tiers shown on the fairness page — mirrors getRestPenalty(). */
 export const REST_PENALTY_TIERS = [
-  { restHoursLabel: "16 שעות ומעלה", penalty: 0, index: 0 },
-  { restHoursLabel: "12–16 שעות", penalty: 1, index: 1 },
-  { restHoursLabel: "10–12 שעות", penalty: 2, index: 2 },
-  { restHoursLabel: "8–10 שעות", penalty: 3, index: 3 },
-  { restHoursLabel: "7–8 שעות", penalty: 4, index: 4 },
-  { restHoursLabel: "6–7 שעות", penalty: 5, index: 5 },
-  { restHoursLabel: "5–6 שעות", penalty: 7, index: 6 },
-  { restHoursLabel: "4–5 שעות", penalty: 9, index: 7 },
-  { restHoursLabel: "פחות מ-4 שעות", penalty: 12, index: 8 },
+  { restHoursLabel: "12 שעות ומעלה", penalty: 0, index: 0 },
+  { restHoursLabel: "10–12 שעות", penalty: 1, index: 1 },
+  { restHoursLabel: "8–10 שעות", penalty: 2, index: 2 },
+  { restHoursLabel: "6–8 שעות", penalty: 3, index: 3 },
+  { restHoursLabel: "4–6 שעות", penalty: 4, index: 4 },
+  { restHoursLabel: "3–4 שעות", penalty: 5, index: 5 },
+  { restHoursLabel: "2–3 שעות", penalty: 6, index: 6 },
+  { restHoursLabel: "1–2 שעות", penalty: 7, index: 7 },
+  { restHoursLabel: "0–1 שעות", penalty: 8, index: 8 },
 ] as const;
 
 export function restPenaltyTiersFromRules(rules: FairnessRules) {
@@ -252,12 +254,12 @@ export const GUARD_TIME_BAND_LABELS = [
 ] as const;
 
 export const GUARD_TIME_BAND_HELP = [
-  "לילה מאוחר — הכי קשה",
-  "לפנות בוקר",
-  "בוקר — הקלה יחסית",
-  "צהריים",
-  "אחר הצהריים",
-  "ערב",
+  "לילה / פגיעה חמורה בשינה",
+  "לפנות בוקר / פגיעה בשינה",
+  "בוקר — שעות נוחות יחסית",
+  "צהריים — שיא חום",
+  "חום / אי-נוחות ערב",
+  "שעות מאוחרות / השפעה על שינה",
 ] as const;
 
 function isRestRelevantBlock(block: BurdenTimelineBlock): boolean {
@@ -266,6 +268,34 @@ function isRestRelevantBlock(block: BurdenTimelineBlock): boolean {
 
 function isKitchenBlock(block: BurdenTimelineBlock): boolean {
   return block.positionKind === "kitchen" || block.missionType === "kitchen";
+}
+
+function isBaseWorkBlock(block: BurdenTimelineBlock): boolean {
+  return block.missionType === "base_work";
+}
+
+/** Fixed ABAS window score; scales proportionally if duration differs but start matches. */
+export function getBaseWorkShiftPoints(
+  startTime: string,
+  endTime: string,
+  shifts = DEFAULT_BASE_WORK_SHIFTS,
+): number | null {
+  const exact = shifts.find((w) => w.start === startTime && w.end === endTime);
+  if (exact) return exact.points;
+
+  const byStart = shifts.find((w) => w.start === startTime);
+  if (!byStart) return null;
+
+  const hours = slotDurationHours(startTime, endTime);
+  const windowHours = slotDurationHours(byStart.start, byStart.end);
+  if (windowHours <= 0) return null;
+  return Math.round(byStart.points * (hours / windowHours) * 100) / 100;
+}
+
+function baseWorkPointsForBlock(block: BurdenTimelineBlock): number {
+  const fixed = getBaseWorkShiftPoints(block.startTime, block.endTime);
+  if (fixed != null) return fixed;
+  return 0;
 }
 
 function legacyPointsForBlock(
@@ -279,6 +309,10 @@ function legacyPointsForBlock(
       scheduling?.kitchen?.points_per_shift !== false &&
       block.missionType === "kitchen";
     return pointsForHours(hours, "kitchen", rules, { perShift });
+  }
+  if (isBaseWorkBlock(block)) {
+    const abas = baseWorkPointsForBlock(block);
+    if (abas > 0) return abas;
   }
   if (block.positionKind === "duty" || block.missionType === "base_work") {
     return pointsForHours(hours, "duty", rules);

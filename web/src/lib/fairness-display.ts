@@ -7,6 +7,7 @@ import {
 import { fairnessRulesChanged } from "@/lib/fairness-stats";
 import type { FairnessBucket, FairnessRules, GuardBandRule } from "@/lib/types";
 import {
+  DEFAULT_BASE_WORK_SHIFTS,
   DEFAULT_FAIRNESS_RULES,
   FAIRNESS_BUCKET_HELP,
   FAIRNESS_BUCKET_LABELS,
@@ -42,24 +43,31 @@ export const FAIRNESS_EDITABLE_HELP: Record<
   standby: "כיתת כוננות (כללי) — נקודות × שעות",
   standby_a: "כרמל א׳ — יום כוננות מלא, 3 צוערים; נקודות × שעות (לא צורך מנוחה)",
   standby_b: "כרמל ב׳ — כוננות; נקודות × שעות (מותר במקביל לעב״ס)",
-  duty: "עבודות בסיס (~14 בחלון) וכוח עתודה (3) — נקודות × שעות",
+  duty: "כוח עתודה — duty × שעות. עב״ס — טבלה קבועה (לא duty).",
   kitchen: "35 צוערים למשמרת — נקודה קבועה לכל משמרת (לא × שעות)",
 };
+
+export const BASE_WORK_SCORING_EXPLANATION = [
+  "עבודות בסיס — נקודות קבועות לכל חלון (לא × שעות).",
+  "כוח עתודה בשמירות — duty × שעות.",
+] as const;
 
 export const FAIRNESS_OVERVIEW = [
   "בשיבוץ חכם נבחר מי שציון העומס שלו הכי נמוך.",
   "ציון = עומס בתקופה הנוכחית + התאמת ניקוד קודם (hist).",
-  "שמירות וקצין תורן — guard_hours_factor × שעות × ציון רצועה + עונש מנוחה.",
-  "כרמל, עב״ס, כוח עתודה ומטבח — לפי «נקודות לשעה» / «למשמרת» בטבלה.",
+  "שמירות — נקודות לפי רצועות 4 שעות; חוצה רצועות = יחסית (ציון × שעות/4).",
+  "עונש מנוחה קצרה מתווסף למשמרת שאחרי הפער.",
+  "עב״ס — נקודות קבועות לחלון; כרמל/מטבח/עתודה — לפי «נקודות לשעה» / «למשמרת».",
   "כרמל א/ב לא צורכים מנוחה — לא נספרים לעונש מנוחה של שמירה.",
   "כל הערכים בדף זה ניתנים להצעת שינוי (לאחר אישור מפקד).",
 ] as const;
 
 export const GUARD_SCORING_EXPLANATION = [
   "כל משמרת שמירה מחולקת לרצועות של 4 שעות (00–04, 04–08, …).",
-  "לכל רצועה ציון בסיס שונה לסולו (מאייש יחיד) ולזוג (2+ מאיישים).",
-  "הניקוד = guard_hours_factor × שעות × (ציון רצועת 4ש׳ ÷ 4).",
-  "דוגמה (ברירת מחדל): 00:00–04:00 סולו = 20 נק׳; 08:00–12:00 בזוג = 2 נק׳.",
+  "לכל רצועה ציון לסולו (מאייש יחיד) ולזוג (2+ מאיישים) — למשמרת 4 שעות מלאה.",
+  "משמרת קצרה או חוצה רצועות: sum(ציון_רצועה × שעות_בה ÷ 4) × guard_hours_factor.",
+  "דוגמה: 00:00–04:00 סולו = 10 נק׳; 08:00–12:00 בזוג = 5 נק׳.",
+  "02:00–05:00 סולו = (10×2/4) + (9×1/4) = 7.25 נק׳.",
   "קצין תורן — אותה טבלת שעות כמו שמירה (seat_count=1 → סולו).",
 ] as const;
 
@@ -86,10 +94,17 @@ export const MISSION_TO_BUCKET = [
   { mission: "קצין תורן", scoring: "טבלת רצועות (סולו) + עונש מנוחה", editable: true },
   { mission: "כרמל א׳ (כוננות)", scoring: "נק׳/שעה × standby_a", editable: true },
   { mission: "כרמל ב׳ (כוננות)", scoring: "נק׳/שעה × standby_b", editable: true },
-  { mission: "עבודות בסיס", scoring: "נק׳/שעה × duty", editable: true },
+  { mission: "עבודות בסיס", scoring: "נק׳ קבועות לחלון (08:30 / 13:30 / 18:30)", editable: false },
   { mission: "כוח עתודה", scoring: "נק׳/שעה × duty", editable: true },
   { mission: "מטבח", scoring: "נק׳ קבועות למשמרת × kitchen", editable: true },
 ] as const;
+
+export function baseWorkShiftRows() {
+  return DEFAULT_BASE_WORK_SHIFTS.map((row) => ({
+    timeLabel: `${row.start}–${row.end}`,
+    points: row.points,
+  }));
+}
 
 export function guardBandRows(rules: FairnessRules) {
   const factor = rules.guard_hours_factor;

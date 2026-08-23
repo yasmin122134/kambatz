@@ -4,7 +4,9 @@ import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import {
+  BASE_WORK_SCORING_EXPLANATION,
   EDITABLE_FAIRNESS_BUCKETS,
+  baseWorkShiftRows,
   editableBucketHelp,
   editableBucketLabel,
   FAIRNESS_OVERVIEW,
@@ -96,6 +98,7 @@ export default function FairnessPage() {
 
   const guardBands = guardBandRows(rules);
   const restTiers = restPenaltyTiersFromRules(rules);
+  const abasRows = baseWorkShiftRows();
 
   return (
     <AppShell title="טבלת צדק">
@@ -120,9 +123,14 @@ export default function FairnessPage() {
           <div>
             <h3 className="font-display text-lg mb-1">שמירות — טבלת שעות</h3>
             <p className="text-sm text-ink2 mb-2">
-              מקדם שעות נוכחי: <span className="mono font-bold">{rules.guard_hours_factor}</span>
-              {" · "}
-              נקודות למשמרת 4ש׳ = מקדם × ציון בסיס (למטה).
+              ציון לרצועת 4 שעות מלאה (סולו / זוג). משמרת קצרה או חוצה רצועות — יחסית.
+              {rules.guard_hours_factor !== 1 && (
+                <>
+                  {" "}
+                  מקדם שעות:{" "}
+                  <span className="mono font-bold">{rules.guard_hours_factor}</span>
+                </>
+              )}
             </p>
             <ul className="text-sm text-ink2 space-y-1 list-disc list-inside mb-3">
               {GUARD_SCORING_EXPLANATION.map((line) => (
@@ -147,8 +155,6 @@ export default function FairnessPage() {
                   <th>רצועת 4 שעות</th>
                   <th>סולו (נק׳/4ש׳)</th>
                   <th>זוג+ (נק׳/4ש׳)</th>
-                  <th>ציון בסיס סולו</th>
-                  <th>ציון בסיס זוג</th>
                   <th>הערה</th>
                 </tr>
               </thead>
@@ -158,9 +164,34 @@ export default function FairnessPage() {
                     <td className="font-medium mono">{row.label}</td>
                     <td className="mono font-bold text-accent">{row.solo}</td>
                     <td className="mono font-bold">{row.pair}</td>
-                    <td className="mono text-ink2">{row.soloBase}</td>
-                    <td className="mono text-ink2">{row.pairBase}</td>
                     <td className="text-ink2 text-xs">{row.help}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card space-y-3">
+          <h3 className="font-display text-lg">עבודות בסיס (ABAS)</h3>
+          <ul className="text-sm text-ink2 space-y-1 list-disc list-inside">
+            {BASE_WORK_SCORING_EXPLANATION.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>חלון</th>
+                  <th>נק׳</th>
+                </tr>
+              </thead>
+              <tbody>
+                {abasRows.map((row) => (
+                  <tr key={row.timeLabel}>
+                    <td className="font-medium mono">{row.timeLabel}</td>
+                    <td className="mono font-bold text-accent">{row.points}</td>
                   </tr>
                 ))}
               </tbody>

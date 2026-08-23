@@ -87,47 +87,58 @@ function flatSlot(
 }
 
 describe("guard base scoring", () => {
-  it("paired 00–04 = 14 (2× hours × band rate)", () => {
-    expect(getGuardBaseBurden("00:00", "04:00", 2)).toBe(14);
+  it("paired 00–04 = 8 (full 4h band)", () => {
+    expect(getGuardBaseBurden("00:00", "04:00", 2)).toBe(8);
   });
 
-  it("solo 00–04 = 20", () => {
-    expect(getGuardBaseBurden("00:00", "04:00", 1)).toBe(20);
+  it("solo 00–04 = 10", () => {
+    expect(getGuardBaseBurden("00:00", "04:00", 1)).toBe(10);
   });
 
-  it("paired 08–12 = 2", () => {
-    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(2);
+  it("paired 08–12 = 5", () => {
+    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(5);
   });
 
-  it("solo 12–16 = 18", () => {
-    expect(getGuardBaseBurden("12:00", "16:00", 1)).toBe(18);
+  it("solo 12–16 = 8", () => {
+    expect(getGuardBaseBurden("12:00", "16:00", 1)).toBe(8);
   });
 
-  it("shortened 2h solo 00–02 = half night burden", () => {
-    expect(getGuardBaseBurden("00:00", "02:00", 1)).toBe(10);
+  it("shortened 2h solo 00–02 = half night band", () => {
+    expect(getGuardBaseBurden("00:00", "02:00", 1)).toBe(5);
   });
 
   it("shift spanning two bands 02–06 solo", () => {
-    expect(getGuardBaseBurden("02:00", "06:00", 1)).toBe(19);
+    expect(getGuardBaseBurden("02:00", "06:00", 1)).toBe(9.5);
+  });
+
+  it("doc example 02–05 solo crosses bands", () => {
+    expect(getGuardBaseBurden("02:00", "05:00", 1)).toBe(7.25);
   });
 
   it("cross-midnight 22–02 solo", () => {
     const score = getGuardBaseBurden("22:00", "02:00", 1);
-    expect(score).toBe(17);
+    expect(score).toBe(9);
   });
 });
 
 describe("rest penalty boundaries", () => {
   it.each([
-    [16, 0],
-    [12, 1],
-    [10, 2],
-    [8, 3],
-    [7, 4],
-    [6, 5],
-    [5, 7],
-    [4, 9],
-    [3.9, 12],
+    [12, 0],
+    [11.9, 1],
+    [10, 1],
+    [9.9, 2],
+    [8, 2],
+    [7.9, 3],
+    [6, 3],
+    [5.9, 4],
+    [4, 4],
+    [3.9, 5],
+    [3, 5],
+    [2.9, 6],
+    [2, 6],
+    [1.9, 7],
+    [1, 7],
+    [0.5, 8],
   ] as const)("rest %sh → +%i", (hours, penalty) => {
     expect(getRestPenalty(hours)).toBe(penalty);
   });
@@ -168,14 +179,26 @@ describe("no double-counting rest penalties", () => {
     const b = guardBlock("12:00", "16:00", 1, "b");
     const breakdown = calculatePersonBurden([a, b], rules);
     expect(breakdown.restPenalties).toBe(getRestPenalty(8));
-    expect(breakdown.guardBaseBurden).toBe(20 + 18);
+    expect(breakdown.guardBaseBurden).toBe(10 + 8);
+  });
+});
+
+describe("ABAS base work shift points", () => {
+  it("assigns fixed points per ABAS window", () => {
+    const morning: BurdenTimelineBlock = {
+      ...guardBlock("08:30", "11:30", 14),
+      missionType: "base_work",
+      positionKind: "duty",
+    };
+    const breakdown = calculatePersonBurden([morning], rules, scheduling);
+    expect(breakdown.otherMissionPoints).toBe(1.5);
   });
 });
 
 describe("paired guard individual burden", () => {
   it("each person gets paired score", () => {
     const detail = calculateGuardAssignmentBurden(guardBlock("00:00", "04:00", 2), null);
-    expect(detail.baseBurden).toBe(14);
+    expect(detail.baseBurden).toBe(8);
     expect(detail.isSolo).toBe(false);
   });
 });
@@ -229,7 +252,7 @@ describe("fairness candidate selection", () => {
       guardShifts: {},
       periodPoints: {},
       kitchenPoints: {},
-      dutyPoints: { "א׳": 20, "ב׳": 2 },
+      dutyPoints: { "א׳": 10, "ב׳": 5 },
     };
 
     const slot = flatSlot("00:00", "04:00", 1, "next-hard");

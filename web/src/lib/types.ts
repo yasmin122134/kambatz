@@ -233,15 +233,28 @@ export type FairnessRules = Record<FairnessBucket, number> & {
 };
 
 export const DEFAULT_GUARD_BANDS: GuardBandRule[] = [
-  { solo: 10, paired: 7 }, // 00:00–04:00
-  { solo: 9, paired: 6 }, // 04:00–08:00
-  { solo: 4, paired: 1 }, // 08:00–12:00 — זוג = 2 נק׳/4ש׳ with factor 2
-  { solo: 9, paired: 6 }, // 12:00–16:00
-  { solo: 6, paired: 3 }, // 16:00–20:00
-  { solo: 7, paired: 4 }, // 20:00–00:00
+  { solo: 10, paired: 8 }, // 00:00–04:00 — night / severe sleep disruption
+  { solo: 9, paired: 7 }, // 04:00–08:00 — early morning
+  { solo: 7, paired: 5 }, // 08:00–12:00 — comfortable daytime
+  { solo: 8, paired: 6 }, // 12:00–16:00 — peak heat
+  { solo: 7, paired: 5 }, // 16:00–20:00 — heat / evening
+  { solo: 8, paired: 6 }, // 20:00–00:00 — late hours
 ];
 
-export const DEFAULT_REST_PENALTIES = [0, 1, 2, 3, 4, 5, 7, 9, 12] as const;
+export const DEFAULT_REST_PENALTIES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+
+export type BaseWorkShiftRule = {
+  start: string;
+  end: string;
+  points: number;
+};
+
+/** Fixed ABAS shift scores (not hourly). Reserve force still uses duty × hours. */
+export const DEFAULT_BASE_WORK_SHIFTS: BaseWorkShiftRule[] = [
+  { start: "08:30", end: "11:30", points: 1.5 },
+  { start: "13:30", end: "17:30", points: 2.0 },
+  { start: "18:30", end: "20:00", points: 0.75 },
+];
 
 export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   solo: 1.5,
@@ -252,7 +265,8 @@ export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   duty: 0.1,
   kitchen: 0.1,
   hist: 0.7,
-  guard_hours_factor: 2,
+  /** Band scores are already «points per 4h block» — keep at 1 unless scaling all guard rows. */
+  guard_hours_factor: 1,
   guard_bands: DEFAULT_GUARD_BANDS.map((b) => ({ ...b })),
   rest_penalties: [...DEFAULT_REST_PENALTIES],
 };
@@ -282,7 +296,7 @@ export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
   standby: "כיתת כוננות (כללי)",
   standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
   standby_b: "כרמל ב׳ — כוננות",
-  duty: "עב״ס, עתודה ומשימות בסיס",
+  duty: "כוח עתודה ומשימות בסיס (לשעה) — עב״ס בטבלה נפרדת",
   kitchen: "חמגשיות ותורנות מטבח — נקודה קבועה לכל משמרת",
 };
 
@@ -322,9 +336,10 @@ export type PersonFairnessStats = {
 };
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
-  "שמירות — ניקוד עומס לפי שעה ביום, סולו/זוג, ומנוחה בין משימות.",
-  "משמרת 00:00–04:00 סולו = 20 נק׳ בסיס; זוג = 14. 08:00–12:00 זוג = 2 (2× שעות).",
-  "מנוחה קצרה בין משימות מוסיפה עונש (למשל פחות מ-7 שעות = +4).",
-  "מטבח, כוננות, עב״ס — עדיין לפי טבלת הצדק.",
+  "שמירות — נקודות לפי רצועות 4 שעות; משמרת קצרה או חוצה רצועות = יחסית (ציון_רצועה × שעות/4).",
+  "משמרת 00:00–04:00 סולו = 10 נק׳; זוג = 8. 08:00–12:00 זוג = 5.",
+  "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2).",
+  "עב״ס — נקודות קבועות לחלון (08:30, 13:30, 18:30); כוח עתודה — duty × שעות.",
+  "מטבח, כוננות — לפי טבלת הצדק.",
   "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];
