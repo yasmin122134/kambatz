@@ -373,13 +373,30 @@ export type HardEligibilityReason =
   | "canAssignKind"
   | "blockedByIssue"
   | "overlap"
+  | "guardSpacing"
   | "sameRoom"
   | "sameGender";
+
+export type HardEligibilityOptions = {
+  scheduling?: MissionSchedulingRules;
+  scopeMissionId?: string;
+};
 
 export type HardEligibilityResult = {
   allowed: boolean;
   reason?: HardEligibilityReason;
 };
+
+/** Minimum guard spacing ratio when evaluating soft guard gaps. */
+export const MIN_GUARD_RATIO = 1;
+
+export function effectiveGuardRatio(scheduling?: MissionSchedulingRules): number {
+  const configured = scheduling?.guard_ratio;
+  if (configured != null && configured > 0) {
+    return Math.max(MIN_GUARD_RATIO, configured);
+  }
+  return MIN_GUARD_RATIO;
+}
 
 /** Category A — never relaxed during Smart Assignment. */
 export function checkHardEligibility(
@@ -390,6 +407,7 @@ export function checkHardEligibility(
   mates: string[],
   peopleByName: Record<string, Person>,
   ignoreSlotId?: string,
+  options?: HardEligibilityOptions,
 ): HardEligibilityResult {
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) {
     return { allowed: false, reason: "canAssignKind" };
@@ -399,6 +417,20 @@ export function checkHardEligibility(
   }
   if (hasHardTimeOverlap(person.name, slot, tracker, ignoreSlotId)) {
     return { allowed: false, reason: "overlap" };
+  }
+  if (
+    isGuardKind(slot.positionKind) &&
+    options?.scheduling &&
+    !guardOk(
+      person.name,
+      slot,
+      tracker,
+      effectiveGuardRatio(options.scheduling),
+      ignoreSlotId,
+      options.scopeMissionId,
+    )
+  ) {
+    return { allowed: false, reason: "guardSpacing" };
   }
   if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) {
     return { allowed: false, reason: "sameRoom" };
@@ -1105,25 +1137,14 @@ export function explainFitsPersonFailure(
     mates,
     peopleByName,
     ignoreSlotId,
+    { scheduling, scopeMissionId },
   );
   if (!hard.allowed) return hard.reason ?? "hard";
-  if (
-    !guardOk(
-      person.name,
-      slot,
-      tracker,
-      scheduling.guard_ratio,
-      ignoreSlotId,
-      scopeMissionId,
-    )
-  ) {
-    return "guardOk";
-  }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
   return null;
 }
 
-/** Hard constraints only — rest and guard spacing are soft for Smart Assignment. */
+/** Hard constraints for Smart Assignment — includes guard spacing (no consecutive guards). */
 export function fitsPerson(
   person: Person,
   slot: FlatSlot,
@@ -1135,8 +1156,6 @@ export function fitsPerson(
   ignoreSlotId?: string,
   scopeMissionId?: string,
 ): boolean {
-  void scheduling;
-  void scopeMissionId;
   return checkHardEligibility(
     person,
     slot,
@@ -1145,6 +1164,7 @@ export function fitsPerson(
     mates,
     peopleByName,
     ignoreSlotId,
+    { scheduling, scopeMissionId },
   ).allowed;
 }
 
@@ -1169,18 +1189,6 @@ export function fitsPersonStrict(
       scheduling,
       mates,
       peopleByName,
-      ignoreSlotId,
-      scopeMissionId,
-    )
-  ) {
-    return false;
-  }
-  if (
-    !guardOk(
-      person.name,
-      slot,
-      tracker,
-      scheduling.guard_ratio,
       ignoreSlotId,
       scopeMissionId,
     )
@@ -1586,9 +1594,14 @@ export function describeAssignmentWarnings(
   }
   if (
     isGuardKind(slot.positionKind) &&
-    !guardOk(person.name, slot, tracker, scheduling.guard_ratio)
+    !guardOk(
+      person.name,
+      slot,
+      tracker,
+      effectiveGuardRatio(scheduling),
+    )
   ) {
-    msgs.push(`${person.name}: יחס שמירות (${scheduling.guard_ratio}:1) לא מתקיים`);
+    msgs.push(`${person.name}: שמירות רצופות / יחס שמירות לא מתקיים`);
   }
   const overlapMsg = overlapAssignmentWarning(
     person.name,
@@ -1651,9 +1664,6 @@ function overlapAssignmentWarning(
 }
 
 /** Minimum guard spacing ratio when evaluating soft guard gaps. */
-export const MIN_GUARD_RATIO = 1;
-
-/** Progressive relaxation removed — only hard-valid candidates; soft costs rank choices. */
 export type AssignmentRelaxationLevel = 0 | 1 | 2 | 3 | 4;
 
 function personFitsAtRelaxationLevel(
@@ -1661,11 +1671,11 @@ function personFitsAtRelaxationLevel(
   slot: FlatSlot,
   tracker: ScheduleTracker,
   issues: Issue[],
-  _scheduling: MissionSchedulingRules,
+  scheduling: MissionSchedulingRules,
   mates: string[],
   peopleByName: Record<string, Person>,
   level: AssignmentRelaxationLevel,
-  _scopeMissionId?: string,
+  scopeMissionId?: string,
 ): boolean {
   if (level === 0) return false;
   return checkHardEligibility(
@@ -1675,6 +1685,8 @@ function personFitsAtRelaxationLevel(
     issues,
     mates,
     peopleByName,
+    undefined,
+    { scheduling, scopeMissionId },
   ).allowed;
 }
 
@@ -1751,6 +1763,8 @@ export function pickRelaxedCandidate(
           issues,
           mates,
           peopleByName,
+          undefined,
+          { scheduling, scopeMissionId },
         ).allowed,
     )
     .sort((a, b) => {
@@ -2261,9 +2275,10 @@ function classifyCandidateRejection(
   slot: FlatSlot,
   tracker: ScheduleTracker,
   issues: Issue[],
-  _scheduling: MissionSchedulingRules,
+  scheduling: MissionSchedulingRules,
   mates: string[],
   peopleByName: Record<string, Person>,
+  scopeMissionId?: string,
 ): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
   const hard = checkHardEligibility(
     person,
@@ -2272,11 +2287,14 @@ function classifyCandidateRejection(
     issues,
     mates,
     peopleByName,
+    undefined,
+    { scheduling, scopeMissionId },
   );
   if (!hard.allowed) {
     if (hard.reason === "blockedByIssue") return "rejectedIssue";
     if (hard.reason === "canAssignKind") return "rejectedIneligible";
     if (hard.reason === "overlap") return "rejectedOverlap";
+    if (hard.reason === "guardSpacing") return "rejectedGuardRatio";
     return "rejectedOther";
   }
   return null;
@@ -2355,6 +2373,7 @@ export function assignBaseWorkShift(input: {
       input.scheduling,
       mates,
       peopleByName,
+      input.missionId,
     );
     if (reason) diagnostics[reason] += 1;
   };
@@ -2368,6 +2387,7 @@ export function assignBaseWorkShift(input: {
       input.scheduling,
       mates,
       peopleByName,
+      input.missionId,
     ) === null;
 
   const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);

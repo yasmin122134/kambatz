@@ -5,7 +5,6 @@ import { flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { standardMissionPositions } from "@/lib/mission-templates";
 import {
   buildTrackerFromMissions,
-  evaluateSoftConstraints,
   explainFitsPersonFailure,
   fitsPerson,
   fitsPersonStrict,
@@ -320,7 +319,7 @@ describe("guard ratio scoped to current mission", () => {
 });
 
 describe("relaxed fill guard spacing", () => {
-  it("pickRelaxedCandidate allows hard-valid guard with soft spacing cost", () => {
+  it("pickRelaxedCandidate rejects consecutive guard shifts", () => {
     const positions = [
       {
         id: "patrol",
@@ -376,19 +375,7 @@ describe("relaxed fill guard spacing", () => {
       new Set(),
       { scopeMissionId: mission.id, roster: [p] },
     );
-    expect(chosen?.name).toBe("Alex");
-    const soft = evaluateSoftConstraints(
-      p,
-      second,
-      tracker,
-      mission.scheduling_rules!,
-      DEFAULT_FAIRNESS_RULES,
-      0,
-      1,
-      undefined,
-      mission.id,
-    );
-    expect(soft.restPenalty).toBeGreaterThan(0);
+    expect(chosen).toBeNull();
   });
 
   it("pickRelaxedCandidate accepts duty↔guard gap as soft cost when hard-valid", () => {

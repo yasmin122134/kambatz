@@ -87,8 +87,8 @@ function guardMission(
 describe("Smart Assignment priority model", () => {
   it("A — hard-valid candidate with rest penalty is still eligible", () => {
     const mission = guardMission([
-      { id: "g1", start: "08:00", end: "12:00" },
-      { id: "g2", start: "12:00", end: "16:00" },
+      { id: "g1", start: "00:00", end: "04:00" },
+      { id: "g2", start: "10:00", end: "14:00" },
     ]);
     const slots = flattenMissionSlots(mission);
     const tracker = buildTrackerFromMissions([], rules);
@@ -97,9 +97,6 @@ describe("Smart Assignment priority model", () => {
     expect(
       fitsPerson(p, slots[1], tracker, [], scheduling, [], { Alex: p }, undefined, mission.id),
     ).toBe(true);
-    expect(
-      fitsPersonStrict(p, slots[1], tracker, [], scheduling, [], { Alex: p }, undefined, mission.id),
-    ).toBe(false);
     const soft = evaluateSoftConstraints(
       p,
       slots[1],
@@ -112,6 +109,26 @@ describe("Smart Assignment priority model", () => {
       mission.id,
     );
     expect(soft.restPenalty).toBeGreaterThan(0);
+  });
+
+  it("H — consecutive guard shifts are hard-invalid", () => {
+    const mission = guardMission([
+      { id: "g1", start: "08:00", end: "12:00" },
+      { id: "g2", start: "12:00", end: "16:00" },
+    ]);
+    const slots = flattenMissionSlots(mission);
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson("Alex", slots[0], mission.id, tracker, rules, scheduling, 1);
+    const p = person("Alex");
+    expect(
+      fitsPerson(p, slots[1], tracker, [], scheduling, [], { Alex: p }, undefined, mission.id),
+    ).toBe(false);
+    expect(
+      checkHardEligibility(p, slots[1], tracker, [], [], { Alex: p }, undefined, {
+        scheduling,
+        scopeMissionId: mission.id,
+      }).reason,
+    ).toBe("guardSpacing");
   });
 
   it("B — complete schedule beats partial even with better fairness score", () => {
