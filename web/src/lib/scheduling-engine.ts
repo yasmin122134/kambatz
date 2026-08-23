@@ -2503,6 +2503,230 @@ export function assignBaseWorkShift(input: {
   };
 }
 
+export type SlotAssignmentCheck =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+/** Full hard-rule check for assigning `person` to a seat (optionally replacing someone). */
+export function canAssignPersonToSlot(input: {
+  missions: MissionDay[];
+  rules: FairnessRules;
+  missionId: string;
+  slot: FlatSlot;
+  seatIndex: number;
+  person: Person;
+  issues: Issue[];
+  peopleByName: Record<string, Person>;
+  /** Occupant to remove from this seat before checking (defaults to current seat holder). */
+  replaceName?: string | null;
+}): SlotAssignmentCheck {
+  const mission = input.missions.find((m) => m.id === input.missionId);
+  if (!mission) return { ok: false, reason: "משימה לא נמצאה" };
+
+  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+  const tracker = buildTrackerFromMissions(input.missions, input.rules);
+  const currentHolder =
+    input.replaceName !== undefined
+      ? input.replaceName
+      : mission.assignments[input.slot.slotId]?.[input.seatIndex] || null;
+
+  if (currentHolder) {
+    unplacePerson(
+      currentHolder,
+      input.slot,
+      input.missionId,
+      tracker,
+      input.rules,
+      scheduling,
+    );
+  }
+
+  const mates = (mission.assignments[input.slot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.seatIndex &&
+      n !== input.person.name &&
+      n !== currentHolder,
+  );
+
+  if (
+    !fitsPerson(
+      input.person,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      mates,
+      input.peopleByName,
+      undefined,
+      input.missionId,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      input.person,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      mates,
+      input.peopleByName,
+      undefined,
+      input.missionId,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(input.person.name, input.slot, why) ??
+        `${input.person.name}: לא עומד בכללי השיבוץ`,
+    };
+  }
+  return { ok: true };
+}
+
+function assignmentFailureMessage(
+  personName: string,
+  slot: FlatSlot,
+  code: string | null,
+): string | null {
+  if (!code) return null;
+  if (code === "canAssignKind") return `${personName}: לא זכאי ל«${slot.positionName}»`;
+  if (code === "blockedByIssue") return `${personName}: חסימה מאושרת`;
+  if (code === "overlap") return `${personName}: חפיפה עם משמרת אחרת`;
+  if (code === "guardSpacing") return `${personName}: שמירות רצופות / מרווח שמירות`;
+  if (code === "sameRoom") return `${personName}: לא אותו חדר`;
+  if (code === "sameGender") return `${personName}: לא אותו מגדר`;
+  if (code === "restOk") return `${personName}: מנוחה לא מספקת`;
+  if (code === "guardOk") return `${personName}: מרווח שמירות לא מתקיים`;
+  return `${personName}: לא עומד בכללים`;
+}
+
+/** Validate a two-person swap before applying. */
+export function canSwapReplacementAssignments(input: {
+  missions: MissionDay[];
+  rules: FairnessRules;
+  missionId: string;
+  slot: FlatSlot;
+  seatIndex: number;
+  removeName: string;
+  swapMissionId: string;
+  swapSlot: FlatSlot;
+  swapSeatIndex: number;
+  swapPerson: Person;
+  issues: Issue[];
+  peopleByName: Record<string, Person>;
+}): SlotAssignmentCheck {
+  const mission = input.missions.find((m) => m.id === input.missionId);
+  const swapMission = input.missions.find((m) => m.id === input.swapMissionId);
+  if (!mission || !swapMission) return { ok: false, reason: "משימה לא נמצאה" };
+
+  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+  const swapScheduling = normalizeSchedulingRules(swapMission.scheduling_rules);
+  const tracker = buildTrackerFromMissions(input.missions, input.rules);
+
+  unplacePerson(
+    input.removeName,
+    input.slot,
+    input.missionId,
+    tracker,
+    input.rules,
+    scheduling,
+  );
+  unplacePerson(
+    input.swapPerson.name,
+    input.swapSlot,
+    input.swapMissionId,
+    tracker,
+    input.rules,
+    swapScheduling,
+  );
+
+  const removePerson = input.peopleByName[input.removeName];
+  if (!removePerson) {
+    return { ok: false, reason: `${input.removeName}: לא נמצא במחזור` };
+  }
+
+  const targetMates = (mission.assignments[input.slot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.seatIndex &&
+      n !== input.swapPerson.name &&
+      n !== input.removeName,
+  );
+  const swapMates = (swapMission.assignments[input.swapSlot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.swapSeatIndex &&
+      n !== input.swapPerson.name &&
+      n !== input.removeName,
+  );
+
+  if (
+    !fitsPerson(
+      input.swapPerson,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      targetMates,
+      input.peopleByName,
+      undefined,
+      input.missionId,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      input.swapPerson,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      targetMates,
+      input.peopleByName,
+      undefined,
+      input.missionId,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(input.swapPerson.name, input.slot, why) ??
+        `${input.swapPerson.name}: לא יכול לקחת את המשמרת`,
+    };
+  }
+
+  if (
+    !fitsPerson(
+      removePerson,
+      input.swapSlot,
+      tracker,
+      input.issues,
+      swapScheduling,
+      swapMates,
+      input.peopleByName,
+      undefined,
+      input.swapMissionId,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      removePerson,
+      input.swapSlot,
+      tracker,
+      input.issues,
+      swapScheduling,
+      swapMates,
+      input.peopleByName,
+      undefined,
+      input.swapMissionId,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(removePerson.name, input.swapSlot, why) ??
+        `${input.removeName}: לא יכול לקחת את משמרת ההחלפה`,
+    };
+  }
+
+  return { ok: true };
+}
+
 export function findReplacements(input: {
   missions: MissionDay[];
   people: Person[];
@@ -2527,87 +2751,119 @@ export function findReplacements(input: {
     input.people.reduce((s, p) => s + (p.prior_score || 0), 0) /
     (input.people.length || 1);
 
-  const tracker = buildTrackerFromMissions(input.missions, input.rules);
-  const removeBlocks = (tracker.busy[input.removeName] || []).filter(
-    (b) => !(b.missionId === input.missionId && b.slotId === input.slotId),
-  );
-  tracker.busy[input.removeName] = removeBlocks;
-  if (isGuardKind(target.positionKind)) {
-    tracker.guardShifts[input.removeName] = (
-      tracker.guardShifts[input.removeName] || []
-    ).slice(0, -1);
-  }
-
   const mates = (mission.assignments[input.slotId] || []).filter(
     (n, i) => n && i !== input.seatIndex,
+  );
+  const roster = activeRosterMembers(input.people);
+  const trackerForRank = buildTrackerFromMissions(input.missions, input.rules);
+  unplacePerson(
+    input.removeName,
+    target,
+    input.missionId,
+    trackerForRank,
+    input.rules,
+    scheduling,
   );
 
   const options: ReplacementOption[] = [];
 
   if (input.mode === "replace") {
-    for (const p of input.people) {
+    for (const p of roster) {
       if (p.name === input.removeName) continue;
       if ((mission.assignments[input.slotId] || []).includes(p.name)) continue;
-      if (
-        !fitsPerson(p, target, tracker, input.issues, scheduling, mates, peopleByName)
-      ) {
-        continue;
-      }
-      const cost = workScore(p, tracker, input.rules, meanPrior);
+
+      const check = canAssignPersonToSlot({
+        missions: input.missions,
+        rules: input.rules,
+        missionId: input.missionId,
+        slot: target,
+        seatIndex: input.seatIndex,
+        person: p,
+        issues: input.issues,
+        peopleByName,
+        replaceName: input.removeName,
+      });
+      if (!check.ok) continue;
+
+      const cost = projectedBurdenForSlot(
+        p,
+        target,
+        trackerForRank,
+        input.rules,
+        meanPrior,
+        scheduling,
+        target.seatCount,
+      );
       options.push({
         type: "direct",
         personName: p.name,
         cost,
-        label: `${p.name} — עומס נמוך (${cost.toFixed(1)} נק׳)`,
+        label: `${p.name} — עומס אחרי שיבוץ ${cost.toFixed(1)} נק׳`,
       });
     }
-    options.sort((a, b) => a.cost - b.cost);
+    options.sort((a, b) => {
+      const cmp = compareByFairnessThenBurden(
+        peopleByName[a.personName]!,
+        peopleByName[b.personName]!,
+        target,
+        roster,
+        trackerForRank,
+        input.rules,
+        meanPrior,
+        scheduling,
+        target.seatCount,
+      );
+      return cmp || a.cost - b.cost || a.personName.localeCompare(b.personName, "he");
+    });
     return options.slice(0, 8);
   }
 
-  for (const p of input.people) {
+  const removePerson = peopleByName[input.removeName];
+  if (!removePerson) return [];
+
+  for (const p of roster) {
     if (p.name === input.removeName) continue;
     for (const otherMission of input.missions) {
+      const otherScheduling = normalizeSchedulingRules(otherMission.scheduling_rules);
       for (const otherSlot of flattenMissionSlots(otherMission)) {
         const arr = otherMission.assignments[otherSlot.slotId] || [];
         const oi = arr.indexOf(p.name);
         if (oi < 0) continue;
         if (arr.includes(input.removeName)) continue;
 
-        const perRemove = buildTrackerFromMissions(input.missions, input.rules);
-        const perPerson = peopleByName[p.name];
-        const perRemovePerson = peopleByName[input.removeName];
-        if (!perPerson || !perRemovePerson) continue;
+        const check = canSwapReplacementAssignments({
+          missions: input.missions,
+          rules: input.rules,
+          missionId: input.missionId,
+          slot: target,
+          seatIndex: input.seatIndex,
+          removeName: input.removeName,
+          swapMissionId: otherMission.id,
+          swapSlot: otherSlot,
+          swapSeatIndex: oi,
+          swapPerson: p,
+          issues: input.issues,
+          peopleByName,
+        });
+        if (!check.ok) continue;
 
-        const matesOther = arr.filter((_, i) => i !== oi);
-        if (
-          !fitsPerson(
-            perRemovePerson,
-            otherSlot,
-            perRemove,
-            input.issues,
-            normalizeSchedulingRules(otherMission.scheduling_rules),
-            matesOther,
-            peopleByName,
-            otherSlot.slotId,
-          )
-        ) {
-          continue;
-        }
-        if (
-          !fitsPerson(
-            perPerson,
-            target,
-            perRemove,
-            input.issues,
-            scheduling,
-            mates,
-            peopleByName,
-            input.slotId,
-          )
-        ) {
-          continue;
-        }
+        const probe = buildTrackerFromMissions(input.missions, input.rules);
+        unplacePerson(
+          input.removeName,
+          target,
+          input.missionId,
+          probe,
+          input.rules,
+          scheduling,
+        );
+        unplacePerson(
+          p.name,
+          otherSlot,
+          otherMission.id,
+          probe,
+          input.rules,
+          otherScheduling,
+        );
 
         const durDiff =
           Math.abs(otherSlot.durationMinutes - target.durationMinutes) / 60;
@@ -2616,7 +2872,16 @@ export function findReplacements(input: {
         const cost =
           durDiff +
           kindPenalty +
-          workScore(perPerson, perRemove, input.rules, meanPrior) / 100;
+          projectedBurdenForSlot(
+            p,
+            target,
+            probe,
+            input.rules,
+            meanPrior,
+            scheduling,
+            target.seatCount,
+          ) /
+            100;
 
         options.push({
           type: "swap",
