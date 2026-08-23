@@ -1826,6 +1826,217 @@ export function assignBaseWorkShift(input: {
   };
 }
 
+export type SlotAssignmentCheck =
+  | { ok: true }
+  | { ok: false; reason: string };
+
+function assignmentFailureMessage(
+  personName: string,
+  slot: FlatSlot,
+  code: string | null,
+): string | null {
+  if (!code) return null;
+  if (code === "canAssignKind") return `${personName}: לא זכאי ל«${slot.positionName}»`;
+  if (code === "blockedByIssue") return `${personName}: חסימה מאושרת`;
+  if (code === "overlapsSlot") return `${personName}: חפיפה עם משמרת אחרת`;
+  if (code === "guardOk") return `${personName}: מרווח שמירות לא מתקיים`;
+  if (code === "sameRoom") return `${personName}: לא אותו חדר`;
+  if (code === "sameGender") return `${personName}: לא אותו מגדר`;
+  if (code === "restOk") return `${personName}: מנוחה לא מספקת`;
+  return `${personName}: לא עומד בכללים`;
+}
+
+/** Full hard-rule check for assigning `person` to a seat (optionally replacing someone). */
+export function canAssignPersonToSlot(input: {
+  missions: MissionDay[];
+  rules: FairnessRules;
+  missionId: string;
+  slot: FlatSlot;
+  seatIndex: number;
+  person: Person;
+  issues: Issue[];
+  peopleByName: Record<string, Person>;
+  /** Occupant to remove from this seat before checking (defaults to current seat holder). */
+  replaceName?: string | null;
+}): SlotAssignmentCheck {
+  const mission = input.missions.find((m) => m.id === input.missionId);
+  if (!mission) return { ok: false, reason: "משימה לא נמצאה" };
+
+  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+  const tracker = buildTrackerFromMissions(input.missions, input.rules);
+  const currentHolder =
+    input.replaceName !== undefined
+      ? input.replaceName
+      : mission.assignments[input.slot.slotId]?.[input.seatIndex] || null;
+
+  if (currentHolder) {
+    unplacePerson(
+      currentHolder,
+      input.slot,
+      input.missionId,
+      tracker,
+      input.rules,
+      scheduling,
+    );
+  }
+
+  const mates = (mission.assignments[input.slot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.seatIndex &&
+      n !== input.person.name &&
+      n !== currentHolder,
+  );
+
+  if (
+    !fitsPerson(
+      input.person,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      mates,
+      input.peopleByName,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      input.person,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      mates,
+      input.peopleByName,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(input.person.name, input.slot, why) ??
+        `${input.person.name}: לא עומד בכללי השיבוץ`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Validate a two-person swap before applying. */
+export function canSwapReplacementAssignments(input: {
+  missions: MissionDay[];
+  rules: FairnessRules;
+  missionId: string;
+  slot: FlatSlot;
+  seatIndex: number;
+  removeName: string;
+  swapMissionId: string;
+  swapSlot: FlatSlot;
+  swapSeatIndex: number;
+  swapPerson: Person;
+  issues: Issue[];
+  peopleByName: Record<string, Person>;
+}): SlotAssignmentCheck {
+  const mission = input.missions.find((m) => m.id === input.missionId);
+  const swapMission = input.missions.find((m) => m.id === input.swapMissionId);
+  if (!mission || !swapMission) return { ok: false, reason: "משימה לא נמצאה" };
+
+  const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+  const swapScheduling = normalizeSchedulingRules(swapMission.scheduling_rules);
+  const tracker = buildTrackerFromMissions(input.missions, input.rules);
+
+  unplacePerson(
+    input.removeName,
+    input.slot,
+    input.missionId,
+    tracker,
+    input.rules,
+    scheduling,
+  );
+  unplacePerson(
+    input.swapPerson.name,
+    input.swapSlot,
+    input.swapMissionId,
+    tracker,
+    input.rules,
+    swapScheduling,
+  );
+
+  const removePerson = input.peopleByName[input.removeName];
+  if (!removePerson) {
+    return { ok: false, reason: `${input.removeName}: לא נמצא במחזור` };
+  }
+
+  const targetMates = (mission.assignments[input.slot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.seatIndex &&
+      n !== input.swapPerson.name &&
+      n !== input.removeName,
+  );
+  const swapMates = (swapMission.assignments[input.swapSlot.slotId] || []).filter(
+    (n, i) =>
+      Boolean(n) &&
+      i !== input.swapSeatIndex &&
+      n !== input.swapPerson.name &&
+      n !== input.removeName,
+  );
+
+  if (
+    !fitsPerson(
+      input.swapPerson,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      targetMates,
+      input.peopleByName,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      input.swapPerson,
+      input.slot,
+      tracker,
+      input.issues,
+      scheduling,
+      targetMates,
+      input.peopleByName,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(input.swapPerson.name, input.slot, why) ??
+        `${input.swapPerson.name}: לא יכול לקחת את המשמרת`,
+    };
+  }
+
+  if (
+    !fitsPerson(
+      removePerson,
+      input.swapSlot,
+      tracker,
+      input.issues,
+      swapScheduling,
+      swapMates,
+      input.peopleByName,
+    )
+  ) {
+    const why = explainFitsPersonFailure(
+      removePerson,
+      input.swapSlot,
+      tracker,
+      input.issues,
+      swapScheduling,
+      swapMates,
+      input.peopleByName,
+    );
+    return {
+      ok: false,
+      reason:
+        assignmentFailureMessage(removePerson.name, input.swapSlot, why) ??
+        `${input.removeName}: לא יכול לקחת את משמרת ההחלפה`,
+    };
+  }
+
+  return { ok: true };
+}
+
 export function findReplacements(input: {
   missions: MissionDay[];
   people: Person[];

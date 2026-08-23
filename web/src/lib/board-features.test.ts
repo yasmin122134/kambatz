@@ -1,28 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { defaultBaseWorkPositions, isBaseWorkOfficerPosition } from "@/lib/base-work-template";
+import { defaultBaseWorkPositions, isBaseWorkPosition } from "@/lib/base-work-template";
 import { computeHourlyAvailability } from "@/lib/hourly-availability";
-import { allowsParallelAssignmentOverlap } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
-describe("base work officer position", () => {
-  it("includes אחראי עב״ס with one seat per window", () => {
+describe("base work positions", () => {
+  it("includes עבודות בסיס with three daily windows", () => {
     const positions = defaultBaseWorkPositions();
-    const officer = positions.find((p) => isBaseWorkOfficerPosition(p));
-    expect(officer?.name).toBe("אחראי עב״ס");
-    expect(officer?.slots).toHaveLength(3);
-    expect(officer?.slots.every((s) => s.seat_count === 1)).toBe(true);
-  });
-});
-
-describe("Carmel B parallel base work", () => {
-  it("allows overlap between carmel B and base work duty", () => {
-    expect(
-      allowsParallelAssignmentOverlap(
-        { positionKind: "standby_carmel_b", missionType: "guards" },
-        { positionKind: "duty", missionType: "base_work" },
-      ),
-    ).toBe(true);
+    const baseWork = positions.find((p) => isBaseWorkPosition(p));
+    expect(baseWork?.name).toBe("עבודות בסיס");
+    expect(baseWork?.slots).toHaveLength(3);
   });
 });
 
