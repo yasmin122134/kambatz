@@ -24,8 +24,9 @@ create table if not exists issues (
   id uuid primary key default gen_random_uuid(),
   person_id uuid references people(id) on delete set null,
   person_name text not null,
-  start_time text not null,  -- HH:MM on the 24h board
+  start_time text not null,  -- HH:MM wall clock on constraint_date
   end_time text not null,
+  constraint_date date not null,
   issue_type text not null check (issue_type in ('exam', 'trial', 'medical', 'weapon', 'other')),
   note text,
   status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
@@ -34,6 +35,7 @@ create table if not exists issues (
 
 create index if not exists issues_status_idx on issues(status);
 create index if not exists issues_created_idx on issues(created_at desc);
+create index if not exists issues_constraint_date_idx on issues(constraint_date);
 
 -- Row Level Security: public read/write for small trusted unit (60 people)
 -- Tighten later with Supabase Auth if needed.

@@ -202,6 +202,32 @@ button:hover,
   font-size: 14px;
 }
 
+.roster-warnings {
+  border: 1px solid #c9a832;
+  background: #faf5ea;
+  color: #6b4f12;
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.roster-warnings h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.roster-warnings ul {
+  margin: 0;
+  padding-right: 1.1rem;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.roster-warnings li + li {
+  margin-top: 4px;
+}
+
 .tag {
   font-family: var(--font-mono);
   font-size: 10px;

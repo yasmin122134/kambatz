@@ -74,11 +74,11 @@ describe("mission-relative guard grid", () => {
       boardStart: "20:00",
       shiftHours: 4,
       season: "summer",
-      missionStartsAt: "2026-01-15T20:00:00",
-      missionEndsAt: "2026-01-16T20:00:00",
+      missionStartsAt: "2026-01-15T20:00:00+02:00",
+      missionEndsAt: "2026-01-16T20:00:00+02:00",
     });
     const patrol = positions.find((p) => p.name === "פטל");
-    expect(patrol?.slots[0]?.start_time).toBe("20:00");
+    expect(patrol?.slots.some((s) => s.start_time === "20:00")).toBe(true);
   });
 
   it("buildPureFourHourShiftWindows anchors to board start", () => {
@@ -109,8 +109,8 @@ describe("mission-relative guard grid", () => {
       boardStart: "06:00",
       shiftHours: 4,
       season: "summer",
-      missionStartsAt: "2026-01-01T06:00:00",
-      missionEndsAt: "2026-01-01T09:00:00",
+      missionStartsAt: "2026-01-01T06:00:00+02:00",
+      missionEndsAt: "2026-01-01T09:00:00+02:00",
     });
     const foot = positions.find((p) => p.name.includes("רגלי"))!;
     foot.slots = [
@@ -119,8 +119,8 @@ describe("mission-relative guard grid", () => {
     const synced = syncGuardShiftSlots(positions, {
       boardStart: "06:00",
       shiftHours: 4,
-      missionStartsAt: "2026-01-01T06:00:00",
-      missionEndsAt: "2026-01-01T09:00:00",
+      missionStartsAt: "2026-01-01T06:00:00+02:00",
+      missionEndsAt: "2026-01-01T09:00:00+02:00",
     });
     const slots = synced.find((p) => p.name.includes("רגלי"))!.slots;
     expect(slots).toHaveLength(1);

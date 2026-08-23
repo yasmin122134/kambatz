@@ -35,18 +35,21 @@ function person(name: string, overrides: Partial<Person> = {}): Person {
 }
 
 function guardMission(assignments: Record<string, string[]> = {}): MissionDay {
+  const startsAt = "2026-03-01T07:00:00.000Z";
+  const endsAt = "2026-03-02T07:00:00.000Z";
   const positions = buildGuardDayPositions({
-    missionStartsAt: "2026-03-01T09:00:00",
-    missionEndsAt: "2026-03-02T09:00:00",
+    missionStartsAt: startsAt,
+    missionEndsAt: endsAt,
     boardStart: "09:00",
+    shiftHours: 4,
   });
   return {
     id: "m1",
     title: "שמירות",
     mission_type: "guards",
     mission_date: "2026-03-01",
-    starts_at: "2026-03-01T09:00:00",
-    ends_at: "2026-03-02T09:00:00",
+    starts_at: startsAt,
+    ends_at: endsAt,
     status: "draft",
     positions,
     assignments,
@@ -61,11 +64,13 @@ function approvedIssue(
   personName: string,
   start: string,
   end: string,
+  constraintDate = "2026-03-01",
 ): Issue {
   return {
     id: `issue-${personName}-${start}`,
     person_id: personName,
     person_name: personName,
+    constraint_date: constraintDate,
     start_time: start,
     end_time: end,
     issue_type: "trial",
@@ -115,7 +120,30 @@ describe("constraints end-to-end", () => {
       issues,
     );
 
-    expect(conflicts.some((m) => m.includes("אילוץ מאושר"))).toBe(true);
+    expect(conflicts.some((m) => m.includes("התנגשות עם חסימה מאושרת"))).toBe(true);
+  });
+
+  it("approved issue on another date does not block assignment", () => {
+    const mission = guardMission({});
+    const slots = flattenMissionSlots(mission);
+    const guardSlot = slots.find((s) => s.positionKind === "guard")!;
+    const blocked = person("חסום");
+    const peopleByName = { [blocked.name]: blocked };
+    const issues = [
+      approvedIssue(blocked.name, guardSlot.startTime, guardSlot.endTime, "2026-03-15"),
+    ];
+
+    expect(blockedByIssue(blocked.name, guardSlot, issues)).toBe(false);
+    expect(
+      findAssignmentConflicts(
+        {
+          ...mission,
+          assignments: { [guardSlot.slotId]: [blocked.name] },
+        },
+        peopleByName,
+        issues,
+      ),
+    ).toEqual([]);
   });
 
   it("smart assign skips person with approved time block", () => {
@@ -123,7 +151,7 @@ describe("constraints end-to-end", () => {
     const slots = flattenMissionSlots(mission);
     const morningGuard = slots.find(
       (s) => s.positionKind === "guard" && s.startTime === "09:00",
-    );
+    ) ?? slots.find((s) => s.positionKind === "guard");
     expect(morningGuard).toBeDefined();
     if (!morningGuard) return;
 

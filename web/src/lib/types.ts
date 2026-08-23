@@ -55,6 +55,8 @@ export interface Issue {
   id: string;
   person_id: string | null;
   person_name: string;
+  /** YYYY-MM-DD — the calendar day this block applies to (Israel). */
+  constraint_date: string;
   start_time: string;
   end_time: string;
   issue_type: IssueType;

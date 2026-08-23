@@ -2,6 +2,7 @@
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/AppShell";
+import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -24,6 +25,9 @@ export default function ReportPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [myIssues, setMyIssues] = useState<Issue[]>([]);
   const [personName, setPersonName] = useState("");
+  const [constraintDate, setConstraintDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
   const [issueType, setIssueType] = useState<IssueType>("trial");
@@ -32,6 +36,18 @@ export default function ReportPage() {
   const [message, setMessage] = useState<{ ok: boolean; text: string } | null>(
     null,
   );
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const reloadIssues = useCallback(() => {
+    if (!personName) {
+      setMyIssues([]);
+      return;
+    }
+    fetch(`/api/issues?person_name=${encodeURIComponent(personName)}`)
+      .then((r) => r.json())
+      .then(setMyIssues)
+      .catch(() => {});
+  }, [personName]);
 
   useEffect(() => {
     fetch("/api/people")
@@ -54,15 +70,8 @@ export default function ReportPage() {
   }, []);
 
   useEffect(() => {
-    if (!personName) {
-      setMyIssues([]);
-      return;
-    }
-    fetch(`/api/issues?person_name=${encodeURIComponent(personName)}`)
-      .then((r) => r.json())
-      .then(setMyIssues)
-      .catch(() => {});
-  }, [personName, message]);
+    reloadIssues();
+  }, [reloadIssues, message]);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -74,6 +83,7 @@ export default function ReportPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         person_name: personName,
+        constraint_date: constraintDate,
         start_time: startTime,
         end_time: endTime,
         issue_type: issueType,
@@ -91,7 +101,7 @@ export default function ReportPage() {
 
     setMessage({
       ok: true,
-      text: "הדיווח נשלח! ממתין לאישור מפקד — לא תשובצו לשום דבר בשעות האלה אחרי האישור.",
+      text: `הדיווח נשלח ל-${constraintDate}! ממתין לאישור מפקד — לא תשובצו לשום דבר בשעות האלה באותו יום אחרי האישור.`,
     });
     setNote("");
   }
@@ -102,7 +112,7 @@ export default function ReportPage() {
         <div className="card mb-4">
           <h2 className="font-display text-xl">הוספת אילוץ</h2>
           <p className="lede">
-            דווחו חסימת שעות — ממתין לאישור מפקד.
+            דווחו חסימת שעות ביום מסוים — ממתין לאישור מפקד.
           </p>
         </div>
       <form onSubmit={onSubmit} className="card space-y-4">
@@ -137,6 +147,19 @@ export default function ReportPage() {
               </button>
             ))}
           </div>
+        </div>
+
+        <div className="field">
+          <label htmlFor="date">תאריך</label>
+          <input
+            id="date"
+            type="date"
+            required
+            className="mono"
+            value={constraintDate}
+            onChange={(e) => setConstraintDate(e.target.value)}
+          />
+          <p className="hint">האילוץ חל רק על היום הזה — לא על כל ימי השמירות.</p>
         </div>
 
         <div className="rowf">
@@ -205,15 +228,55 @@ export default function ReportPage() {
       {personName && myIssues.length > 0 && (
         <div className="card mt-6">
           <h3 className="font-display text-base mb-3">הדיווחים שלי</h3>
-          <ul className="space-y-2 text-sm">
+          <ul className="space-y-3 text-sm">
             {myIssues.map((iss) => (
-              <li key={iss.id} className="flex flex-wrap gap-2 items-center border-b border-line2 pb-2">
-                <span className="mono">{iss.start_time}–{iss.end_time}</span>
-                <span>{ISSUE_TYPE_LABELS[iss.issue_type]}</span>
-                <span className={`tag tag-${iss.status}`}>
-                  {ISSUE_STATUS_LABELS[iss.status]}
-                </span>
-                {iss.note && <span className="text-ink2">{iss.note}</span>}
+              <li key={iss.id} className="border-b border-line2 pb-3">
+                {editingId === iss.id ? (
+                  <IssueEditor
+                    issue={iss}
+                    onSaved={(updated) => {
+                      setMyIssues((prev) =>
+                        prev.map((row) => (row.id === updated.id ? updated : row)),
+                      );
+                      setEditingId(null);
+                      setMessage({
+                        ok: true,
+                        text:
+                          updated.status === "pending" && iss.status === "approved"
+                            ? "האילוץ עודכן וממתין לאישור מחדש"
+                            : "האילוץ עודכן",
+                      });
+                    }}
+                    onCancel={() => setEditingId(null)}
+                    onDeleted={(id) => {
+                      setMyIssues((prev) => prev.filter((row) => row.id !== id));
+                      setEditingId(null);
+                      setMessage({ ok: true, text: "האילוץ נמחק" });
+                    }}
+                  />
+                ) : (
+                  <div className="flex flex-wrap gap-2 items-center justify-between">
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <span className="mono">
+                        {iss.constraint_date} · {iss.start_time}–{iss.end_time}
+                      </span>
+                      <span>{ISSUE_TYPE_LABELS[iss.issue_type]}</span>
+                      <span className={`tag tag-${iss.status}`}>
+                        {ISSUE_STATUS_LABELS[iss.status]}
+                      </span>
+                      {iss.note && <span className="text-ink2">{iss.note}</span>}
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        className="btn-sm"
+                        onClick={() => setEditingId(iss.id)}
+                      >
+                        ערוך
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>

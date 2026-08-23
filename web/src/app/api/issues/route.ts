@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { isAdmin } from "@/lib/auth";
+import { parseIssuePayload } from "@/lib/issue-validation";
 import { getSessionPerson } from "@/lib/session";
 
 export async function GET(request: Request) {
@@ -42,10 +43,6 @@ export async function POST(request: Request) {
   const admin = await isAdmin();
   const session = await getSessionPerson();
   const person_name = String(body.person_name || "").trim();
-  const start_time = String(body.start_time || "").trim();
-  const end_time = String(body.end_time || "").trim();
-  const issue_type = body.issue_type;
-  const note = body.note ? String(body.note).trim() : null;
   const autoApprove = admin && !!body.approved;
 
   if (!admin && !session) {
@@ -59,17 +56,16 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!person_name || !start_time || !end_time || !issue_type) {
+  if (!person_name) {
     return NextResponse.json({ error: "חסרים שדות חובה" }, { status: 400 });
   }
 
-  if (!note) {
-    return NextResponse.json({ error: "יש לכתוב הערה קצרה שמסבירה את החסימה" }, { status: 400 });
+  const parsed = parseIssuePayload(body);
+  if ("error" in parsed) {
+    return NextResponse.json({ error: parsed.error }, { status: 400 });
   }
 
-  if (!/^\d{1,2}:\d{2}$/.test(start_time) || !/^\d{1,2}:\d{2}$/.test(end_time)) {
-    return NextResponse.json({ error: "פורמט שעה לא תקין (HH:MM)" }, { status: 400 });
-  }
+  const { constraint_date, start_time, end_time, issue_type, note } = parsed;
 
   if (body.approved && !admin) {
     return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
@@ -93,6 +89,7 @@ export async function POST(request: Request) {
     .insert({
       person_id: person.id,
       person_name,
+      constraint_date,
       start_time,
       end_time,
       issue_type,

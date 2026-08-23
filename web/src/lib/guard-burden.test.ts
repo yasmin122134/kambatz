@@ -344,6 +344,7 @@ describe("hard constraints still gate eligibility", () => {
         id: "i1",
         person_id: p.id,
         person_name: p.name,
+        constraint_date: "2026-01-15",
         start_time: "07:00",
         end_time: "13:00",
         issue_type: "medical",

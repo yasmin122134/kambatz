@@ -1,3 +1,4 @@
+import { sendCalendarInvitesForMission } from "@/lib/calendar-invites";
 import { createClient } from "@/lib/supabase/server";
 import { loadApprovedIssues } from "@/lib/issues";
 import { findAssignmentConflicts } from "@/lib/scheduling-engine";
@@ -148,6 +149,7 @@ export async function saveMissionDay(
   };
 
   if (payload.id) {
+    const previous = await getMissionDay(payload.id);
     const { data, error } = await supabase
       .from("mission_days")
       .update(row)
@@ -156,7 +158,7 @@ export async function saveMissionDay(
       .single();
     if (error) throw new Error(error.message);
     const saved = rowFromDb(data);
-    await afterMissionSave(saved);
+    await afterMissionSave(saved, previous);
     return saved;
   }
 
@@ -167,11 +169,14 @@ export async function saveMissionDay(
     .single();
   if (error) throw new Error(error.message);
   const saved = rowFromDb(data);
-  await afterMissionSave(saved);
+  await afterMissionSave(saved, null);
   return saved;
 }
 
-async function afterMissionSave(mission: MissionDay): Promise<void> {
+async function afterMissionSave(
+  mission: MissionDay,
+  previous: MissionDay | null,
+): Promise<void> {
   try {
     if (mission.status !== "published") {
       await deleteFairnessPointsForMission(mission.id);
@@ -179,6 +184,12 @@ async function afterMissionSave(mission: MissionDay): Promise<void> {
     await syncPublishedFairnessPoints();
   } catch {
     // טבלת fairness_assignment_points עדיין לא קיימת — לא חוסם שמירה
+  }
+
+  try {
+    await sendCalendarInvitesForMission(mission, previous);
+  } catch (e) {
+    console.error("[calendar-invite] mission save", e);
   }
 }
 

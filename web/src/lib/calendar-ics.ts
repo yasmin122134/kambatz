@@ -50,27 +50,9 @@ function icsStamp(d: Date): string {
   );
 }
 
-function icsLocalDateTime(ms: number, timeZone = MISSION_WALL_TZ): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(new Date(ms));
-  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? "00";
-  return (
-    pick("year") +
-    pick("month") +
-    pick("day") +
-    "T" +
-    pick("hour") +
-    pick("minute") +
-    pick("second")
-  );
+function assigneeMatches(assignees: string[], personName: string): boolean {
+  const norm = personName.trim();
+  return assignees.some((a) => a.trim() === norm);
 }
 
 /** All published assignment events for one person. */
@@ -81,8 +63,14 @@ export function calendarEventsForPerson(
   const events: CalendarEvent[] = [];
   for (const mission of missions.filter((m) => m.status === "published")) {
     for (const slot of flattenMissionSlots(mission)) {
-      if (!slot.assignees.includes(personName)) continue;
-      if (!slot.startAtMs || !slot.endAtMs || slot.endAtMs <= slot.startAtMs) continue;
+      if (!assigneeMatches(slot.assignees, personName)) continue;
+      if (
+        slot.startAtMs == null ||
+        slot.endAtMs == null ||
+        slot.endAtMs <= slot.startAtMs
+      ) {
+        continue;
+      }
       const typeLabel = MISSION_TYPE_LABELS[mission.mission_type];
       events.push({
         uid: `${mission.id}-${slot.slotId}@kambatz`,
@@ -109,16 +97,20 @@ export function buildIcsCalendar(
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     `X-WR-CALNAME:${icsEscape(calendarName)}`,
+    `X-WR-TIMEZONE:${MISSION_WALL_TZ}`,
   ];
 
   for (const e of events) {
     lines.push("BEGIN:VEVENT");
     lines.push(`UID:${e.uid}`);
     lines.push(`DTSTAMP:${stamp}`);
-    lines.push(`DTSTART;TZID=${MISSION_WALL_TZ}:${icsLocalDateTime(e.startMs)}`);
-    lines.push(`DTEND;TZID=${MISSION_WALL_TZ}:${icsLocalDateTime(e.endMs)}`);
+    // UTC timestamps — Google Calendar imports reliably (TZID without VTIMEZONE often fails).
+    lines.push(`DTSTART:${icsStamp(new Date(e.startMs))}`);
+    lines.push(`DTEND:${icsStamp(new Date(e.endMs))}`);
     lines.push(`SUMMARY:${icsEscape(e.summary)}`);
     if (e.description) lines.push(`DESCRIPTION:${icsEscape(e.description)}`);
+    lines.push("STATUS:CONFIRMED");
+    lines.push("TRANSP:OPAQUE");
     lines.push("END:VEVENT");
   }
 
@@ -132,4 +124,34 @@ export function buildPersonCalendarIcs(
 ): string {
   const events = calendarEventsForPerson(missions, personName);
   return buildIcsCalendar(events, `משמרות — ${personName}`);
+}
+
+export function buildCalendarInviteIcs(
+  event: CalendarEvent,
+  attendee: { name: string; email: string },
+  organizerEmail: string,
+  sequence = 0,
+): string {
+  const stamp = icsStamp(new Date());
+  const lines: string[] = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//Kambatz//Mission Scheduler//HE",
+    "CALSCALE:GREGORIAN",
+    "METHOD:REQUEST",
+    "BEGIN:VEVENT",
+    `UID:${event.uid}`,
+    `SEQUENCE:${sequence}`,
+    `DTSTAMP:${stamp}`,
+    `DTSTART:${icsStamp(new Date(event.startMs))}`,
+    `DTEND:${icsStamp(new Date(event.endMs))}`,
+    `SUMMARY:${icsEscape(event.summary)}`,
+    `ORGANIZER;CN=Kambatz:mailto:${organizerEmail}`,
+    `ATTENDEE;CUTYPE=INDIVIDUAL;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE;CN=${icsEscape(attendee.name)}:mailto:${attendee.email}`,
+    "STATUS:CONFIRMED",
+    "TRANSP:OPAQUE",
+  ];
+  if (event.description) lines.push(`DESCRIPTION:${icsEscape(event.description)}`);
+  lines.push("END:VEVENT", "END:VCALENDAR");
+  return lines.map(icsFold).join("\r\n") + "\r\n";
 }

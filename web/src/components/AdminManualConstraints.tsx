@@ -32,14 +32,19 @@ const EMPTY_FLAGS: PersonalFlags = {
 type Props = {
   people: Person[];
   onSaved: () => void;
+  /** Default calendar date for time blocks (e.g. active board day). */
+  defaultDate?: string;
 };
 
-export function AdminManualConstraints({ people, onSaved }: Props) {
+export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) {
   const [mode, setMode] = useState<"flags" | "block">("flags");
   const [personName, setPersonName] = useState("");
   const [flags, setFlags] = useState<PersonalFlags>(EMPTY_FLAGS);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
+  const [constraintDate, setConstraintDate] = useState(
+    () => new Date().toISOString().slice(0, 10),
+  );
   const [issueType, setIssueType] = useState<IssueType>("trial");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -47,6 +52,10 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
   const [error, setError] = useState("");
 
   const selected = people.find((p) => p.name === personName);
+
+  useEffect(() => {
+    if (defaultDate) setConstraintDate(defaultDate.slice(0, 10));
+  }, [defaultDate]);
 
   useEffect(() => {
     if (!selected) {
@@ -98,6 +107,7 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         person_name: personName,
+        constraint_date: constraintDate,
         start_time: startTime,
         end_time: endTime,
         issue_type: issueType,
@@ -216,6 +226,18 @@ export function AdminManualConstraints({ people, onSaved }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div className="field">
+            <label htmlFor="c-date">תאריך</label>
+            <input
+              id="c-date"
+              type="date"
+              required
+              className="mono"
+              value={constraintDate}
+              onChange={(e) => setConstraintDate(e.target.value)}
+            />
           </div>
 
           <div className="rowf">

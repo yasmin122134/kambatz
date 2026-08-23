@@ -27,6 +27,7 @@ import {
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
+import { issueAbsoluteInterval } from "@/lib/issues";
 import {
   DEFAULT_MISSION_SCHEDULING_RULES,
   type FairnessRules,
@@ -129,20 +130,14 @@ export function blockedByIssue(
   slot: FlatSlot,
   issues: Issue[],
 ): boolean {
-  const a = parseTimeMinutes(slot.startTime);
-  const b = parseTimeMinutes(slot.endTime);
-  if (a === null || b === null) return false;
+  const slotIv: TimeInterval = { startMs: slot.startAtMs, endMs: slot.endAtMs };
+  if (slotIv.endMs <= slotIv.startMs) return false;
 
   for (const issue of issues) {
     if (issue.person_name !== personName || issue.status !== "approved") continue;
-    const ia = parseTimeMinutes(issue.start_time);
-    const ib = parseTimeMinutes(issue.end_time);
-    if (ia === null || ib === null) continue;
-    const idur = slotDurationMinutes(issue.start_time, issue.end_time);
-    const pIssue = slot.cyclicStart; // approximate — issues use wall clock
-    const pSlot = slot.cyclicStart;
-    if (cyclicOverlap(pIssue, idur, pSlot, slot.durationMinutes)) return true;
-    if (cyclicOverlap(ia, idur, a, slot.durationMinutes)) return true;
+    const block = issueAbsoluteInterval(issue);
+    if (!block) continue;
+    if (intervalsOverlap(block, slotIv)) return true;
   }
   return false;
 }
@@ -150,8 +145,12 @@ export function blockedByIssue(
 export function issueBlockMessage(
   personName: string,
   slot: Pick<FlatSlot, "positionName" | "timeLabel">,
+  issue?: Pick<Issue, "constraint_date" | "start_time" | "end_time">,
 ): string {
-  return `${personName}: אילוץ מאושר חוסם ${slot.positionName} ${slot.timeLabel}`;
+  const when = issue
+    ? `${issue.constraint_date} ${issue.start_time}–${issue.end_time}`
+    : slot.timeLabel;
+  return `${personName}: התנגשות עם חסימה מאושרת (${when})`;
 }
 
 export function canGuardPerson(person: Person): boolean {
@@ -773,12 +772,20 @@ export function describeAssignmentWarnings(
     msgs.push(ineligibilityMessage(person, slot));
   }
   if (blockedByIssue(person.name, slot, issues)) {
-    msgs.push(`${person.name}: חסום בגלל אילוץ מאושר ב${slot.timeLabel}`);
+    const issue = issues.find(
+      (row) =>
+        row.person_name === person.name &&
+        row.status === "approved" &&
+        issueAbsoluteInterval(row) &&
+        intervalsOverlap(issueAbsoluteInterval(row)!, {
+          startMs: slot.startAtMs,
+          endMs: slot.endAtMs,
+        }),
+    );
+    msgs.push(issueBlockMessage(person.name, slot, issue));
   }
   if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) {
-    msgs.push(
-      `${person.name}: לא נח מספיק לפני ${slot.positionName} (${slot.timeLabel})`,
-    );
+    msgs.push(`${person.name}: לא נח מספיק זמן לפני ${slot.timeLabel}`);
   }
   if (
     isGuardKind(slot.positionKind) &&
@@ -1646,6 +1653,132 @@ function blockLabel(block: BusyBlock): string {
     : block.positionKind === "standby_carmel_b"
       ? "כרמל ב׳"
       : block.positionKind;
+}
+
+/** Structural roster issues that are not tied to a single assignee. */
+function collectStructuralRosterWarnings(mission: MissionDay): string[] {
+  const slots = flattenMissionSlots(mission);
+  const messages: string[] = [];
+
+  const namesBySlotId = new Map<string, string[]>();
+  for (const slot of slots) {
+    const names = namesBySlotId.get(slot.slotId) || [];
+    names.push(slot.positionName);
+    namesBySlotId.set(slot.slotId, names);
+  }
+  for (const [, names] of namesBySlotId) {
+    if (names.length > 1) {
+      messages.push(`מזהה משמרת משותף בין עמדות: ${names.join(" · ")}`);
+    }
+  }
+
+  const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a");
+  const carmelB = slots.find((s) => s.positionKind === "standby_carmel_b");
+  if (carmelA && carmelB) {
+    const setA = new Set((mission.assignments[carmelA.slotId] || []).filter(Boolean));
+    const shared = (mission.assignments[carmelB.slotId] || []).filter(
+      (n) => n && setA.has(n),
+    );
+    if (shared.length) {
+      messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${shared.join(", ")}`);
+    }
+  }
+
+  for (const slot of slots) {
+    const seats = mission.assignments[slot.slotId] || [];
+    const filled = seats.filter(Boolean);
+    if (slot.seatCount > 0 && filled.length !== slot.seatCount) {
+      messages.push(
+        `${slot.positionName} ${slot.timeLabel}: כיסוי ${filled.length}/${slot.seatCount}`,
+      );
+    }
+  }
+
+  return messages;
+}
+
+export type CollectRosterWarningsInput = {
+  missions: MissionDay[];
+  peopleByName: Record<string, Person>;
+  issues?: Issue[];
+};
+
+/** Admin board warnings — rest, approved blocks, overlaps, coverage, eligibility. */
+export function collectRosterWarnings(input: CollectRosterWarningsInput): string[] {
+  const issues = (input.issues ?? []).filter((row) => row.status === "approved");
+  const messages: string[] = [...validateNoPersonOverlaps(input.missions)];
+
+  for (const mission of input.missions) {
+    messages.push(...collectStructuralRosterWarnings(mission));
+  }
+
+  const entries: Array<{
+    mission: MissionDay;
+    slot: FlatSlot;
+    names: string[];
+  }> = [];
+
+  for (const mission of input.missions) {
+    for (const slot of flattenMissionSlots(mission)) {
+      const names = (mission.assignments[slot.slotId] || []).filter(Boolean);
+      if (!names.length) continue;
+      entries.push({ mission, slot, names });
+    }
+  }
+
+  entries.sort(
+    (a, b) =>
+      a.slot.sortKey - b.slot.sortKey ||
+      a.mission.id.localeCompare(b.mission.id),
+  );
+
+  const tracker: ScheduleTracker = { busy: {}, guardShifts: {}, periodPoints: {} };
+  const rules: FairnessRules = {
+    solo: 1,
+    pair: 1,
+    standby: 1,
+    standby_a: 1,
+    standby_b: 1,
+    duty: 1,
+    kitchen: 1,
+    hist: 0,
+  };
+
+  for (const { mission, slot, names } of entries) {
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+    for (let seatIndex = 0; seatIndex < names.length; seatIndex++) {
+      const name = names[seatIndex];
+      const person = input.peopleByName[name];
+      if (!person) {
+        messages.push(`${name}: לא נמצא במחזור`);
+        continue;
+      }
+      const mates = names.filter((n, idx) => n && idx !== seatIndex);
+      messages.push(
+        ...describeAssignmentWarnings(
+          person,
+          slot,
+          tracker,
+          issues,
+          scheduling,
+          mates,
+          input.peopleByName,
+        ),
+      );
+      placePerson(
+        name,
+        slot,
+        mission.id,
+        tracker,
+        rules,
+        scheduling,
+        slot.seatCount,
+        mission.mission_type,
+      );
+    }
+  }
+
+  return [...new Set(messages)];
 }
 
 /** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים, זכאות לתפקיד, אילוצים) */

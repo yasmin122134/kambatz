@@ -98,6 +98,35 @@ export function slotDurationMinutes(start: string, end: string): number {
   return 1440 - a + b;
 }
 
+/** YYYY-MM-DD offset from a mission calendar date. */
+export function addCalendarDays(dateStr: string, days: number): string {
+  const date = dateStr.slice(0, 10);
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Absolute [start, end) for a wall-clock window on a specific calendar date (Israel). */
+export function wallClockIntervalOnCalendarDate(
+  dateStr: string,
+  startTime: string,
+  endTime: string,
+): TimeInterval | null {
+  const date = dateStr.slice(0, 10);
+  const startMin = parseTimeMinutes(normalizeTimeLabel(startTime));
+  const durMin = slotDurationMinutes(startTime, endTime);
+  if (startMin === null || durMin <= 0) return null;
+
+  const anchor = parseIsoMs(`${date}T12:00:00+03:00`);
+  if (anchor === null) return null;
+
+  const midnight = localMissionMidnightMs(anchor);
+  const startMs = midnight + startMin * 60_000;
+  const endMs = startMs + durMin * 60_000;
+  if (endMs <= startMs) return null;
+  return { startMs, endMs };
+}
+
 /** Half-open overlap: [start, end) — adjacent intervals do NOT overlap. */
 export function intervalsOverlap(a: TimeInterval, b: TimeInterval): boolean {
   return a.startMs < b.endMs && b.startMs < a.endMs;

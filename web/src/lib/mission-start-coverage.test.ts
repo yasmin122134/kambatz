@@ -65,4 +65,21 @@ describe("mission start coverage", () => {
     expect(foot.slots.some((s) => s.start_time === "09:00")).toBe(true);
     expect(foot.slots.some((s) => s.start_time.endsWith(":15"))).toBe(false);
   });
+
+  it("avoids :15 boundaries when mission starts at 06:00 foot-patrol window", () => {
+    const positions = buildGuardDayPositions({
+      missionStartsAt: "2026-08-21T06:00:00+03:00",
+      missionEndsAt: "2026-08-22T06:00:00+03:00",
+      boardStart: "06:00",
+      shiftHours: 4,
+    });
+    const foot = positions.find((p) => p.name.includes("רגלי"))!;
+    expect(foot.slots.some((s) => s.start_time.endsWith(":15"))).toBe(false);
+    expect(foot.slots[0].start_time).toBe("06:00");
+    expect(foot.slots.map((s) => `${s.start_time}-${s.end_time}`)).toEqual([
+      "06:00-10:00",
+      "10:00-14:00",
+      "14:00-19:00",
+    ]);
+  });
 });

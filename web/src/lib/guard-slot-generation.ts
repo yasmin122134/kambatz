@@ -98,6 +98,29 @@ export function partitionInterval(
   return out;
 }
 
+function mergeShortTailFragments(
+  segments: RawSegment[],
+  minShiftMin: number,
+  maxShiftMin: number,
+): RawSegment[] {
+  const cur = [...segments];
+  while (cur.length > 1 && cur[cur.length - 1].durMin < minShiftMin) {
+    const tail = cur.pop()!;
+    const prev = cur.pop()!;
+    const combined = prev.durMin + tail.durMin;
+    if (combined > maxShiftMin + minShiftMin) {
+      cur.push(prev, tail);
+      break;
+    }
+    cur.push({
+      startMs: prev.startMs,
+      endMs: tail.endMs,
+      durMin: combined,
+    });
+  }
+  return cur;
+}
+
 function hasAwkwardFragments(segments: RawSegment[], minShiftMin: number): boolean {
   return segments.some((s) => s.durMin < minShiftMin);
 }
@@ -164,6 +187,8 @@ function slotsForStaffingSegment(
     });
   }
 
+  raw = mergeShortTailFragments(raw, minShiftMin, nominalMin);
+
   if (hasAwkwardFragments(raw, minShiftMin)) {
     return partitionInterval(segStartMs, segEndMs, nominalMin, minShiftMin).map((p) => ({
       ...p,
@@ -177,23 +202,6 @@ function slotsForStaffingSegment(
     endMs: s.endMs,
     requiredSeats: seats,
   }));
-}
-
-function alignSlotsToMissionStart(
-  slots: GeneratedPositionSlot[],
-  profile: StaffingProfile,
-  missionStartMs: number,
-): GeneratedPositionSlot[] {
-  if (getRequiredSeats(profile, missionStartMs) <= 0) return slots;
-  const first = [...slots]
-    .filter((s) => s.requiredSeats > 0)
-    .sort((a, b) => a.startMs - b.startMs)[0];
-  if (!first || first.startMs <= missionStartMs) return slots;
-  return slots.map((s) =>
-    s.startMs === first.startMs && s.endMs === first.endMs && s.requiredSeats === first.requiredSeats
-      ? { ...s, startMs: missionStartMs }
-      : s,
-  );
 }
 
 /**
@@ -237,7 +245,7 @@ export function generatePositionSlots(input: GeneratePositionSlotsInput): Genera
     );
   }
 
-  return alignSlotsToMissionStart(slots, staffingProfile, missionStartMs);
+  return slots;
 }
 
 export function slotStructuralKey(positionId: string, startMs: number, endMs: number): string {

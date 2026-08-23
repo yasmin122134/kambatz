@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
   ISSUE_STATUS_LABELS,
@@ -16,6 +17,7 @@ import {
 } from "@/lib/types";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DUTY_OFFICER_NAMES } from "@/lib/officers";
+import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import type { FlatSlot } from "@/lib/mission-utils";
 import type { Person } from "@/lib/types";
@@ -40,6 +42,8 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   const [isAdminUser, setIsAdminUser] = useState(isAdmin);
   const [showConstraints, setShowConstraints] = useState(false);
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [approvedIssues, setApprovedIssues] = useState<Issue[]>([]);
+  const [peopleByName, setPeopleByName] = useState<Record<string, Person>>({});
   const [profileRequests, setProfileRequests] = useState<ProfileRequest[]>([]);
   const [fairnessRequests, setFairnessRequests] = useState<FairnessRuleRequest[]>([]);
   const [publishedRules, setPublishedRules] = useState(DEFAULT_FAIRNESS_RULES);
@@ -82,6 +86,15 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
   const baseWorkMissionId = guardsMission?.id ?? baseMission?.id;
   const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
 
+  const rosterWarnings = useMemo(() => {
+    if (!isAdminUser || !dayMissions.length) return [];
+    return collectRosterWarnings({
+      missions: dayMissions,
+      peopleByName,
+      issues: approvedIssues,
+    });
+  }, [isAdminUser, dayMissions, peopleByName, approvedIssues]);
+
   const mySlots = useMemo(() => {
     return dayMissions.flatMap((m) =>
       flattenMissionSlots(m).filter((s) => s.assignees.includes(personName)),
@@ -103,8 +116,9 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;
-    const [i, p, f, rulesRes, peopleRes] = await Promise.all([
+    const [i, approved, p, f, rulesRes, peopleRes] = await Promise.all([
       fetch("/api/issues?status=pending").then((r) => (r.ok ? r.json() : [])),
+      fetch("/api/issues?status=approved").then((r) => (r.ok ? r.json() : [])),
       fetch("/api/profile-requests?status=pending").then((r) =>
         r.ok ? r.json() : [],
       ),
@@ -115,11 +129,14 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
       fetch("/api/people").then((r) => (r.ok ? r.json() : [])),
     ]);
     setIssues(i);
+    setApprovedIssues(approved);
     setProfileRequests(p);
     setFairnessRequests(f);
     if (rulesRes?.rules) setPublishedRules(rulesRes.rules);
     if (Array.isArray(peopleRes)) {
-      const officers = (peopleRes as Person[])
+      const people = peopleRes as Person[];
+      setPeopleByName(Object.fromEntries(people.map((person) => [person.name, person])));
+      const officers = people
         .filter((person) => person.is_officer)
         .map((person) => person.name);
       if (officers.length) setDutyOfficerNames(officers);
@@ -373,12 +390,24 @@ export function BoardClient({ personName, initialMissions, isAdmin }: Props) {
         <p className={`mb-3 ${msg.includes("שובצו") ? "msg-ok" : "msg-err"}`}>{msg}</p>
       )}
 
+      {isAdminUser && rosterWarnings.length > 0 && (
+        <section className="roster-warnings" role="alert">
+          <h3>אזהרות שיבוץ — {formatDate(activeDate)}</h3>
+          <ul>
+            {rosterWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {showConstraints && isAdminUser && (
         <ConstraintsPanel
           issues={issues}
           profileRequests={profileRequests}
           fairnessRequests={fairnessRequests}
           onIssue={setIssueStatus}
+          onReload={loadAdminData}
           onProfile={setProfileStatus}
           onFairness={setFairnessStatus}
           formatFairnessDiff={formatFairnessDiff}
@@ -553,6 +582,7 @@ function ConstraintsPanel({
   profileRequests,
   fairnessRequests,
   onIssue,
+  onReload,
   onProfile,
   onFairness,
   formatFairnessDiff,
@@ -561,10 +591,13 @@ function ConstraintsPanel({
   profileRequests: ProfileRequest[];
   fairnessRequests: FairnessRuleRequest[];
   onIssue: (id: string, s: "approved" | "rejected") => void;
+  onReload: () => void;
   onProfile: (id: string, s: "approved" | "rejected") => void;
   onFairness: (id: string, s: "approved" | "rejected") => void;
   formatFairnessDiff: (req: FairnessRuleRequest) => string;
 }) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   const empty =
     issues.length === 0 &&
     profileRequests.length === 0 &&
@@ -579,22 +612,42 @@ function ConstraintsPanel({
         <ul className="space-y-3">
           {issues.map((iss) => (
             <li key={iss.id} className="issue-row">
-              <div>
-                <b>{iss.person_name}</b>
-                <span className="mono mx-2">
-                  {iss.start_time}–{iss.end_time}
-                </span>
-                <span>{ISSUE_TYPE_LABELS[iss.issue_type]}</span>
-                {iss.note && <span className="text-ink2 mr-2"> — {iss.note}</span>}
-              </div>
-              <div className="flex gap-2 mt-2">
-                <button type="button" className="btn-pri btn-sm" onClick={() => onIssue(iss.id, "approved")}>
-                  אשר
-                </button>
-                <button type="button" className="btn-sm" onClick={() => onIssue(iss.id, "rejected")}>
-                  דחה
-                </button>
-              </div>
+              {editingId === iss.id ? (
+                <IssueEditor
+                  issue={iss}
+                  onSaved={() => {
+                    setEditingId(null);
+                    onReload();
+                  }}
+                  onCancel={() => setEditingId(null)}
+                  onDeleted={() => {
+                    setEditingId(null);
+                    onReload();
+                  }}
+                />
+              ) : (
+                <>
+                  <div>
+                    <b>{iss.person_name}</b>
+                    <span className="mono mx-2">
+                      {iss.constraint_date} · {iss.start_time}–{iss.end_time}
+                    </span>
+                    <span>{ISSUE_TYPE_LABELS[iss.issue_type]}</span>
+                    {iss.note && <span className="text-ink2 mr-2"> — {iss.note}</span>}
+                  </div>
+                  <div className="flex gap-2 mt-2 flex-wrap">
+                    <button type="button" className="btn-pri btn-sm" onClick={() => onIssue(iss.id, "approved")}>
+                      אשר
+                    </button>
+                    <button type="button" className="btn-sm" onClick={() => onIssue(iss.id, "rejected")}>
+                      דחה
+                    </button>
+                    <button type="button" className="btn-sm" onClick={() => setEditingId(iss.id)}>
+                      ערוך
+                    </button>
+                  </div>
+                </>
+              )}
             </li>
           ))}
           {profileRequests.map((req) => (

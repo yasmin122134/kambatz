@@ -41,11 +41,12 @@ describe("calendar-ics", () => {
     expect(events[0].summary).toContain("פטל");
   });
 
-  it("outputs valid ICS with timezone", () => {
+  it("outputs valid ICS with UTC times for Google Calendar", () => {
     const ics = buildPersonCalendarIcs([mission], "יסמין חדד");
     expect(ics).toContain("BEGIN:VCALENDAR");
     expect(ics).toContain("BEGIN:VEVENT");
-    expect(ics).toContain("TZID=Asia/Jerusalem");
+    expect(ics).toMatch(/DTSTART:\d{8}T\d{6}Z/);
+    expect(ics).toMatch(/DTEND:\d{8}T\d{6}Z/);
     expect(ics).toContain("SUMMARY:");
   });
 });
