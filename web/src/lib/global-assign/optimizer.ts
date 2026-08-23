@@ -269,6 +269,32 @@ function countCarmelCandidates(
     : 0;
 }
 
+function baseworkTargetSeats(slot: FlatSlot, scheduling: MissionSchedulingRules): number {
+  const configured = scheduling.base_work?.seats_per_shift ?? 14;
+  return Math.max(13, Math.min(15, slot.seatCount || configured));
+}
+
+function baseworkNeedFilled(
+  unit: Extract<AssignmentUnit, { kind: "basework" }>,
+  state: SolverState,
+  scheduling: MissionSchedulingRules,
+): number {
+  const seats = state.assignmentsByMission.get(unit.mission.id)!;
+  const row = seats[unit.slot.slotId] || [];
+  const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+  const target = baseworkTargetSeats(unit.slot, scheduling);
+  return Math.min(target, unit.seatIndices.length + taken.length);
+}
+
+function baseworkRowFilled(
+  unit: Extract<AssignmentUnit, { kind: "basework" }>,
+  state: SolverState,
+): boolean {
+  const seats = state.assignmentsByMission.get(unit.mission.id)!;
+  const row = seats[unit.slot.slotId] || [];
+  return unit.seatIndices.every((i) => Boolean(row[i]));
+}
+
 function countBaseworkCandidates(
   unit: Extract<AssignmentUnit, { kind: "basework" }>,
   state: SolverState,
@@ -295,8 +321,7 @@ function countBaseworkCandidates(
     missionType: unit.mission.mission_type,
     taken,
   });
-  const target = Math.max(13, Math.min(15, unit.slot.seatCount || 14));
-  const need = Math.min(target, unit.seatIndices.length + taken.length);
+  const need = baseworkNeedFilled(unit, state, scheduling);
   return result.diagnostics.assigned >= need ? 1 : 0;
 }
 
@@ -330,6 +355,8 @@ function computeBaseworkNames(
   for (const name of result.names) {
     if (!roster.includes(name)) roster.push(name);
   }
+  const need = baseworkNeedFilled(unit, state, scheduling);
+  if (result.diagnostics.assigned < need) return [];
   return roster.filter((n) => !taken.includes(n));
 }
 
@@ -455,10 +482,11 @@ function unitDifficulty(
     return 100_000 + 10_000 / Math.max(1, candidates);
   }
   if (unit.kind === "basework") {
-    return 9_000 + 900 / Math.max(1, candidates);
+    // Whole squads — assign before guards (90min gap blocks squads if guards go first).
+    return 88_000 + 8_800 / Math.max(1, candidates);
   }
   if (unit.kind === "guard_pair") {
-    return 85_000 + 8_500 / Math.max(1, candidates);
+    return 42_000 + 4_200 / Math.max(1, candidates);
   }
   if (unit.slot.positionKind === "officer_duty") {
     return 50_000 + 5_000 / Math.max(1, candidates);
@@ -709,7 +737,9 @@ function applyChoice(
       }
     }
     seats[unit.slot.slotId] = row;
-    state.assignedUnitIds.add(unit.id);
+    if (baseworkRowFilled(unit, state)) {
+      state.assignedUnitIds.add(unit.id);
+    }
     return;
   }
 
@@ -868,6 +898,92 @@ function pickDutyOfficerForSeed(
 
   // קצין תורן — תמיד רני/יסמין גם אם מנוחה/4-8 היו חוסמים בשיבוץ רגיל.
   return pool.find((o) => !mates.includes(o.name) && personIsDutyOfficer(o));
+}
+
+/** Fill עב״ס squads before guards — guard-first ordering blocks whole squads (90min gap). */
+function seedBaseWorkInState(
+  missions: MissionDay[],
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+  state: SolverState,
+  units: AssignmentUnit[],
+  keepExisting: boolean,
+): void {
+  for (const mission of missions) {
+    if (mission.mission_type !== "guards") continue;
+    const scheduling = schedulingFor(mission);
+    const assignments = state.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+
+    const baseUnits = units
+      .filter(
+        (u): u is Extract<AssignmentUnit, { kind: "basework" }> =>
+          u.kind === "basework" && u.mission.id === mission.id,
+      )
+      .sort((a, b) => a.shiftIndex - b.shiftIndex);
+
+    for (const unit of baseUnits) {
+      if (state.assignedUnitIds.has(unit.id)) continue;
+
+      const row = [...(assignments[unit.slot.slotId] || [])];
+      const emptyIndices = unit.seatIndices.filter((i) => !row[i] || (!keepExisting && row[i]));
+
+      if (!emptyIndices.length) {
+        state.assignedUnitIds.add(unit.id);
+        continue;
+      }
+
+      if (!keepExisting) {
+        for (const i of unit.seatIndices) {
+          const existing = row[i];
+          if (!existing) continue;
+          unplacePerson(
+            existing,
+            unit.slot,
+            mission.id,
+            state.tracker,
+            rules,
+            scheduling,
+          );
+          row[i] = "";
+        }
+      }
+
+      const taken = row.filter(Boolean);
+      const result = assignBaseWorkShift({
+        people,
+        slot: unit.slot,
+        shiftIndex: unit.shiftIndex,
+        tracker: state.tracker,
+        issues,
+        scheduling,
+        rules,
+        meanPrior,
+        missionId: mission.id,
+        missionType: mission.mission_type,
+        taken,
+      });
+
+      const need = baseworkNeedFilled(unit, state, scheduling);
+      if (result.diagnostics.assigned < need) {
+        for (const name of result.names) {
+          unplacePerson(name, unit.slot, mission.id, state.tracker, rules, scheduling);
+        }
+        continue;
+      }
+
+      const newNames = result.names.filter((n) => !taken.includes(n));
+      let ni = 0;
+      for (const idx of unit.seatIndices) {
+        if (row[idx]) continue;
+        row[idx] = newNames[ni++] ?? "";
+      }
+      assignments[unit.slot.slotId] = row;
+      state.assignedUnitIds.add(unit.id);
+    }
+  }
 }
 
 function seedOfficerDutyInState(
@@ -1312,6 +1428,17 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       }).map((u) => u.id),
     ),
   };
+
+  seedBaseWorkInState(
+    missions,
+    input.people,
+    input.issues,
+    input.rules,
+    input.meanPrior,
+    initialState,
+    units,
+    keepExisting,
+  );
 
   seedOfficerDutyInState(
     missions,

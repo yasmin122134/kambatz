@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { baseWorkWallClockInterval } from "@/lib/base-work-template";
-import { resolveKitchenSlotInterval } from "@/lib/kitchen-day-template";
+import { defaultKitchenDayPositions, resolveKitchenSlotInterval } from "@/lib/kitchen-day-template";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
+import { validateGeneratedRoster } from "@/lib/scheduling-engine";
 import { buildGuardDayPositions, carmelSlotFromMission } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
 import type { MissionDay } from "@/lib/types";
@@ -30,6 +31,30 @@ describe("kitchen slot intervals", () => {
     const month = parts.find((p) => p.type === "month")?.value;
     const year = parts.find((p) => p.type === "year")?.value;
     expect(`${year}-${month}-${day}`).toBe("2026-08-25");
+  });
+
+  it("passes validation when starts_at is stale but mission_date is correct", () => {
+    const positions = defaultKitchenDayPositions();
+    const mission: MissionDay = {
+      id: "k1",
+      title: "מטבch",
+      mission_type: "kitchen",
+      mission_date: "2026-08-25",
+      starts_at: "2026-08-23T06:00:00",
+      ends_at: "2026-08-23T22:00:00",
+      status: "published",
+      positions,
+      assignments: Object.fromEntries(
+        positions[0].slots.map((s) => [s.id, Array(s.seat_count).fill("")]),
+      ),
+      scheduling_rules: DEFAULT_MISSION_SCHEDULING_RULES,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+    const errors = validateGeneratedRoster({ missions: [mission] });
+    expect(errors.filter((e) => e.includes("outside mission interval"))).toEqual([]);
   });
 });
 

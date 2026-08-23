@@ -29,6 +29,7 @@ import {
   type TimeInterval,
 } from "@/lib/time-interval";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
+import { kitchenMissionInterval } from "@/lib/kitchen-day-template";
 import {
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
@@ -2409,13 +2410,26 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
     const missionStartMs = Date.parse(mission.starts_at);
     const missionEndMs = Date.parse(mission.ends_at);
+    const kitchenBounds =
+      mission.mission_type === "kitchen"
+        ? kitchenMissionInterval(mission.mission_date)
+        : null;
 
     for (const slot of flattenMissionSlots(mission)) {
       if (slot.startAtMs >= slot.endAtMs) {
         messages.push(`${slot.positionName} ${slot.timeLabel}: start >= end`);
       }
-      if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
-        messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
+      if (kitchenBounds) {
+        if (
+          slot.startAtMs < kitchenBounds.startMs ||
+          slot.endAtMs > kitchenBounds.endMs
+        ) {
+          messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
+        }
+      } else if (slot.missionType !== "base_work") {
+        if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
+          messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
+        }
       }
 
       const seats = mission.assignments[slot.slotId] || [];

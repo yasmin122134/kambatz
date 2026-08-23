@@ -24,6 +24,29 @@ export const DEFAULT_KITCHEN_SHIFTS: KitchenShiftDef[] = [
   { start: "19:00", end: "22:00", label: "ערב" },
 ];
 
+/** Canonical kitchen day window on mission_date (Israel wall clock). */
+export function kitchenMissionInterval(missionDate: string): TimeInterval | null {
+  return wallClockIntervalOnCalendarDate(missionDate.slice(0, 10), "06:00", "22:00");
+}
+
+export function normalizeKitchenMissionTimes(missionDate: string): {
+  starts_at: string;
+  ends_at: string;
+} {
+  const iv = kitchenMissionInterval(missionDate);
+  if (!iv) {
+    const date = missionDate.slice(0, 10);
+    return {
+      starts_at: `${date}T06:00:00+03:00`,
+      ends_at: `${date}T22:00:00+03:00`,
+    };
+  }
+  return {
+    starts_at: new Date(iv.startMs).toISOString(),
+    ends_at: new Date(iv.endMs).toISOString(),
+  };
+}
+
 /** מטבch — תמיד mission_date + שעות קיר (06:00–22:00), לא תלוי ב-starts_at שגוי. */
 export function resolveKitchenSlotInterval(
   missionDate: string,
