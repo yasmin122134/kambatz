@@ -1588,7 +1588,7 @@ export function assignKitchenShift(input: {
   return { names, usedRestSquad, squadCounts };
 }
 
-/** שיבוץ חלון עב״ס — צוות שלם (13–15), צוות אחד במנוחה */
+/** שיבוץ חלון עב״ס — מעדיף צוות שלם; אם אין — צוות עוגן + הלוואות; אחרת מילוי מעורב */
 export type BaseWorkShiftDiagnostics = {
   required: number;
   assigned: number;
@@ -1710,117 +1710,136 @@ export function assignBaseWorkShift(input: {
       peopleByName,
     ) === null;
 
+  const need = Math.max(0, target - input.taken.length);
   const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
-  const squadCandidates = activeSquads
-    .map((s) => ({ squad: s, members: groups[s] }))
-    .filter(({ members }) => members.length >= 13 && members.length <= 15)
+  const minWholeSquad = Math.min(13, target);
+
+  const sortByFairness = (pool: Person[]) =>
+    [...pool].sort((a, b) => {
+      const cmp = compareByFairnessThenBurden(
+        a,
+        b,
+        input.slot,
+        input.people,
+        input.tracker,
+        input.rules,
+        input.meanPrior,
+        input.scheduling,
+        input.slot.seatCount,
+      );
+      return cmp || a.name.localeCompare(b.name, "he");
+    });
+
+  const tryAdd = (person: Person, assigned: string[]) => {
+    const mates = [...input.taken, ...assigned];
+    if (!fitsCandidate(person, mates)) {
+      countRejection(person, mates);
+      return false;
+    }
+    assigned.push(person.name);
+    placePerson(
+      person.name,
+      input.slot,
+      input.missionId,
+      input.tracker,
+      input.rules,
+      input.scheduling,
+      input.slot.seatCount,
+      input.missionType,
+    );
+    return true;
+  };
+
+  const dominantSquad = (names: string[]): number | null => {
+    if (!names.length) return null;
+    const counts: Record<number, number> = {};
+    for (const name of names) {
+      const p = peopleByName[name];
+      if (!p) continue;
+      const s = squadOf(p);
+      counts[s] = (counts[s] || 0) + 1;
+    }
+    let best: number | null = null;
+    let bestCount = 0;
+    for (const [s, c] of Object.entries(counts)) {
+      if (c > bestCount) {
+        bestCount = c;
+        best = Number(s);
+      }
+    }
+    return best;
+  };
+
+  const assigned: string[] = [];
+
+  // Phase 1 — whole active squad when every available member fits
+  const wholeSquadCandidates = activeSquads
+    .map((squad) => {
+      const pool = groups[squad].filter((m) => !input.taken.includes(m.name));
+      return { squad, pool };
+    })
+    .filter(({ pool }) => pool.length >= minWholeSquad)
     .sort(
       (a, b) =>
-        Math.abs(a.members.length - target) - Math.abs(b.members.length - target),
+        Math.abs(b.pool.length - target) - Math.abs(a.pool.length - target),
     );
 
-  for (const { squad, members } of squadCandidates) {
-    const pool = members.filter((m) => !input.taken.includes(m.name));
-    if (pool.length < 13 || pool.length > 15) continue;
+  for (const { squad, pool } of wholeSquadCandidates) {
     if (!pool.every((p) => fitsCandidate(p, input.taken))) {
       for (const p of pool) countRejection(p, input.taken);
       continue;
     }
-    const names = pool.map((p) => p.name);
-    for (const name of names) {
-      placePerson(
-        name,
-        input.slot,
-        input.missionId,
-        input.tracker,
-        input.rules,
-        input.scheduling,
-        input.slot.seatCount,
-        input.missionType,
-      );
-    }
-    diagnostics.assigned = names.length;
-    return { names, workSquad: squad, usedFallback: false, diagnostics };
-  }
-
-  const need = Math.max(0, target - input.taken.length);
-  const assigned: string[] = [];
-  const activePools = activeSquads.map((s) => groups[s]);
-  const eligibleCounts = activePools.map(
-    (pool) => pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length,
-  );
-  const targets = apportionSeats(need, eligibleCounts);
-
-  for (let i = 0; i < activeSquads.length; i++) {
-    const pool = activePools[i]
-      .filter((p) => !input.taken.includes(p.name) && !assigned.includes(p.name))
-      .sort((a, b) => {
-        const cmp = compareByFairnessThenBurden(
-          a,
-          b,
-          input.slot,
-          input.people,
-          input.tracker,
-          input.rules,
-          input.meanPrior,
-          input.scheduling,
-          input.slot.seatCount,
-        );
-        return cmp || a.name.localeCompare(b.name, "he");
-      });
-
-    let squadAdded = 0;
     for (const p of pool) {
-      if (assigned.length >= need || squadAdded >= targets[i]) break;
-      const mates = [...input.taken, ...assigned];
-      if (!fitsCandidate(p, mates)) {
-        countRejection(p, mates);
-        continue;
-      }
-      assigned.push(p.name);
-      squadAdded += 1;
-      placePerson(
-        p.name,
-        input.slot,
-        input.missionId,
-        input.tracker,
-        input.rules,
-        input.scheduling,
-        input.slot.seatCount,
-        input.missionType,
-      );
+      tryAdd(p, assigned);
     }
+    if (assigned.length >= need) {
+      diagnostics.assigned = input.taken.length + assigned.length;
+      return { names: assigned, workSquad: squad, usedFallback: false, diagnostics };
+    }
+    break;
   }
 
-  if (assigned.length < need) {
-    const remaining = sortedPeople.filter(
-      (p) => !input.taken.includes(p.name) && !assigned.includes(p.name),
-    );
-    for (const p of remaining) {
+  // Phase 2 — anchor squad (largest eligible pool) + borrow from other squads
+  const squadFillOrder = [...activeSquads, restSquad]
+    .map((squad) => ({
+      squad,
+      pool: sortByFairness(
+        groups[squad].filter(
+          (p) => !input.taken.includes(p.name) && !assigned.includes(p.name),
+        ),
+      ),
+    }))
+    .sort((a, b) => {
+      const eligibleA = a.pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length;
+      const eligibleB = b.pool.filter((p) => fitsCandidate(p, [...input.taken, ...assigned])).length;
+      return eligibleB - eligibleA;
+    });
+
+  for (const { pool } of squadFillOrder) {
+    for (const p of pool) {
       if (assigned.length >= need) break;
-      const mates = [...input.taken, ...assigned];
-      if (!fitsCandidate(p, mates)) {
-        countRejection(p, mates);
-        continue;
-      }
-      assigned.push(p.name);
-      placePerson(
-        p.name,
-        input.slot,
-        input.missionId,
-        input.tracker,
-        input.rules,
-        input.scheduling,
-        input.slot.seatCount,
-        input.missionType,
-      );
+      if (assigned.includes(p.name)) continue;
+      tryAdd(p, assigned);
+    }
+    if (assigned.length >= need) break;
+  }
+
+  // Phase 3 — any remaining eligible person (break squad structure completely)
+  if (assigned.length < need) {
+    for (const p of sortByFairness(
+      sortedPeople.filter(
+        (person) => !input.taken.includes(person.name) && !assigned.includes(person.name),
+      ),
+    )) {
+      if (assigned.length >= need) break;
+      tryAdd(p, assigned);
     }
   }
 
   diagnostics.assigned = input.taken.length + assigned.length;
   return {
     names: assigned,
-    workSquad: assigned.length ? squadOf(peopleByName[assigned[0]]) : null,
+    workSquad: dominantSquad(assigned),
     usedFallback: true,
     diagnostics,
   };

@@ -383,4 +383,79 @@ describe("base work assignment", () => {
       expect(people.slice(0, 14).map((p) => p.name)).not.toContain(name);
     }
   });
+
+  it("uses mixed squads when one squad member is blocked from whole-squad pick", () => {
+    const people = Array.from({ length: 14 }, (_, i) => person(`S1-${i + 1}`, 1)).concat(
+      Array.from({ length: 14 }, (_, i) => person(`S2-${i + 1}`, 2)),
+    );
+    const base = missionDay(
+      "base-1",
+      "base_work",
+      defaultBaseWorkPositions(),
+      {},
+      "2026-08-21T08:00:00",
+      "2026-08-21T20:00:00",
+    );
+    const slot = flattenMissionSlots(base)[0];
+    const guardMission = missionDay(
+      "g-1",
+      "guards",
+      [
+        {
+          id: "pg",
+          name: "Gate",
+          kind: "guard",
+          slots: [
+            { id: "gs1", start_time: "06:00", end_time: "08:00", seat_count: 1 },
+            { id: "gs2", start_time: "06:00", end_time: "08:00", seat_count: 1 },
+          ],
+        },
+      ],
+      { gs1: ["S1-1"], gs2: ["S2-1"] },
+      "2026-08-21T06:00:00",
+      "2026-08-21T22:00:00",
+    );
+    const guardSlots = flattenMissionSlots(guardMission);
+    const tracker = buildTrackerFromMissions([guardMission], rules);
+    placePerson(
+      "S1-1",
+      guardSlots[0],
+      guardMission.id,
+      tracker,
+      rules,
+      scheduling,
+      1,
+      "guards",
+    );
+    placePerson(
+      "S2-1",
+      guardSlots[1],
+      guardMission.id,
+      tracker,
+      rules,
+      scheduling,
+      1,
+      "guards",
+    );
+
+    const { names, usedFallback } = assignBaseWorkShift({
+      people,
+      slot,
+      shiftIndex: 0,
+      taken: [],
+      tracker,
+      issues: [],
+      scheduling,
+      rules,
+      meanPrior: 0,
+      missionId: base.id,
+      missionType: base.mission_type,
+    });
+
+    expect(usedFallback).toBe(true);
+    expect(names.length).toBeGreaterThanOrEqual(13);
+    expect(names).not.toContain("S1-1");
+    expect(names.some((n) => n.startsWith("S1-"))).toBe(true);
+    expect(names.some((n) => n.startsWith("S2-"))).toBe(true);
+  });
 });
