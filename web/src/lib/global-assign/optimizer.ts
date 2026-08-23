@@ -190,7 +190,6 @@ function seedExistingAssignments(
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
         );
       }
     }
@@ -318,7 +317,6 @@ function countBaseworkCandidates(
     rules,
     meanPrior,
     missionId: unit.mission.id,
-    missionType: unit.mission.mission_type,
     taken,
   });
   const need = baseworkNeedFilled(unit, state, scheduling);
@@ -348,7 +346,6 @@ function computeBaseworkNames(
     rules,
     meanPrior,
     missionId: unit.mission.id,
-    missionType: unit.mission.mission_type,
     taken,
   });
   const roster = [...taken];
@@ -732,7 +729,6 @@ function applyChoice(
           rules,
           scheduling,
           unit.slot.seatCount,
-          unit.mission.mission_type,
         );
       }
     }
@@ -758,7 +754,6 @@ function applyChoice(
           rules,
           scheduling,
           unit.slot.seatCount,
-          unit.mission.mission_type,
         );
       }
     }
@@ -778,7 +773,6 @@ function applyChoice(
       rules,
       scheduling,
       unit.slot.seatCount,
-      unit.mission.mission_type,
     );
     state.assignedUnitIds.add(unit.id);
     return;
@@ -800,7 +794,6 @@ function applyChoice(
           rules,
           scheduling,
           unit.slot.seatCount,
-          unit.mission.mission_type,
         );
       }
     }
@@ -962,7 +955,6 @@ function seedBaseWorkInState(
         rules,
         meanPrior,
         missionId: mission.id,
-        missionType: mission.mission_type,
         taken,
       });
 
@@ -1054,7 +1046,6 @@ function seedOfficerDutyInState(
           rules,
           scheduling,
           slot.seatCount,
-          mission.mission_type,
         );
         state.assignedUnitIds.add(`${mission.id}:${slot.slotId}:${seatIndex}`);
       }
