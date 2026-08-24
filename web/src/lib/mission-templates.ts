@@ -4,6 +4,14 @@ import {
   materializeBaseWorkPositions,
 } from "@/lib/base-work-template";
 import {
+  isHamagshiyotPosition,
+  materializeHamagshiyotPositions,
+} from "@/lib/hamagshiyot-template";
+import {
+  isPatrolPosition,
+  materializePatrolPositions,
+} from "@/lib/patrol-day-template";
+import {
   buildGuardDayPositions,
   footPatrolSlotsValid,
   guardPositionHint,
@@ -126,7 +134,11 @@ export function finalizeGuardMissionPositions(
 ): MissionPosition[] {
   if (!positions?.length) return positions;
   const baseWorkPositions = positions.filter((p) => isBaseWorkPosition(p));
-  const guardPositions = positions.filter((p) => !isBaseWorkPosition(p));
+  const patrolPositions = positions.filter((p) => isPatrolPosition(p));
+  const hamagshiyotPositions = positions.filter((p) => isHamagshiyotPosition(p));
+  const guardPositions = positions.filter(
+    (p) => !isBaseWorkPosition(p) && !isPatrolPosition(p) && !isHamagshiyotPosition(p),
+  );
   const synced = syncGuardShiftSlots(guardPositions, {
     shiftHours: input.scheduling?.shift_hours,
     boardStart: input.scheduling?.board_start,
@@ -151,7 +163,15 @@ export function finalizeGuardMissionPositions(
           input.endsAt,
           input.missionDate,
         );
-  return [...synced, ...baseWork];
+  const patrol =
+    patrolPositions.length > 0
+      ? materializePatrolPositions(patrolPositions, input.missionDate)
+      : [];
+  const hamagshiyot =
+    hamagshiyotPositions.length > 0
+      ? materializeHamagshiyotPositions(hamagshiyotPositions, input.missionDate)
+      : [];
+  return [...synced, ...baseWork, ...patrol, ...hamagshiyot];
 }
 
 /** Operation A — regenerate guard slot structure from mission window + rules. */
@@ -261,6 +281,8 @@ export function missionTemplateComplete(
       "כוח עתודה",
       "קצין תורן",
       "עבודות בסיס",
+      "פטרולים",
+      "חמגשיות",
     ];
     const names = new Set(positions.map((p) => p.name));
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
@@ -269,7 +291,7 @@ export function missionTemplateComplete(
     const startsAt = opts?.startsAt ?? "2026-01-01T20:00:00";
     const endsAt = opts?.endsAt ?? "2026-01-02T20:00:00";
     return (
-      positions.length >= 13 &&
+      positions.length >= 15 &&
       required.every((n) => names.has(n)) &&
       guardSlotIdsUnique(positions) &&
       (!rear || rearVehicleSlotsValid(rear.slots, "06:00", "18:00", startsAt, endsAt)) &&
@@ -311,6 +333,8 @@ export const STANDARD_GUARD_DAY_SUMMARY = [
   "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — בדיוק 1 ב־06–19, 0 בשאר השעות",
   "פטל, תצפיתן, ימ״ח, נשקייה, בונקר — 1 תמיד",
   "כוח עתודה — 3 תמיד · קצין תורן — רק רני פלג / יסמין חדד, שתי משמרות (חצי יום כל אחת)",
+  "פטרולים — 6 סיורים לפי הפקודה (ככ״א / קצין תורן נוכחי), ללא נקודות",
+  "חמגשיות — 5 צוערים ב־07–08, 12–13, 18–19, ללא נקודות",
 ] as const;
 
 export const STANDARD_KITCHEN_SUMMARY = [

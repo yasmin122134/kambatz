@@ -27,6 +27,8 @@ import {
   isBaseWorkPositionName,
   isBaseWorkShiftSlot,
 } from "@/lib/base-work-template";
+import { isHamagshiyotPositionName } from "@/lib/hamagshiyot-template";
+import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
@@ -109,6 +111,14 @@ function syncPersonPeriodPoints(
 export type FairnessBurdenBucket = "kitchen" | "duty";
 
 export function fairnessBurdenBucketForSlot(slot: FlatSlot): FairnessBurdenBucket {
+  if (slot.positionKind === "patrol") return "duty";
+  if (
+    slot.positionKind === "kitchen" &&
+    slot.missionType === "guards" &&
+    isHamagshiyotPositionName(slot.positionName)
+  ) {
+    return "duty";
+  }
   if (slot.positionKind === "kitchen" || slot.missionType === "kitchen") return "kitchen";
   return "duty";
 }
@@ -264,6 +274,8 @@ export function canGuardPerson(person: Person): boolean {
 export type AssignKindContext = {
   positionName?: string;
   missionType?: MissionType;
+  startTime?: string;
+  endTime?: string;
 };
 
 export function canAssignKind(
@@ -273,6 +285,14 @@ export function canAssignKind(
 ): boolean {
   if (kind === "officer_duty") {
     return personIsDutyOfficer(person);
+  }
+  if (kind === "patrol") {
+    const patrolRole =
+      ctx?.startTime && ctx?.endTime
+        ? patrolAssigneeRole(ctx.startTime, ctx.endTime)
+        : null;
+    if (patrolRole === "duty_officer") return personIsDutyOfficer(person);
+    return true;
   }
   if (kind === "kitchen") {
     return !person.no_kitchen;
@@ -299,7 +319,12 @@ export function canAssignKind(
 }
 
 function assignKindContext(slot: FlatSlot): AssignKindContext {
-  return { positionName: slot.positionName, missionType: slot.missionType };
+  return {
+    positionName: slot.positionName,
+    missionType: slot.missionType,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
+  };
 }
 
 function ineligibilityMessage(
@@ -310,6 +335,12 @@ function ineligibilityMessage(
   const kind = slot.positionKind;
   if (kind === "officer_duty") {
     return `${person.name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`;
+  }
+  if (kind === "patrol") {
+    const role = patrolAssigneeRole(slot.startTime, slot.endTime);
+    if (role === "duty_officer" && !personIsDutyOfficer(person)) {
+      return `${person.name}: רק קצין תורן נוכחי יכול לבצע סיור זה`;
+    }
   }
   if (kind === "kitchen" && person.no_kitchen) {
     return `${person.name}: ` + "פטור מטבח";
@@ -350,6 +381,23 @@ export function siblingDutyOfficerAssignee(
     if (s.positionId !== slot.positionId || s.slotId === slot.slotId) continue;
     for (const name of assignments[s.slotId] || []) {
       if (name && isDutyOfficerName(name)) return name;
+    }
+  }
+  return null;
+}
+
+/** קצין תורן המשובץ בזמן משמרת הפטרול */
+export function dutyOfficerAtPatrolTime(
+  mission: MissionDay,
+  patrolSlot: FlatSlot,
+  assignments: Record<string, string[]>,
+): string | null {
+  for (const s of flattenMissionSlots(mission)) {
+    if (s.positionKind !== "officer_duty") continue;
+    if (s.startAtMs <= patrolSlot.startAtMs && s.endAtMs > patrolSlot.startAtMs) {
+      for (const name of assignments[s.slotId] || []) {
+        if (name && isDutyOfficerName(name)) return name;
+      }
     }
   }
   return null;
@@ -582,6 +630,14 @@ export function bucketForSlot(
   seatCount: number,
   rules: FairnessRules,
 ): keyof FairnessRules {
+  if (slot.positionKind === "patrol") return "duty";
+  if (
+    slot.positionKind === "kitchen" &&
+    slot.missionType === "guards" &&
+    isHamagshiyotPositionName(slot.positionName)
+  ) {
+    return "duty";
+  }
   if (slot.positionKind === "standby_carmel_a") return "standby_a";
   if (slot.positionKind === "standby_carmel_b") return "standby_b";
   if (isStandbyKind(slot.positionKind)) return "standby";
@@ -596,6 +652,14 @@ export function pointsForSlot(
   rules: FairnessRules,
   options?: { missionType?: MissionType; scheduling?: MissionSchedulingRules },
 ): number {
+  if (slot.positionKind === "patrol") return 0;
+  if (
+    slot.positionKind === "kitchen" &&
+    options?.missionType === "guards" &&
+    isHamagshiyotPositionName(slot.positionName)
+  ) {
+    return 0;
+  }
   const bucket = bucketForSlot(slot, seatCount, rules);
   const weight = rules[bucket as keyof FairnessRules] as number;
   const kitchenPerShift =
@@ -1714,6 +1778,20 @@ export function assignStandbyRoom(
 }
 
 /** שיבוץ משמרת מטבח — תמיד 35, חלוקה יחסית בין צוותים פעילים */
+export const MAX_KITCHEN_SHIFTS_PER_DAY = 3;
+
+export function kitchenShiftsOnMission(
+  personName: string,
+  tracker: ScheduleTracker,
+  missionId: string,
+): number {
+  return (tracker.busy[personName] || []).filter(
+    (b) =>
+      b.missionId === missionId &&
+      (b.missionType === "kitchen" || b.positionKind === "kitchen"),
+  ).length;
+}
+
 export function assignKitchenShift(input: {
   people: Person[];
   slot: FlatSlot;
@@ -1749,6 +1827,12 @@ export function assignKitchenShift(input: {
 
   const canPick = (p: Person) => {
     if (assigned.includes(p.name)) return false;
+    if (
+      kitchenShiftsOnMission(p.name, input.tracker, input.missionId) >=
+      MAX_KITCHEN_SHIFTS_PER_DAY
+    ) {
+      return false;
+    }
     return fitsPerson(
       p,
       input.slot,
@@ -1765,6 +1849,9 @@ export function assignKitchenShift(input: {
     const sorted = [...pool]
       .filter(canPick)
       .sort((a, b) => {
+        const ka = kitchenShiftsOnMission(a.name, input.tracker, input.missionId);
+        const kb = kitchenShiftsOnMission(b.name, input.tracker, input.missionId);
+        if (ka !== kb) return ka - kb;
         const cmp = compareByFairnessThenBurden(
           a,
           b,

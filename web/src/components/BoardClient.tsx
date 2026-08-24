@@ -24,6 +24,7 @@ import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
+import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import type { FlatSlot } from "@/lib/mission-utils";
 import {
   kitchenShiftHandoffsFromSlots,
@@ -1330,10 +1331,18 @@ function SlotCard({
                   value={name}
                   onChange={(v) => onAdminSet(missionId, slot.slotId, seatIndex, v)}
                   placeholder={
-                    slot.positionKind === "officer_duty" ? "קצין תורן…" : "שם"
+                    slot.positionKind === "officer_duty"
+                      ? "קצין תורן…"
+                      : slot.positionKind === "patrol"
+                        ? "מבצע…"
+                        : "שם"
                   }
                   allowedNames={
-                    slot.positionKind === "officer_duty" ? dutyOfficerNames : undefined
+                    slot.positionKind === "officer_duty" ||
+                    (slot.positionKind === "patrol" &&
+                      patrolAssigneeRole(slot.startTime, slot.endTime) === "duty_officer")
+                      ? dutyOfficerNames
+                      : undefined
                   }
                   className="flex-1 min-w-[100px]"
                 />
@@ -1429,6 +1438,13 @@ function SlotCard({
       {missionId && slot.positionName && (
         <div className="text-xs text-ink2">{slot.positionName}</div>
       )}
+      {slot.slotLabel && (
+        <div className="text-xs text-ink2">{slot.slotLabel}</div>
+      )}
+      {slot.positionKind === "patrol" &&
+        patrolAssigneeRole(slot.startTime, slot.endTime) === "company_commander" && (
+          <div className="text-xs text-ink3">מבצע: ככ״א (שיבוץ ידני)</div>
+        )}
       {isBaseWork && slotLeaderName && (
         <div className="text-xs text-ink2 mt-0.5">
           אחראי/ת קבוצה:{" "}

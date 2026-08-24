@@ -6,7 +6,9 @@ import {
 } from "@/lib/scheduling-engine";
 import {
   assignBaseWorkShift,
+  assignKitchenShift,
   buildTrackerFromMissions,
+  dutyOfficerAtPatrolTime,
   fitsPerson,
   placePerson,
   siblingDutyOfficerAssignee,
@@ -21,6 +23,7 @@ import {
   syncAssignmentSeats,
   type FlatSlot,
 } from "@/lib/mission-utils";
+import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
 import { DUTY_OFFICER_NAMES, personIsDutyOfficer } from "@/lib/officers";
 import { enumerateCarmelGroups, hasCarmelGroupCandidates, summarizeCarmelRooms } from "./carmel-groups";
@@ -49,6 +52,7 @@ type CandidateChoice =
   | { kind: "carmel"; group: CarmelGroupCandidate }
   | { kind: "seat"; person: Person }
   | { kind: "basework"; names: string[] }
+  | { kind: "kitchen"; names: string[] }
   | { kind: "guard_pair"; people: Person[] };
 
 /** Branching limits — keeps server-side assign under ~15s on full guard days. */
@@ -94,6 +98,7 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
   for (const mission of missions) {
     const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
     let baseShiftIndex = 0;
+    let kitchenShiftIndex = 0;
     for (const slot of flattenMissionSlots(mission)) {
       const seats = assignments[slot.slotId] || [];
       const emptyIndices = seats
@@ -102,6 +107,32 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
         .map(({ i }) => i);
 
       if (!emptyIndices.length) continue;
+
+      if (
+        slot.positionKind === "patrol" &&
+        patrolAssigneeRole(slot.startTime, slot.endTime) === "company_commander"
+      ) {
+        continue;
+      }
+
+      const slotIsKitchen =
+        mission.mission_type === "kitchen" ||
+        slot.missionType === "kitchen" ||
+        slot.positionKind === "kitchen";
+
+      if (slotIsKitchen) {
+        const fixedNames = keepExisting ? seats.filter(Boolean) : [];
+        units.push({
+          kind: "kitchen",
+          id: `${mission.id}:${slot.slotId}:kitchen`,
+          mission,
+          slot,
+          shiftIndex: slot.kitchenShiftIndex ?? kitchenShiftIndex++,
+          seatIndices: emptyIndices,
+          fixedNames,
+        });
+        continue;
+      }
 
       const slotIsBaseWork = slot.missionType === "base_work";
 
@@ -329,6 +360,60 @@ function computeBaseworkNames(
   return roster.filter((n) => !taken.includes(n));
 }
 
+function countKitchenCandidates(
+  unit: Extract<AssignmentUnit, { kind: "kitchen" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+): number {
+  return computeKitchenNames(
+    unit,
+    state,
+    people,
+    issues,
+    rules,
+    meanPrior,
+  ).length > 0
+    ? 1
+    : 0;
+}
+
+function computeKitchenNames(
+  unit: Extract<AssignmentUnit, { kind: "kitchen" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+): string[] {
+  const scheduling = schedulingFor(unit.mission);
+  const seats = state.assignmentsByMission.get(unit.mission.id)!;
+  const row = seats[unit.slot.slotId] || [];
+  const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+  const probe = cloneTracker(state.tracker);
+  const result = assignKitchenShift({
+    people,
+    slot: unit.slot,
+    shiftIndex: unit.shiftIndex,
+    need: unit.seatIndices.length,
+    taken,
+    tracker: probe,
+    issues,
+    scheduling,
+    rules,
+    meanPrior,
+    missionId: unit.mission.id,
+    missionType: unit.mission.mission_type,
+  });
+  const roster = [...taken];
+  for (const name of result.names) {
+    if (!roster.includes(name)) roster.push(name);
+  }
+  return roster.filter((n) => !taken.includes(n));
+}
+
 function countGuardPairCandidates(
   unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
   state: SolverState,
@@ -402,7 +487,9 @@ function unitDifficulty(
       ? countCarmelCandidates(unit, state, people, issues, peopleByName)
       : unit.kind === "basework"
         ? countBaseworkCandidates(unit, state, people, issues, rules, meanPrior)
-        : unit.kind === "guard_pair"
+        : unit.kind === "kitchen"
+          ? countKitchenCandidates(unit, state, people, issues, rules, meanPrior)
+          : unit.kind === "guard_pair"
           ? countGuardPairCandidates(unit, state, people, issues, peopleByName)
           : countSeatCandidates(unit, state, people, issues, peopleByName);
 
@@ -411,6 +498,9 @@ function unitDifficulty(
   }
   if (unit.kind === "basework") {
     return 9_000 + 900 / Math.max(1, candidates);
+  }
+  if (unit.kind === "kitchen") {
+    return 8_000 + 800 / Math.max(1, candidates);
   }
   if (unit.kind === "guard_pair") {
     return 85_000 + 8_500 / Math.max(1, candidates);
@@ -428,9 +518,6 @@ function unitDifficulty(
       }
     }
     return 10_000 + 1_000 / Math.max(1, candidates);
-  }
-  if (unit.mission.mission_type === "kitchen") {
-    return 100 + 10 / Math.max(1, candidates);
   }
   return 5_000 + 500 / Math.max(1, candidates);
 }
@@ -662,6 +749,31 @@ function applyChoice(
     return;
   }
 
+  if (unit.kind === "kitchen" && choice.kind === "kitchen") {
+    let ni = 0;
+    for (const idx of unit.seatIndices) {
+      if (row[idx]) continue;
+      const name = choice.names[ni++];
+      if (!name) continue;
+      row[idx] = name;
+      if (!personAlreadyInSlot(name, unit.slot.slotId, unit.mission.id, state.tracker)) {
+        placePerson(
+          name,
+          unit.slot,
+          unit.mission.id,
+          state.tracker,
+          rules,
+          scheduling,
+          unit.slot.seatCount,
+          unit.mission.mission_type,
+        );
+      }
+    }
+    seats[unit.slot.slotId] = row;
+    state.assignedUnitIds.add(unit.id);
+    return;
+  }
+
   if (unit.kind === "carmel" && choice.kind === "carmel") {
     let pi = 0;
     for (const idx of unit.seatIndices) {
@@ -739,6 +851,18 @@ function revertChoice(
   const row = seats[unit.slot.slotId] || [];
 
   if (unit.kind === "basework" && choice.kind === "basework") {
+    for (const name of choice.names) {
+      for (const idx of unit.seatIndices) {
+        if (row[idx] === name) row[idx] = "";
+      }
+      unplacePerson(name, unit.slot, unit.mission.id, state.tracker, rules, scheduling);
+    }
+    seats[unit.slot.slotId] = row;
+    state.assignedUnitIds.delete(unit.id);
+    return;
+  }
+
+  if (unit.kind === "kitchen" && choice.kind === "kitchen") {
     for (const name of choice.names) {
       for (const idx of unit.seatIndices) {
         if (row[idx] === name) row[idx] = "";
@@ -896,6 +1020,64 @@ function seedOfficerDutyInState(
   }
 }
 
+function seedPatrolInState(
+  missions: MissionDay[],
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  state: SolverState,
+  keepExisting: boolean,
+): void {
+  const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+
+  for (const mission of missions) {
+    if (mission.mission_type !== "guards") continue;
+    const scheduling = schedulingFor(mission);
+    const assignments = state.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+
+    for (const slot of flattenMissionSlots(mission)) {
+      if (slot.positionKind !== "patrol") continue;
+      if (patrolAssigneeRole(slot.startTime, slot.endTime) !== "duty_officer") continue;
+
+      const row = [...(assignments[slot.slotId] || [])];
+      for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+        const existing = row[seatIndex];
+        if (existing && keepExisting) {
+          state.assignedUnitIds.add(`${mission.id}:${slot.slotId}:${seatIndex}`);
+          continue;
+        }
+        if (existing && !keepExisting) {
+          unplacePerson(existing, slot, mission.id, state.tracker, rules, scheduling);
+          row[seatIndex] = "";
+        }
+
+        const officerName = dutyOfficerAtPatrolTime(mission, slot, assignments);
+        const officer = officerName ? peopleByName[officerName] : undefined;
+        if (
+          officer &&
+          personIsDutyOfficer(officer) &&
+          fitsPerson(officer, slot, state.tracker, issues, scheduling, row.filter(Boolean), peopleByName)
+        ) {
+          row[seatIndex] = officer.name;
+          placePerson(
+            officer.name,
+            slot,
+            mission.id,
+            state.tracker,
+            rules,
+            scheduling,
+            slot.seatCount,
+            mission.mission_type,
+          );
+          state.assignedUnitIds.add(`${mission.id}:${slot.slotId}:${seatIndex}`);
+        }
+      }
+      assignments[slot.slotId] = row;
+    }
+  }
+}
+
 function evaluateLex(
   units: AssignmentUnit[],
   state: SolverState,
@@ -991,7 +1173,19 @@ function solveGreedy(input: {
               );
               return names.length ? { kind: "basework", names } : null;
             })()
-          : unit.kind === "guard_pair"
+          : unit.kind === "kitchen"
+            ? (() => {
+                const names = computeKitchenNames(
+                  unit,
+                  state,
+                  input.people,
+                  input.issues,
+                  input.rules,
+                  input.meanPrior,
+                );
+                return names.length ? { kind: "kitchen", names } : null;
+              })()
+            : unit.kind === "guard_pair"
             ? (() => {
                 const group = listGuardPairCandidates(
                   unit,
@@ -1126,7 +1320,19 @@ function solveBacktracking(input: {
               );
               return names.length ? [{ kind: "basework" as const, names }] : [];
             })()
-          : unit.kind === "guard_pair"
+          : unit.kind === "kitchen"
+            ? (() => {
+                const names = computeKitchenNames(
+                  unit,
+                  state,
+                  input.people,
+                  input.issues,
+                  input.rules,
+                  input.meanPrior,
+                );
+                return names.length ? [{ kind: "kitchen" as const, names }] : [];
+              })()
+            : unit.kind === "guard_pair"
             ? listGuardPairCandidates(
                 unit,
                 state,
@@ -1239,7 +1445,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       units.filter((u) => {
         const seats =
           missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
-        if (u.kind === "carmel" || u.kind === "basework") {
+        if (u.kind === "carmel" || u.kind === "basework" || u.kind === "kitchen") {
           return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
         }
         if (u.kind === "guard_pair") {
@@ -1251,6 +1457,14 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   };
 
   seedOfficerDutyInState(
+    missions,
+    input.people,
+    input.issues,
+    input.rules,
+    initialState,
+    keepExisting,
+  );
+  seedPatrolInState(
     missions,
     input.people,
     input.issues,

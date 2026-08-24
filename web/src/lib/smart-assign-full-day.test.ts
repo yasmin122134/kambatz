@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
+import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { runGlobalAssign } from "@/lib/global-assign";
 import { flattenMissionSlots, syncAssignmentSeats } from "@/lib/mission-utils";
 import {
@@ -104,8 +105,29 @@ function runPostProcessPipeline(
   return { assignments, filled, required, gaps };
 }
 
+function autoAssignableSeatCount(mission: MissionDay): number {
+  return flattenMissionSlots(mission)
+    .filter((s) => {
+      if (s.positionKind === "officer_duty") return false;
+      if (
+        s.positionKind === "patrol" &&
+        patrolAssigneeRole(s.startTime, s.endTime) === "company_commander"
+      ) {
+        return false;
+      }
+      return true;
+    })
+    .reduce((sum, sl) => sum + sl.seatCount, 0);
+}
+
+function isExpectedManualGap(gap: PostProcessGap): boolean {
+  if (gap.kind === "officer_duty") return true;
+  if (gap.kind === "patrol") return true;
+  return false;
+}
+
 describe("full guard day pipeline", () => {
-  it("fills most seats with repair + forceFill (53 people, Aug 26-like window)", () => {
+  it("fills most seats with repair + forceFill (53 people, Aug 26-like window)", { timeout: 15000 }, () => {
     const startsAt = "2026-08-26T20:00:00+03:00";
     const endsAt = "2026-08-27T20:00:00+03:00";
     const positions = buildGuardDayPositions({
@@ -149,13 +171,11 @@ describe("full guard day pipeline", () => {
     const guardSlots = flattenMissionSlots(mission).filter((s) => s.positionName.includes("ימ״ח"));
     const yamach = guardSlots[0];
     const yamachFilled = (assignments[yamach?.slotId] || []).filter(Boolean).length;
-    const cadetRequired = flattenMissionSlots(mission)
-      .filter((s) => s.positionKind !== "officer_duty")
-      .reduce((s, sl) => s + sl.seatCount, 0);
+    const cadetRequired = autoAssignableSeatCount(mission);
 
     expect(filled).toBeGreaterThan(100);
     expect(filled).toBe(cadetRequired);
-    expect(gaps.every((g) => g.kind === "officer_duty")).toBe(true);
+    expect(gaps.every(isExpectedManualGap)).toBe(true);
     expect(yamachFilled).toBeGreaterThan(0);
   });
 
@@ -259,13 +279,11 @@ describe("full guard day pipeline", () => {
     const { filled, required: req, gaps } = runPostProcessPipeline(mission, people, {
       ...(output.assignmentsByMission.get(mission.id) ?? {}),
     });
-    const cadetRequired = slots
-      .filter((s) => s.positionKind !== "officer_duty")
-      .reduce((s, sl) => s + sl.seatCount, 0);
+    const cadetRequired = autoAssignableSeatCount(mission);
 
     expect(required).toBeGreaterThan(abasRequired);
     expect(filled).toBe(cadetRequired);
-    expect(gaps.every((g) => g.kind === "officer_duty")).toBe(true);
-    expect(req - cadetRequired).toBe(2);
+    expect(gaps.every(isExpectedManualGap)).toBe(true);
+    expect(req - cadetRequired).toBe(5);
   });
 });

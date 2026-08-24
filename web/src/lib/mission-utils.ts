@@ -23,6 +23,17 @@ import {
   materializeBaseWorkPositions,
   resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
+import {
+  hamagshiyotWallClockInterval,
+  isHamagshiyotPosition,
+  isHamagshiyotPositionName,
+  isHamagshiyotShiftSlot,
+} from "@/lib/hamagshiyot-template";
+import {
+  isPatrolPosition,
+  isPatrolShiftSlot,
+  patrolWallClockInterval,
+} from "@/lib/patrol-day-template";
 import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
 
 export type FlatSlot = {
@@ -52,6 +63,8 @@ export type FlatSlot = {
   kitchenShiftIndex?: number;
   /** אינדקס חלון עב״ס (0-based) */
   baseWorkShiftIndex?: number;
+  /** תיאור משמרת (למשל סוג סיור) */
+  slotLabel?: string;
 };
 
 export type UpcomingMissionItem = {
@@ -90,6 +103,8 @@ export function defaultPositionKind(
   if (/כרמל\s*א/.test(n)) return "standby_carmel_a";
   if (/כרמל\s*ב/.test(n)) return "standby_carmel_b";
   if (missionType === "guards" && /קצין\s*תורן/.test(n)) return "officer_duty";
+  if (missionType === "guards" && /פטרול/.test(n)) return "patrol";
+  if (missionType === "guards" && /חמגש/.test(n)) return "kitchen";
   if (missionType === "guards" && /עתודה/.test(n)) return "duty";
   if (isBaseWorkPositionName(n)) return "duty";
   if (missionType === "kitchen") return "kitchen";
@@ -143,6 +158,14 @@ export function isReserveForceBlock(
 export function slotEatsRest(slot: FlatSlot): boolean {
   if (isStandbyKind(slot.positionKind)) return false;
   if (isReserveForceSlot(slot)) return false;
+  if (slot.positionKind === "patrol") return false;
+  if (
+    slot.positionKind === "kitchen" &&
+    slot.missionType === "guards" &&
+    isHamagshiyotPositionName(slot.positionName)
+  ) {
+    return false;
+  }
   return eatsRest(slot.positionKind);
 }
 
@@ -291,11 +314,20 @@ export function flattenMissionSlots(
       const assignees = (mission.assignments[slot.id] || []).filter(Boolean);
       const startMin = parseTimeMinutes(slot.start_time) ?? 0;
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
-      const isKitchenSlot = mission.mission_type === "kitchen" || kind === "kitchen";
+      const isKitchenSlot =
+        mission.mission_type === "kitchen" ||
+        (kind === "kitchen" && !isHamagshiyotPosition(pos));
+      const isHamagshiyotSlot =
+        kind === "kitchen" &&
+        (isHamagshiyotPosition(pos) || isHamagshiyotShiftSlot(slot.start_time, slot.end_time));
       const isBaseWorkSlot =
         mission.mission_type === "base_work" ||
         isBaseWorkPosition(pos) ||
         (kind === "duty" && isBaseWorkShiftSlot(slot.start_time, slot.end_time));
+      const isPatrolSlot =
+        kind === "patrol" ||
+        isPatrolPosition(pos) ||
+        isPatrolShiftSlot(slot.start_time, slot.end_time);
       const slotMissionType: MissionType = isBaseWorkSlot ? "base_work" : mission.mission_type;
       const abs = isBaseWorkSlot
         ? resolveBaseWorkSlotInterval(
@@ -304,7 +336,11 @@ export function flattenMissionSlots(
             mission.ends_at,
             slot,
           )
-        : resolveCanonicalSlotInterval(mission, slot);
+        : isPatrolSlot
+          ? patrolWallClockInterval(mission.mission_date, slot.start_time, slot.end_time)
+          : isHamagshiyotSlot
+            ? hamagshiyotWallClockInterval(mission.mission_date, slot.start_time, slot.end_time)
+            : resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;
       const startAtMs = abs.startMs;
       const endAtMs = abs.endMs;
@@ -334,6 +370,7 @@ export function flattenMissionSlots(
         endAtMs,
         kitchenShiftIndex: isKitchenSlot ? kitchenIdx++ : undefined,
         baseWorkShiftIndex: isBaseWorkSlot ? baseWorkIdx++ : undefined,
+        slotLabel: slot.label,
       });
     }
   }

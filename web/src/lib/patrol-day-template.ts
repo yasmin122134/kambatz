@@ -110,12 +110,13 @@ export function patrolWallClockInterval(
 function materializePatrolSlot(
   missionDate: string,
   tour: PatrolTourDef,
+  existing?: MissionSlot,
 ): MissionSlot {
   const slot: MissionSlot = {
-    id: uid(),
+    id: existing?.id ?? uid(),
     start_time: tour.start,
     end_time: tour.end,
-    seat_count: 1,
+    seat_count: existing?.seat_count ?? 1,
     label: tour.label,
   };
   const abs = patrolWallClockInterval(missionDate, tour.start, tour.end);
@@ -123,6 +124,30 @@ function materializePatrolSlot(
     Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
   }
   return slot;
+}
+
+export function materializePatrolPositions(
+  positions: MissionPosition[],
+  missionDate?: string,
+): MissionPosition[] {
+  const date = missionDate ?? new Date().toISOString().slice(0, 10);
+  return positions.map((pos) =>
+    isPatrolPosition(pos)
+      ? {
+          ...pos,
+          kind: "patrol" as const,
+          slots: pos.slots.map((slot, i) => {
+            const tour =
+              DEFAULT_PATROL_TOURS.find(
+                (t) =>
+                  patrolWindowKey(t.start, t.end) ===
+                  patrolWindowKey(slot.start_time, slot.end_time),
+              ) ?? DEFAULT_PATROL_TOURS[i];
+            return tour ? materializePatrolSlot(date, tour, slot) : slot;
+          }),
+        }
+      : pos,
+  );
 }
 
 export function defaultPatrolPositions(options?: {

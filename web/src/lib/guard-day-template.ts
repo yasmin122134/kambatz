@@ -3,7 +3,17 @@ import {
   isBaseWorkPosition,
   materializeBaseWorkPositions,
 } from "@/lib/base-work-template";
+import {
+  defaultHamagshiyotPositions,
+  isHamagshiyotPosition,
+  materializeHamagshiyotPositions,
+} from "@/lib/hamagshiyot-template";
 import type { MissionPosition, MissionPositionKind, MissionSlot } from "@/lib/types";
+import {
+  defaultPatrolPositions,
+  isPatrolPosition,
+  materializePatrolPositions,
+} from "@/lib/patrol-day-template";
 import {
   debugFormatPositionSlots,
   generatePositionSlots,
@@ -584,6 +594,16 @@ export function syncGuardShiftSlots(
         return { ...pos, slots: mergeSlotsPreservingIds(pos.slots, [carmel]) };
       }
 
+      if (isPatrolPosition(pos)) {
+        const [patrol] = materializePatrolPositions([pos], ctx.missionDate);
+        return patrol ?? pos;
+      }
+
+      if (isHamagshiyotPosition(pos)) {
+        const [ham] = materializeHamagshiyotPositions([pos], ctx.missionDate);
+        return ham ?? pos;
+      }
+
       const next = guardSlotsForPosition(pos, ctx);
       if (!next) return pos;
       if (pos.kind === "officer_duty") {
@@ -625,15 +645,31 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
 
   const synced = syncGuardShiftSlots(positions, options);
   const hasBaseWork = synced.some((p) => isBaseWorkPosition(p));
-  if (hasBaseWork) return synced;
+  const hasPatrol = synced.some((p) => isPatrolPosition(p));
+  const hasHamagshiyot = synced.some((p) => isHamagshiyotPosition(p));
+  const missionDate = ctx.missionDate ?? options?.missionDate;
 
-  const baseWork = defaultBaseWorkPositions({
-    seatsPerShift: options?.baseWorkSeatsPerShift,
-  });
-  return [
-    ...synced,
-    ...materializeBaseWorkPositions(baseWork, ctx.missionStartsAt, ctx.missionEndsAt, ctx.missionDate),
-  ];
+  const extras: MissionPosition[] = [];
+  if (!hasBaseWork) {
+    extras.push(
+      ...materializeBaseWorkPositions(
+        defaultBaseWorkPositions({
+          seatsPerShift: options?.baseWorkSeatsPerShift,
+        }),
+        ctx.missionStartsAt,
+        ctx.missionEndsAt,
+        missionDate,
+      ),
+    );
+  }
+  if (!hasPatrol) {
+    extras.push(...defaultPatrolPositions({ missionDate }));
+  }
+  if (!hasHamagshiyot) {
+    extras.push(...defaultHamagshiyotPositions({ missionDate }));
+  }
+
+  return [...synced, ...extras];
 }
 
 export function defaultGuardDayPositions(options?: BuildGuardDayOptions): MissionPosition[] {
@@ -649,6 +685,8 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (רס״ר) ולמטבח.";
     case "officer_duty":
       return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
+    case "patrol":
+      return "סיורים לפי הפקודה — ככ״א או קצין תורן נוכחי לפי המשמרת. ללא נקודות צדק.";
     case "duty":
       if (pos.name.includes("עתודה")) {
         return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
@@ -668,6 +706,9 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
   }
   if (pos.name.includes("רגלי")) {
     return "בדיוק 1 שומר 06:00–19:00. אין משמרות מחוץ לשעות הפעילות.";
+  }
+  if (pos.name.includes("חמגש")) {
+    return "5 צוערים בכל חלון (07–08, 12–13, 18–19). ללא נקודות צדק.";
   }
   if (["פטל", "תצפיתן", "ימ״ח", "נשקייה", "בונקר"].some((n) => pos.name.includes(n))) {
     return "משמרות מסתובבות ~4 שעות מעוגנות לתחילת יום המשימה.";

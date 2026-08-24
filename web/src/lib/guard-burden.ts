@@ -267,6 +267,14 @@ function isRestRelevantBlock(block: BurdenTimelineBlock): boolean {
 }
 
 function isKitchenBlock(block: BurdenTimelineBlock): boolean {
+  if (block.positionKind === "patrol") return false;
+  if (
+    block.positionKind === "kitchen" &&
+    block.missionType === "guards" &&
+    block.positionName?.includes("חמגש")
+  ) {
+    return false;
+  }
   return block.positionKind === "kitchen" || block.missionType === "kitchen";
 }
 
@@ -303,6 +311,14 @@ function legacyPointsForBlock(
   rules: FairnessRules,
   scheduling?: MissionSchedulingRules,
 ): number {
+  if (block.positionKind === "patrol") return 0;
+  if (
+    block.positionKind === "kitchen" &&
+    block.missionType === "guards" &&
+    block.positionName?.includes("חמגש")
+  ) {
+    return 0;
+  }
   const hours = slotDurationHours(block.startTime, block.endTime);
   if (isKitchenBlock(block)) {
     const perShift =

@@ -74,10 +74,21 @@ export type GuardPairAssignmentUnit = {
   seatIndices: number[];
 };
 
+export type KitchenAssignmentUnit = {
+  kind: "kitchen";
+  id: string;
+  mission: MissionDay;
+  slot: FlatSlot;
+  shiftIndex: number;
+  seatIndices: number[];
+  fixedNames: string[];
+};
+
 export type AssignmentUnit =
   | CarmelAssignmentUnit
   | SeatAssignmentUnit
   | BaseWorkAssignmentUnit
+  | KitchenAssignmentUnit
   | GuardPairAssignmentUnit;
 
 export type GlobalAssignInput = {

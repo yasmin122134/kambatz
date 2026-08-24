@@ -11,7 +11,7 @@ import type {
 export function countRequiredSeats(units: AssignmentUnit[]): number {
   return units.reduce((sum, u) => {
     if (u.kind === "carmel") return sum + u.need;
-    if (u.kind === "basework" || u.kind === "guard_pair") {
+    if (u.kind === "basework" || u.kind === "kitchen" || u.kind === "guard_pair") {
       return sum + u.seatIndices.length;
     }
     return sum + 1;
@@ -25,7 +25,7 @@ export function countFilledSeats(
   let filled = 0;
   for (const unit of units) {
     const seats = assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
-    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "guard_pair") {
+    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "kitchen" || unit.kind === "guard_pair") {
       filled += unit.seatIndices.filter((i) => Boolean(seats[i])).length;
     } else if (seats[unit.seatIndex]) {
       filled += 1;
@@ -46,7 +46,7 @@ export function buildUnresolvedRequirements(input: {
     const seats = input.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
     const key = `${unit.mission.id}:${unit.slot.slotId}`;
 
-    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "guard_pair") {
+    if (unit.kind === "carmel" || unit.kind === "basework" || unit.kind === "kitchen" || unit.kind === "guard_pair") {
       const assigned = unit.seatIndices.filter((i) => Boolean(seats[i])).length;
       const required =
         unit.kind === "carmel" ? unit.need : unit.seatIndices.length;
@@ -64,7 +64,9 @@ export function buildUnresolvedRequirements(input: {
         reasons: input.failureReasons.get(key) || [
           unit.kind === "basework"
             ? "לא נמצאו מספיק צוערים לעב״ס (מנוחה/שמירות/מרווח שמירה↔עב״ס/חסימות)"
-            : "לא נותרה קבוצת חדר/מגדר תקפה לאחר שיבוצים אחרים",
+            : unit.kind === "kitchen"
+              ? "לא נמצאו מספיק צוערים למטבch (מנוחת צוות/מגבלת 3 משמרות/חסימות)"
+              : "לא נותרה קבוצת חדר/מגדר תקפה לאחר שיבוצים אחרים",
         ],
         carmelSnapshot: snapshot,
       });
