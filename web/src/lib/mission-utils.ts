@@ -124,17 +124,17 @@ export function eatsRest(kind: MissionPositionKind): boolean {
 
 /** כוח עתודה — חוסם זמן אך לא צורך מנוחה */
 export function isReserveForceSlot(
-  slot: Pick<FlatSlot, "positionName" | "positionKind" | "missionType">,
+  slot: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },
 ): boolean {
   return (
     slot.missionType === "guards" &&
     slot.positionKind === "duty" &&
-    slot.positionName.includes("עתודה")
+    (slot.positionName?.includes("עתודה") ?? false)
   );
 }
 
 export function isReserveForceBlock(
-  block: Pick<FlatSlot, "positionName" | "positionKind" | "missionType">,
+  block: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },
 ): boolean {
   return isReserveForceSlot(block);
 }
