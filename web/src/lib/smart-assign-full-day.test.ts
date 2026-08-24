@@ -8,7 +8,7 @@ import {
   forceFillEmptySeats,
 } from "@/lib/scheduling-engine";
 import { normalizeSchedulingRules } from "@/lib/mission-utils";
-import type { MissionDay, Person } from "@/lib/types";
+import type { MissionDay, MissionPositionKind, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 function rosterPerson(i: number): Person {
@@ -30,11 +30,23 @@ function rosterPerson(i: number): Person {
   };
 }
 
+type PostProcessGap = {
+  slot: string;
+  filled: number;
+  need: number;
+  kind: MissionPositionKind;
+};
+
 function runPostProcessPipeline(
   mission: MissionDay,
   people: Person[],
   initialAssignments: Record<string, string[]>,
-): { assignments: Record<string, string[]>; filled: number; required: number } {
+): {
+  assignments: Record<string, string[]>;
+  filled: number;
+  required: number;
+  gaps: PostProcessGap[];
+} {
   let assignments = syncAssignmentSeats(mission.positions, { ...initialAssignments });
   const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
   const required = flattenMissionSlots(mission).reduce((s, sl) => s + sl.seatCount, 0);
