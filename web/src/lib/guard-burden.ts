@@ -81,6 +81,7 @@ export type BurdenTimelineBlock = {
   startTime: string;
   endTime: string;
   slotId?: string;
+  positionName?: string;
 };
 
 export type GuardAssignmentBurdenDetail = {
@@ -511,6 +512,7 @@ export function blockFromFlatSlot(
     startTime: slot.startTime,
     endTime: slot.endTime,
     slotId: slot.slotId,
+    positionName: slot.positionName,
   };
 }
 
