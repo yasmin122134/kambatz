@@ -28,7 +28,10 @@ import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import type { FlatSlot } from "@/lib/mission-utils";
 import {
   kitchenShiftHandoffsFromSlots,
+  kitchenShiftRosterViews,
+  kitchenShiftWindowKey,
   type KitchenShiftHandoff,
+  type KitchenShiftRosterView,
 } from "@/lib/kitchen-handoffs";
 import type { Person } from "@/lib/types";
 
@@ -113,6 +116,15 @@ export function BoardClient({
   const [dutyOfficerNames, setDutyOfficerNames] = useState<string[]>([
     ...DUTY_OFFICER_NAMES,
   ]);
+
+  const activeRosterNames = useMemo(
+    () =>
+      Object.values(peopleByName)
+        .filter((p) => p.active !== false)
+        .map((p) => p.name)
+        .sort((a, b) => a.localeCompare(b, "he")),
+    [peopleByName],
+  );
 
   const dayMissions = useMemo(
     () => missions.filter((m) => m.mission_date === activeDate),
@@ -616,6 +628,7 @@ export function BoardClient({
               canAssign={canAssign}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
+              rosterNames={activeRosterNames}
               mySlots={mySlots}
               swapTarget={swapTarget}
               swapMode={swapMode}
@@ -941,6 +954,7 @@ function MissionPanel({
   isAdmin,
   fairnessRules,
   dutyOfficerNames,
+  rosterNames = [],
   mySlots,
   swapTarget,
   swapMode,
@@ -959,6 +973,7 @@ function MissionPanel({
   isAdmin: boolean;
   fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
+  rosterNames?: string[];
   mySlots: ReturnType<typeof flattenMissionSlots>;
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
@@ -982,9 +997,26 @@ function MissionPanel({
 
   if (mission.mission_type === "kitchen") {
     const handoffs = kitchenShiftHandoffsFromSlots(slots);
+    const rosterViews = kitchenShiftRosterViews(slots, rosterNames);
+    const viewsByWindow = new Map(rosterViews.map((v) => [v.windowKey, v]));
+    const firstSlotIndexByWindow = new Map<string, number>();
+    slots.forEach((slot, i) => {
+      if (slot.kitchenShiftIndex == null) return;
+      const key = kitchenShiftWindowKey(slot);
+      if (!firstSlotIndexByWindow.has(key)) firstSlotIndexByWindow.set(key, i);
+    });
+
     return (
       <div className="space-y-3 max-w-xl">
-        {slots.map((slot, index) => (
+        {slots.map((slot, index) => {
+          const windowKey = kitchenShiftWindowKey(slot);
+          const rosterView = viewsByWindow.get(windowKey);
+          const showAbsent =
+            slot.kitchenShiftIndex != null &&
+            rosterView != null &&
+            firstSlotIndexByWindow.get(windowKey) === index;
+
+          return (
           <Fragment key={slot.slotId}>
             <SlotCard
               mission={mission}
@@ -1005,11 +1037,15 @@ function MissionPanel({
               onApplyReplacement={onApplyReplacement}
               onCancelSwap={onCancelSwap}
             />
+            {showAbsent && (
+              <KitchenShiftAbsentBar view={rosterView} personName={personName} />
+            )}
             {index < handoffs.length && (
               <KitchenHandoffBar handoff={handoffs[index]} personName={personName} />
             )}
           </Fragment>
-        ))}
+          );
+        })}
       </div>
     );
   }
@@ -1064,6 +1100,51 @@ function MissionPanel({
             onCancelSwap={onCancelSwap}
           />
         ))}
+    </div>
+  );
+}
+
+function KitchenShiftAbsentBar({
+  view,
+  personName,
+}: {
+  view: KitchenShiftRosterView;
+  personName: string;
+}) {
+  const { absentNames, assignedCount, rosterSize, timeLabel } = view;
+
+  function nameChip(name: string) {
+    const mine = name === personName;
+    return (
+      <span
+        key={name}
+        className={`inline-block rounded px-1.5 py-0.5 text-xs bg-slate-50 text-slate-800 ${
+          mine ? "font-semibold ring-1 ring-[var(--color-accent)]" : ""
+        }`}
+      >
+        {name}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className="rounded border px-3 py-2 text-sm"
+      style={{ borderColor: "var(--color-line2)", background: "var(--color-bg)" }}
+    >
+      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-xs font-medium">בחוץ · {timeLabel}</span>
+        <span className="hint text-xs">
+          {absentNames.length} מתוך {rosterSize} צוערים ({assignedCount} במשמרת)
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {absentNames.length > 0 ? (
+          absentNames.map((name) => nameChip(name))
+        ) : (
+          <span className="hint text-xs">כולם משובצים</span>
+        )}
+      </div>
     </div>
   );
 }

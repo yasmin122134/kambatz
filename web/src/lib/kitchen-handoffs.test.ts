@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
-import { kitchenShiftHandoffs, kitchenShiftHandoffsFromSlots, kitchenShiftRostersFromSlots } from "@/lib/kitchen-handoffs";
+import { kitchenShiftHandoffs, kitchenShiftHandoffsFromSlots, kitchenShiftRosterViews, kitchenShiftRostersFromSlots } from "@/lib/kitchen-handoffs";
 import { emptyAssignments, flattenMissionSlots } from "@/lib/mission-utils";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -102,5 +102,37 @@ describe("kitchenShiftHandoffs", () => {
     const handoffs = kitchenShiftHandoffsFromSlots(slots);
     expect(handoffs[0].leaving).toEqual(["A"]);
     expect(handoffs[0].entering).toEqual(["B"]);
+  });
+
+  it("lists roster names absent from each kitchen shift", () => {
+    const mission = kitchenMission([
+      ["Alice", "Bob", "Carl", "Dana"],
+      ["Bob", "Carl", "Dana", "Eve"],
+      ["Carl", "Dana", "Eve", "Frank"],
+      ["Dana", "Eve", "Frank", "Grace"],
+    ]);
+    const roster = [
+      "Alice",
+      "Bob",
+      "Carl",
+      "Dana",
+      "Eve",
+      "Frank",
+      "Grace",
+      "Henry",
+      "Iris",
+    ];
+    const views = kitchenShiftRosterViews(flattenMissionSlots(mission, 0), roster);
+    expect(views).toHaveLength(4);
+    expect(views[0].assignedCount).toBe(4);
+    expect(views[0].absentNames).toEqual([
+      "Eve",
+      "Frank",
+      "Grace",
+      "Henry",
+      "Iris",
+    ]);
+    expect(views[0].rosterSize).toBe(9);
+    expect(views[0].absentNames).toHaveLength(9 - 4);
   });
 });
