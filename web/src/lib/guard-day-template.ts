@@ -9,6 +9,7 @@ import {
   materializeHamagshiyotPositions,
 } from "@/lib/hamagshiyot-template";
 import type { MissionPosition, MissionPositionKind, MissionSlot } from "@/lib/types";
+import { DEFAULT_RESERVE_FORCE_SEATS } from "@/lib/types";
 import {
   defaultPatrolPositions,
   isPatrolPosition,
@@ -545,7 +546,8 @@ function staffingProfileForPosition(
   if (pos.name.includes("רכב אחורי")) return ctx.rearProfile;
   if (pos.name.includes("רגלי")) return ctx.footProfile;
   if (pos.name.includes("רכב קדמי")) return constantStaffingProfile(2);
-  if (pos.kind === "duty") return constantStaffingProfile(3);
+  if (pos.name.includes("עתודה")) return constantStaffingProfile(DEFAULT_RESERVE_FORCE_SEATS);
+  if (pos.kind === "duty") return constantStaffingProfile(DEFAULT_RESERVE_FORCE_SEATS);
   return constantStaffingProfile(1);
 }
 
@@ -689,10 +691,10 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       return "סיורים לפי הפקודה — ככ״א או קצין תורן נוכחי לפי המשמרת. ללא נקודות צדק.";
     case "duty":
       if (pos.name.includes("עתודה")) {
-        return "3 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
+        return "5 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
       }
       if (pos.name.includes("עבודות בסיס") || pos.name.includes("עב״ס")) {
-        return "3 חלונות (בוקר/צהריים/ערב) — צוות שלם 13–15 בכל חלון, צוות אחד במנוחה.";
+        return "3 חלונות (בוקר/צהריים/ערב) — 13–15 צוערים בכל חלון לפי צדק.";
       }
       return null;
     default:
@@ -738,7 +740,7 @@ export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "pair", label: "שמירה בזוג+", default: 1.0, examples: "ש״ג רכב קדמי, ש״ג רכב אחורי (לילה — 2)" },
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
-  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (3)" },
+  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (5)" },
   { bucket: "kitchen", label: "מטבch", default: 0.1, examples: "35 למשמרת" },
 ] as const;
 

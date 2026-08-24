@@ -1,7 +1,13 @@
-import { pointsForHours, slotDurationHours } from "@/lib/fairness-math";
+import { slotDurationHours } from "@/lib/fairness-math";
+import {
+  nightOverlapMinutes,
+  resolveHourlyRates,
+  roundPoints,
+} from "@/lib/fairness-hourly-rates";
 import {
   type FlatSlot,
   isGuardKind,
+  isObservationPost,
   isStandbyKind,
   parseTimeMinutes,
   slotDurationMinutes,
@@ -15,7 +21,6 @@ import type {
   MissionType,
 } from "@/lib/types";
 import {
-  DEFAULT_BASE_WORK_SHIFTS,
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
@@ -98,11 +103,17 @@ export type GuardAssignmentBurdenDetail = {
 export type PersonBurdenBreakdown = {
   guardBaseBurden: number;
   restPenalties: number;
-  /** Non-guard, non-kitchen missions (עב״ס, כוננות, וכו׳) */
+  /** Non-guard missions (עב״ס, כוננות, …) */
   otherMissionPoints: number;
-  /** Kitchen-only points for the day */
+  /** Kitchen-only points */
   kitchenPoints: number;
-  /** Guard + rest + עב״ס/כוננות — excludes kitchen */
+  /** נקודות שמירה = בסיס + עונש מנוחה */
+  guardPoints: number;
+  /** נקודות תורנות = מטbch + עב״ס + כוננות */
+  toranutPoints: number;
+  /** נקודות צדק = שמירה + תורנות */
+  fairnessPoints: number;
+  /** לשיבוץ חכם: שמירה + תורנות ללא מטbch */
   dutyPoints: number;
   guardAssignmentCount: number;
   totalBurden: number;
@@ -173,27 +184,25 @@ export function getGuardBaseBurden(
   endTime: string,
   seatCount: number,
   rules?: FairnessRules,
+  positionName?: string,
 ): number {
+  void seatCount;
+  const rates = resolveHourlyRates(rules);
+  const hours = slotDurationHours(startTime, endTime);
+  if (hours <= 0) return 0;
+
+  if (positionName && isObservationPost(positionName)) {
+    return roundPoints(hours * rates.observation);
+  }
+
   const startMin = parseTimeMinutes(startTime);
   if (startMin === null) return 0;
   const durationMin = slotDurationMinutes(startTime, endTime);
-  if (durationMin <= 0) return 0;
-
-  const bands = resolveGuardBands(rules);
-  const hoursFactor = resolveGuardHoursFactor(rules);
-  const isSolo = seatCount <= 1;
-  let total = 0;
-  for (let i = 0; i < GUARD_BAND_TIME_RANGES.length; i++) {
-    const range = GUARD_BAND_TIME_RANGES[i];
-    const band = bands[i];
-    if (!band) continue;
-    const overlap = overlapSlotWithBand(startMin, durationMin, range.startMin, range.endMin);
-    if (overlap <= 0) continue;
-    const overlapHours = overlap / 60;
-    const bandScore = isSolo ? band.solo : band.paired;
-    total += (overlapHours / BAND_WIDTH_HOURS) * bandScore * hoursFactor;
-  }
-  return Math.round(total * 100) / 100;
+  const nightMin = nightOverlapMinutes(startMin, durationMin);
+  const dayMin = Math.max(0, durationMin - nightMin);
+  const dayHours = dayMin / 60;
+  const nightHours = nightMin / 60;
+  return roundPoints(dayHours * rates.guard + nightHours * rates.guard_night);
 }
 
 export function getGuardBaseBurdenForSlot(
@@ -206,6 +215,7 @@ export function getGuardBaseBurdenForSlot(
     slot.endTime,
     seatCount ?? slot.seatCount,
     rules,
+    slot.positionName,
   );
 }
 
@@ -283,34 +293,10 @@ function isBaseWorkBlock(block: BurdenTimelineBlock): boolean {
   return block.missionType === "base_work";
 }
 
-/** Fixed ABAS window score; scales proportionally if duration differs but start matches. */
-export function getBaseWorkShiftPoints(
-  startTime: string,
-  endTime: string,
-  shifts = DEFAULT_BASE_WORK_SHIFTS,
-): number | null {
-  const exact = shifts.find((w) => w.start === startTime && w.end === endTime);
-  if (exact) return exact.points;
-
-  const byStart = shifts.find((w) => w.start === startTime);
-  if (!byStart) return null;
-
-  const hours = slotDurationHours(startTime, endTime);
-  const windowHours = slotDurationHours(byStart.start, byStart.end);
-  if (windowHours <= 0) return null;
-  return Math.round(byStart.points * (hours / windowHours) * 100) / 100;
-}
-
-function baseWorkPointsForBlock(block: BurdenTimelineBlock): number {
-  const fixed = getBaseWorkShiftPoints(block.startTime, block.endTime);
-  if (fixed != null) return fixed;
-  return 0;
-}
-
-function legacyPointsForBlock(
+function toranutPointsForBlock(
   block: BurdenTimelineBlock,
   rules: FairnessRules,
-  scheduling?: MissionSchedulingRules,
+  _scheduling?: MissionSchedulingRules,
 ): number {
   if (block.positionKind === "patrol") return 0;
   if (
@@ -320,30 +306,35 @@ function legacyPointsForBlock(
   ) {
     return 0;
   }
+
+  const rates = resolveHourlyRates(rules);
   const hours = slotDurationHours(block.startTime, block.endTime);
+  if (hours <= 0) return 0;
+
   if (isKitchenBlock(block)) {
-    const perShift =
-      scheduling?.kitchen?.points_per_shift !== false &&
-      block.missionType === "kitchen";
-    return pointsForHours(hours, "kitchen", rules, { perShift });
+    return roundPoints(hours * rates.kitchen);
   }
-  if (isBaseWorkBlock(block)) {
-    const abas = baseWorkPointsForBlock(block);
-    if (abas > 0) return abas;
-  }
-  if (block.positionKind === "duty" || block.missionType === "base_work") {
-    return pointsForHours(hours, "duty", rules);
+  if (isBaseWorkBlock(block) || block.positionKind === "duty") {
+    return roundPoints(hours * rates.base_work);
   }
   if (block.positionKind === "standby_carmel_a") {
-    return pointsForHours(hours, "standby_a", rules);
+    return roundPoints(hours * rates.standby_a);
   }
   if (block.positionKind === "standby_carmel_b") {
-    return pointsForHours(hours, "standby_b", rules);
+    return roundPoints(hours * rates.standby_b);
   }
   if (isStandbyKind(block.positionKind)) {
-    return pointsForHours(hours, "standby", rules);
+    return roundPoints(hours * rates.standby_a);
   }
   return 0;
+}
+
+export function toranutPointsForMissionBlock(
+  block: BurdenTimelineBlock,
+  rules: FairnessRules,
+  scheduling?: MissionSchedulingRules,
+): number {
+  return toranutPointsForBlock(block, rules, scheduling);
 }
 
 export function getRestHoursBetween(
@@ -407,6 +398,7 @@ export function calculateGuardAssignmentBurden(
     guard.endTime,
     guard.seatCount,
     rules,
+    guard.positionName,
   );
   const { penalty, restHours } = restPenaltyBeforeGuard(guard, prevRelevant, rules);
   return {
@@ -474,24 +466,31 @@ export function calculatePersonBurden(
       restPenalties += detail.restPenaltyBefore;
       guardDetails.push(detail);
     } else if (isKitchenBlock(block)) {
-      kitchenPoints += legacyPointsForBlock(block, rules, scheduling);
+      kitchenPoints += toranutPointsForBlock(block, rules, scheduling);
     } else {
-      otherMissionPoints += legacyPointsForBlock(block, rules, scheduling);
+      otherMissionPoints += toranutPointsForBlock(block, rules, scheduling);
     }
   }
 
+  const guardPoints =
+    Math.round((guardBaseBurden + restPenalties) * 100) / 100;
+  const toranutPoints =
+    Math.round((kitchenPoints + otherMissionPoints) * 100) / 100;
+  const fairnessPoints = Math.round((guardPoints + toranutPoints) * 100) / 100;
   const dutyPoints =
-    Math.round((guardBaseBurden + restPenalties + otherMissionPoints) * 100) / 100;
-  const totalBurden = Math.round((dutyPoints + kitchenPoints) * 100) / 100;
+    Math.round((guardPoints + otherMissionPoints) * 100) / 100;
 
   return {
     guardBaseBurden: Math.round(guardBaseBurden * 100) / 100,
     restPenalties: Math.round(restPenalties * 100) / 100,
     otherMissionPoints: Math.round(otherMissionPoints * 100) / 100,
     kitchenPoints: Math.round(kitchenPoints * 100) / 100,
+    guardPoints,
+    toranutPoints,
+    fairnessPoints,
     dutyPoints,
     guardAssignmentCount,
-    totalBurden,
+    totalBurden: fairnessPoints,
     guardDetails,
   };
 }

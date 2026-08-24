@@ -301,7 +301,7 @@ describe("validateNoPersonOverlaps", () => {
     const baseSlotId = base.positions[0].slots[0].id;
     const assignments = { ...timed.assignments };
     assignments[carmel.slotId] = ["Alex", "", ""];
-    assignments[baseSlotId] = Array(14).fill("");
+    assignments[baseSlotId] = Array(15).fill("");
     assignments[baseSlotId][0] = "Alex";
 
     const guardMission = { ...timed, assignments };
@@ -379,9 +379,10 @@ describe("base work assignment", () => {
     expect(diagnostics.assigned).toBeGreaterThan(0);
   });
 
-  it("Test F — prefers whole squad when available", () => {
-    const people = Array.from({ length: 14 }, (_, i) => person(`S1-${i + 1}`, 1))
-      .concat(Array.from({ length: 14 }, (_, i) => person(`S2-${i + 1}`, 2)));
+  it("Test F — fills full base work shift (15 seats)", () => {
+    const people = Array.from({ length: 14 }, (_, i) => person(`S1-${i + 1}`, 1)).concat(
+      Array.from({ length: 15 }, (_, i) => person(`S2-${i + 1}`, 2)),
+    );
     const base = missionDay(
       "base-1",
       "base_work",
@@ -392,7 +393,7 @@ describe("base work assignment", () => {
     );
     const tracker = buildTrackerFromMissions([], rules);
     const slot = flattenMissionSlots(base)[0];
-    const { names, workSquad, usedFallback } = assignBaseWorkShift({
+    const { names, diagnostics } = assignBaseWorkShift({
       people,
       slot,
       shiftIndex: 0,
@@ -405,12 +406,13 @@ describe("base work assignment", () => {
       missionId: base.id,
       missionType: base.mission_type,
     });
-    expect(usedFallback).toBe(false);
-    expect(workSquad).toBe(1);
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(15);
+    expect(diagnostics.required).toBe(15);
+    expect(diagnostics.assigned).toBe(15);
+    expect(new Set(names).size).toBe(15);
   });
 
-  it("Test G — fills from other squads when preferred squad is blocked", () => {
+  it("Test G — skips people blocked by kitchen overlap", () => {
     const people = makePeople(56);
     const base = missionDay(
       "base-1",
@@ -436,7 +438,7 @@ describe("base work assignment", () => {
     const kitchenMission = { ...blocker, assignments: kitchenAssignments };
     const tracker = buildTrackerFromMissions([kitchenMission], rules);
 
-    const { names, usedFallback, diagnostics } = assignBaseWorkShift({
+    const { names, diagnostics } = assignBaseWorkShift({
       people,
       slot,
       shiftIndex: 0,
@@ -451,7 +453,6 @@ describe("base work assignment", () => {
     });
 
     expect(names.length).toBeGreaterThan(0);
-    expect(usedFallback).toBe(true);
     expect(diagnostics.rejectedOverlap).toBeGreaterThan(0);
     expect(new Set(names).size).toBe(names.length);
     for (const name of names) {
@@ -459,7 +460,7 @@ describe("base work assignment", () => {
     }
   });
 
-  it("uses mixed squads when one squad member is blocked from whole-squad pick", () => {
+  it("fills shift when some people are blocked by guard overlap", () => {
     const people = Array.from({ length: 14 }, (_, i) => person(`S1-${i + 1}`, 1)).concat(
       Array.from({ length: 14 }, (_, i) => person(`S2-${i + 1}`, 2)),
     );
@@ -513,7 +514,7 @@ describe("base work assignment", () => {
       "guards",
     );
 
-    const { names, usedFallback } = assignBaseWorkShift({
+    const { names } = assignBaseWorkShift({
       people,
       slot,
       shiftIndex: 0,
@@ -527,8 +528,7 @@ describe("base work assignment", () => {
       missionType: base.mission_type,
     });
 
-    expect(usedFallback).toBe(true);
-    expect(names.length).toBeGreaterThanOrEqual(13);
+    expect(names.length).toBeGreaterThanOrEqual(15);
     expect(names).not.toContain("S1-1");
     expect(names.some((n) => n.startsWith("S1-"))).toBe(true);
     expect(names.some((n) => n.startsWith("S2-"))).toBe(true);

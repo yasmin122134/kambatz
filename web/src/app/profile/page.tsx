@@ -210,23 +210,39 @@ export default function ProfilePage() {
         {fairness && (
           <div className="rounded-2xl border border-line2 bg-bone2/50 p-4 space-y-3">
             <div className="bar spread flex-wrap gap-2">
-              <p className="font-display text-sm">נקודות שמירה (טבלת צדק)</p>
+              <p className="font-display text-sm">נקודות צדק</p>
               <Link href="/fairness" className="text-xs text-brick hover:underline">
                 טבלת צדק
               </Link>
             </div>
             <div className="grid grid-cols-3 gap-2 text-center text-sm">
               <div>
-                <p className="hint text-xs">תקופה נוכחית</p>
-                <p className="font-display text-lg">{fairness.periodPoints}</p>
+                <p className="hint text-xs">נקודות שמירה</p>
+                <p className="font-display text-lg">
+                  {fairness.burden?.guardPoints?.toFixed(1) ?? "—"}
+                </p>
               </div>
+              <div>
+                <p className="hint text-xs">נקודות תורנות</p>
+                <p className="font-display text-lg">
+                  {fairness.burden?.toranutPoints?.toFixed(1) ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="hint text-xs">נקודות צדק</p>
+                <p className="font-display text-lg text-accent">
+                  {fairness.periodPoints}
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center text-sm border-t border-line2 pt-2">
               <div>
                 <p className="hint text-xs">ניקוד קודם</p>
-                <p className="font-display text-lg">{fairness.priorScore}</p>
+                <p className="font-display">{fairness.priorScore}</p>
               </div>
               <div>
-                <p className="hint text-xs">סה״כ</p>
-                <p className="font-display text-lg text-accent">{fairness.totalPoints}</p>
+                <p className="hint text-xs">סה״כ + היסטוריה</p>
+                <p className="font-display">{fairness.totalPoints}</p>
               </div>
             </div>
             {fairness.history.length > 0 ? (

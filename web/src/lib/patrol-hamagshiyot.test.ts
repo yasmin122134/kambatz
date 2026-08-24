@@ -3,6 +3,7 @@ import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import { DEFAULT_HAMAGSHIYOT_SHIFTS, DEFAULT_HAMAGSHIYOT_SEATS } from "@/lib/hamagshiyot-template";
 import { DEFAULT_PATROL_TOURS, patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { flattenMissionSlots } from "@/lib/mission-utils";
+import { validateGeneratedRoster } from "@/lib/scheduling-engine";
 import type { MissionDay } from "@/lib/types";
 
 describe("patrol and hamagshiyot guard day positions", () => {
@@ -69,5 +70,36 @@ describe("patrol and hamagshiyot guard day positions", () => {
     expect(patrolSlots.every((s) => s.slotLabel)).toBe(true);
     expect(hamSlots).toHaveLength(3);
     expect(hamSlots[0].startTime).toBe("07:00");
+  });
+
+  it("does not flag wall-clock slots as outside the guard mission interval", () => {
+    const positions = buildGuardDayPositions({
+      missionStartsAt: "2026-01-01T08:00:00+03:00",
+      missionEndsAt: "2026-01-02T08:00:00+03:00",
+      missionDate: "2026-01-01",
+    });
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-01-01",
+      starts_at: "2026-01-01T08:00:00+03:00",
+      ends_at: "2026-01-02T08:00:00+03:00",
+      status: "draft",
+      positions,
+      assignments: {},
+      scheduling_rules: {
+        rest_hours: 7,
+        guard_ratio: 2,
+        board_start: "08:00",
+        shift_hours: 4,
+      },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+
+    const errors = validateGeneratedRoster({ missions: [mission] });
+    expect(errors.some((e) => e.includes("outside mission interval"))).toBe(false);
   });
 });

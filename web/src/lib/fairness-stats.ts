@@ -1,14 +1,17 @@
 import {
   blockFromFlatSlot,
   calculatePersonBurden,
+  toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
 } from "@/lib/guard-burden";
 import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   DEFAULT_FAIRNESS_RULES,
+  DEFAULT_FAIRNESS_HOURLY_RATES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
   type FairnessBucket,
+  type FairnessHourlyRates,
   type FairnessRules,
   type GuardBandRule,
   type MissionDay,
@@ -50,15 +53,31 @@ function normalizeRestPenalties(raw: unknown): number[] {
   });
 }
 
+function normalizeHourlyRates(raw: unknown): FairnessHourlyRates {
+  const base = { ...DEFAULT_FAIRNESS_HOURLY_RATES };
+  if (!raw || typeof raw !== "object") return base;
+  const src = raw as Partial<FairnessHourlyRates>;
+  return {
+    guard: parseNonNegativeNumber(src.guard) ?? base.guard,
+    guard_night: parseNonNegativeNumber(src.guard_night) ?? base.guard_night,
+    observation: parseNonNegativeNumber(src.observation) ?? base.observation,
+    base_work: parseNonNegativeNumber(src.base_work) ?? base.base_work,
+    standby_a: parseNonNegativeNumber(src.standby_a) ?? base.standby_a,
+    standby_b: parseNonNegativeNumber(src.standby_b) ?? base.standby_b,
+    kitchen: parseNonNegativeNumber(src.kitchen) ?? base.kitchen,
+  };
+}
+
 export function normalizeFairnessRulesFromRaw(raw: unknown): FairnessRules {
   const src = (raw || {}) as Partial<FairnessRules>;
   const out: FairnessRules = {
     ...DEFAULT_FAIRNESS_RULES,
     guard_bands: normalizeGuardBands(src.guard_bands),
     rest_penalties: normalizeRestPenalties(src.rest_penalties),
+    hourly_rates: normalizeHourlyRates(src.hourly_rates),
   };
   for (const key of Object.keys(DEFAULT_FAIRNESS_RULES) as (keyof FairnessRules)[]) {
-    if (key === "guard_bands" || key === "rest_penalties") continue;
+    if (key === "guard_bands" || key === "rest_penalties" || key === "hourly_rates") continue;
     const v = parseNonNegativeNumber(src[key]);
     if (v !== null) out[key] = v;
   }
@@ -76,6 +95,18 @@ function numberArraysEqual(a: number[], b: number[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
+function hourlyRatesEqual(a: FairnessHourlyRates, b: FairnessHourlyRates): boolean {
+  return (
+    a.guard === b.guard &&
+    a.guard_night === b.guard_night &&
+    a.observation === b.observation &&
+    a.base_work === b.base_work &&
+    a.standby_a === b.standby_a &&
+    a.standby_b === b.standby_b &&
+    a.kitchen === b.kitchen
+  );
+}
+
 export function fairnessRulesChanged(current: FairnessRules, proposed: FairnessRules): boolean {
   for (const key of Object.keys(DEFAULT_FAIRNESS_RULES) as (keyof FairnessRules)[]) {
     if (key === "guard_bands") {
@@ -84,6 +115,10 @@ export function fairnessRulesChanged(current: FairnessRules, proposed: FairnessR
     }
     if (key === "rest_penalties") {
       if (!numberArraysEqual(current.rest_penalties, proposed.rest_penalties)) return true;
+      continue;
+    }
+    if (key === "hourly_rates") {
+      if (!hourlyRatesEqual(current.hourly_rates, proposed.hourly_rates)) return true;
       continue;
     }
     if (current[key] !== proposed[key]) return true;
@@ -175,12 +210,8 @@ export function buildPersonFairnessHistory(
         continue;
       }
 
-      const kitchenPerShift =
-        mission.mission_type === "kitchen" &&
-        scheduling.kitchen?.points_per_shift !== false;
-      const points = pointsForHours(hours, bucket, rules, {
-        perShift: kitchenPerShift,
-      });
+      const block = blockFromFlatSlot(slot, slot.missionType);
+      const points = toranutPointsForMissionBlock(block, rules, scheduling);
       history.push({
         id: `${mission.id}:${slot.slotId}:${personName}`,
         missionId: mission.id,
@@ -265,7 +296,10 @@ export function statsFromStoredHistory(
   const kitchenPoints = Math.round(
     history.filter((h) => h.bucket === "kitchen").reduce((sum, h) => sum + h.points, 0) * 100,
   ) / 100;
-  const dutyPoints = Math.round((periodPoints - kitchenPoints) * 100) / 100;
+  const guardPoints = Math.round((guardBaseBurden + restPenalties) * 100) / 100;
+  const toranutPoints = Math.round((kitchenPoints + otherMissionPoints) * 100) / 100;
+  const fairnessPoints = periodPoints;
+  const dutyPoints = Math.round((guardPoints + otherMissionPoints) * 100) / 100;
 
   return {
     rules,
@@ -278,6 +312,9 @@ export function statsFromStoredHistory(
       restPenalties,
       otherMissionPoints,
       kitchenPoints,
+      guardPoints,
+      toranutPoints,
+      fairnessPoints,
       dutyPoints,
       guardAssignmentCount,
       totalBurden: periodPoints,

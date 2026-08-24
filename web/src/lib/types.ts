@@ -20,7 +20,6 @@ export interface Person {
   email: string | null;
   room: string | null;
   gender: "m" | "f" | null;
-  /** צוות 1–4 — לשיבוץ מטבח ועב״ס */
   squad?: number | null;
   active: boolean;
   is_admin?: boolean;
@@ -111,10 +110,10 @@ export interface KitchenSchedulingRules {
 }
 
 export interface BaseWorkSchedulingRules {
-  /** יעד צוערים בחלון עב״ס (13–15, בדרך כלל צוות שלם) */
+  /** יעד צוערים בחלון עב״ס (13–15) */
   seats_per_shift: number;
-  /** לכל חלון (0-based): צוות במנוחה */
-  squad_rest_by_shift: number[];
+  /** @deprecated לא בשימוש — שיבוץ עב״ס לא לפי צוותים */
+  squad_rest_by_shift?: number[];
   /** slotId → שם אחראי/ת הקבוצה לחלון עב״ס */
   slot_leaders?: Record<string, string>;
 }
@@ -142,9 +141,11 @@ export const DEFAULT_KITCHEN_SCHEDULING_RULES: KitchenSchedulingRules = {
 };
 
 export const DEFAULT_BASE_WORK_SCHEDULING_RULES: BaseWorkSchedulingRules = {
-  seats_per_shift: 14,
-  squad_rest_by_shift: [4, 1, 2],
+  seats_per_shift: 15,
 };
+
+/** מאיישים בכל משמרת כוח עתודה */
+export const DEFAULT_RESERVE_FORCE_SEATS = 5;
 
 export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
   rest_hours: 7,
@@ -230,14 +231,44 @@ export type GuardBandRule = {
   paired: number;
 };
 
+/** נקודות צדק לשעה — מודל מרכזי (2026) */
+export type FairnessHourlyRates = {
+  /** שעת שמירה רגילה */
+  guard: number;
+  /** שעת שמירה בלילה (22:00–06:00) */
+  guard_night: number;
+  /** שעת שמירה בתצפיתן */
+  observation: number;
+  /** שעת עב״ס */
+  base_work: number;
+  /** שעת כוננות כרמל א׳ */
+  standby_a: number;
+  /** שעת כוננות כרמel ב׳ */
+  standby_b: number;
+  /** שעת מטבch */
+  kitchen: number;
+};
+
+export const DEFAULT_FAIRNESS_HOURLY_RATES: FairnessHourlyRates = {
+  guard: 1,
+  guard_night: 1.25,
+  observation: 0.6,
+  base_work: 0.75,
+  standby_a: 0.5,
+  standby_b: 0.3,
+  kitchen: 1,
+};
+
 export type FairnessRules = Record<FairnessBucket, number> & {
   hist: number;
-  /** Multiplier on guard hours (default 2 — same pattern as כרמל × שעות). */
+  /** Multiplier on guard hours (legacy — band model) */
   guard_hours_factor: number;
-  /** Six 4-hour wall-clock bands — scores for a full band before hours factor. */
+  /** Six 4-hour wall-clock bands — legacy, kept for DB compat */
   guard_bands: GuardBandRule[];
   /** Rest-penalty tiers: ≥16h, ≥12h, …, under 4h (mirrors getRestPenalty). */
   rest_penalties: number[];
+  /** נקודות לשעה — מודל חישוב ראשי */
+  hourly_rates: FairnessHourlyRates;
 };
 
 export const DEFAULT_GUARD_BANDS: GuardBandRule[] = [
@@ -265,18 +296,18 @@ export const DEFAULT_BASE_WORK_SHIFTS: BaseWorkShiftRule[] = [
 ];
 
 export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
-  solo: 1.5,
-  pair: 1.0,
+  solo: 1,
+  pair: 1,
   standby: 0.15,
-  standby_a: 0.45,
-  standby_b: 0.15,
-  duty: 0.1,
-  kitchen: 0.1,
+  standby_a: 0.5,
+  standby_b: 0.3,
+  duty: 0.75,
+  kitchen: 1,
   hist: 0.7,
-  /** Band scores are already «points per 4h block» — keep at 1 unless scaling all guard rows. */
   guard_hours_factor: 1,
   guard_bands: DEFAULT_GUARD_BANDS.map((b) => ({ ...b })),
   rest_penalties: [...DEFAULT_REST_PENALTIES],
+  hourly_rates: { ...DEFAULT_FAIRNESS_HOURLY_RATES },
 };
 export interface FairnessRuleRequest {
   id: string;
@@ -289,23 +320,23 @@ export interface FairnessRuleRequest {
 }
 
 export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
-  solo: "שמירה לבד (לשעה)",
-  pair: "שמירה בזוג (לשעה)",
+  solo: "שמירה (לשעה)",
+  pair: "שמירה (לשעה)",
   standby: "כוננות (לשעה)",
   standby_a: "כרמל א׳ — כוננות (לשעה)",
   standby_b: "כרמל ב׳ — כוננות (לשעה)",
-  duty: "עבודות בסיס (לשעה)",
-  kitchen: "תורנות מטבח (למשמרת)",
+  duty: "עב״ס / כוח עתודה (לשעה)",
+  kitchen: "מטבח (לשעה)",
 };
 
 export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
-  solo: "משמרת שמירה כשמאיישים יחיד בעמדה",
-  pair: "משמרת שמירה עם 2+ מאיישים",
+  solo: "שעת שמירה רגילה",
+  pair: "שעת שמירה — אותו תעריף במודל החדש",
   standby: "כיתת כוננות (כללי)",
   standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
   standby_b: "כרמל ב׳ — כוננות",
-  duty: "כוח עתודה ומשימות בסיס (לשעה) — עב״ס בטבלה נפרדת",
-  kitchen: "חמגשיות ותורנות מטבח — נקודה קבועה לכל משמרת",
+  duty: "עב״ס וכוח עתודה",
+  kitchen: "תורנות מטבח — נקודות × שעות",
 };
 
 export type PersonMissionHistoryItem = {
@@ -337,6 +368,13 @@ export type PersonFairnessStats = {
     restPenalties: number;
     otherMissionPoints: number;
     kitchenPoints: number;
+    /** נקודות שמירה = בסיס + עונש מנוחה */
+    guardPoints: number;
+    /** נקודות תורנות = מטבch + עב״ס + כוננות */
+    toranutPoints: number;
+    /** נקודות צדק = שמירה + תורנות */
+    fairnessPoints: number;
+    /** לשיבוץ: שמירה + תורנות ללא מטבח */
     dutyPoints: number;
     guardAssignmentCount: number;
     totalBurden: number;
@@ -344,8 +382,9 @@ export type PersonFairnessStats = {
 };
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
-  "שמירות — נקודות לפי רצועות 4 שעות; משמרת קצרה או חוצה רצועות = יחסית (ציון_רצועה × שעות/4).",
-  "משמרת 00:00–04:00 סולו = 10 נק׳; זוג = 8. 08:00–12:00 זוג = 5.",
+  "שמירה — 1 נק׳/שעה; לילה (22:00–06:00) — 1.25; תצפיתן — 0.6.",
+  "תורנות — עב״ס 0.75; כרמל א׳ 0.5; כרמל ב׳ 0.3; מטבח 1 נק׳/שעה.",
+  "נקודות צדק = נקודות שמירה + נקודות תורנות.",
   "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2).",
   "עב״ס — נקודות קבועות לחלון (08:30, 13:30, 18:30); כוח עתודה — duty × שעות.",
   "מטבח, כוננות — לפי טבלת הצדק.",

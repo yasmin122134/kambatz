@@ -11,6 +11,7 @@
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
 import { isBaseWorkPosition, resolveBaseWorkSlotInterval } from "@/lib/base-work-template";
 import { officerDutySlotsValid } from "@/lib/guard-day-template";
+import { positionUsesWallClockSchedule } from "@/lib/mission-utils";
 import { resolveCanonicalSlotInterval } from "@/lib/time-interval";
 
 export type MissionStructureSnapshot = {
@@ -120,7 +121,7 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
       if (interval.startMs >= interval.endMs) {
         messages.push(`${pos.name} ${slot.start_time}–${slot.end_time}: start >= end`);
       }
-      if (!isBaseWorkPosition(pos)) {
+      if (!positionUsesWallClockSchedule(pos, slot)) {
         if (interval.startMs < missionStartMs || interval.endMs > missionEndMs) {
           messages.push(
             `${pos.name} ${slot.start_time}–${slot.end_time}: outside mission interval`,

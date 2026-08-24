@@ -824,9 +824,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   type="number"
                   min={13}
                   max={15}
-                  value={schedulingRules.base_work?.seats_per_shift ?? 14}
+                  value={schedulingRules.base_work?.seats_per_shift ?? 15}
                   onChange={(e) => {
-                    const seats = Math.max(13, Math.min(15, +e.target.value || 14));
+                    const seats = Math.max(13, Math.min(15, +e.target.value || 15));
                     setSchedulingRules((r) => ({
                       ...r,
                       base_work: {
@@ -837,42 +837,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   }}
                 />
               </div>
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="field">
-                  <label>מנוחה חלון {i + 1} — צוות</label>
-                  <select
-                    value={
-                      schedulingRules.base_work?.squad_rest_by_shift?.[i] ?? i + 1
-                    }
-                    onChange={(e) => {
-                      const squad = +e.target.value;
-                      setSchedulingRules((r) => {
-                        const rest = [
-                          ...(r.base_work?.squad_rest_by_shift ||
-                            DEFAULT_BASE_WORK_SCHEDULING_RULES.squad_rest_by_shift),
-                        ];
-                        rest[i] = squad;
-                        return {
-                          ...r,
-                          base_work: {
-                            ...(r.base_work || DEFAULT_BASE_WORK_SCHEDULING_RULES),
-                            squad_rest_by_shift: rest,
-                          },
-                        };
-                      });
-                    }}
-                  >
-                    {[1, 2, 3, 4].map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              ))}
             </div>
             <p className="hint text-xs">
-              בכל חלון משובץ צוות שלם (13–15). צוות אחד במנוחה לכל חלון.
+              בכל חלון משובצים 13–15 צוערים לפי צדק וזמינות (לא לפי צוותים).
             </p>
             <button
               type="button"

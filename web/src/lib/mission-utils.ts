@@ -178,6 +178,38 @@ export function slotEatsRest(slot: FlatSlot): boolean {
   return eatsRest(slot.positionKind);
 }
 
+/** Patrol, hamagshiyot, and ABAS use fixed wall-clock times on mission_date — not the guard cycle window. */
+export function slotUsesWallClockSchedule(
+  slot: Pick<
+    FlatSlot,
+    "positionKind" | "missionType" | "positionName" | "startTime" | "endTime"
+  >,
+): boolean {
+  if (slot.positionKind === "patrol") return true;
+  if (slot.missionType === "base_work") return true;
+  if (isBaseWorkShiftSlot(slot.startTime, slot.endTime)) return true;
+  if (
+    slot.positionKind === "kitchen" &&
+    (isHamagshiyotPositionName(slot.positionName) ||
+      isHamagshiyotShiftSlot(slot.startTime, slot.endTime))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function positionUsesWallClockSchedule(
+  pos: Pick<MissionPosition, "name" | "kind">,
+  slot: Pick<MissionSlot, "start_time" | "end_time">,
+): boolean {
+  if (isBaseWorkPosition(pos)) return true;
+  if (pos.kind === "patrol" || isPatrolPosition(pos)) return true;
+  if (isPatrolShiftSlot(slot.start_time, slot.end_time)) return true;
+  if (isHamagshiyotPosition(pos)) return true;
+  if (isHamagshiyotShiftSlot(slot.start_time, slot.end_time)) return true;
+  return false;
+}
+
 export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
   const src = (raw || {}) as Partial<MissionSchedulingRules> & {
     kitchen?: Partial<KitchenSchedulingRules>;
@@ -223,10 +255,6 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
     seats_per_shift: Math.max(
       13,
       Math.min(15, +b.seats_per_shift! || DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift),
-    ),
-    squad_rest_by_shift: normalizeSquadRest(
-      b.squad_rest_by_shift,
-      DEFAULT_BASE_WORK_SCHEDULING_RULES.squad_rest_by_shift,
     ),
     slot_leaders: normalizeBaseWorkSlotLeaders(b.slot_leaders),
   };

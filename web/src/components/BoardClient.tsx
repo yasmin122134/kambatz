@@ -108,6 +108,9 @@ export function BoardClient({
       guardAssignmentCount: number;
       guardBaseBurden: number;
       restPenalties: number;
+      guardPoints: number;
+      toranutPoints: number;
+      fairnessPoints: number;
       otherMissionPoints: number;
       historicalAdjustment: number;
       totalWithHistory: number;
@@ -1704,6 +1707,9 @@ function BurdenSummaryPanel({
     guardAssignmentCount: number;
     guardBaseBurden: number;
     restPenalties: number;
+    guardPoints?: number;
+    toranutPoints?: number;
+    fairnessPoints?: number;
     otherMissionPoints: number;
     historicalAdjustment: number;
     totalWithHistory: number;
@@ -1766,12 +1772,9 @@ function BurdenSummaryPanel({
               <th title="עומס ביום הנבחר">עומס יום</th>
               <th title="עומס + התאמת ניקוד קודם — לשיבוץ חכם">סה״כ+היסט׳</th>
               <th aria-label="יחס לעומס המקסימלי" />
-              <th>שמירות</th>
-              <th title="עומס בסיס שמירות">בסיס</th>
-              <th title="עונש מנוחה">מנוחה</th>
-              <th title="שמירות + עב״ס + כוננות">שמירה+עב״ס</th>
-              <th title="תורנות מטבח">מטבח</th>
-              <th title="עב״ס/כוננות (לא כולל שמירות)">עב״ס/כוננ</th>
+              <th>#</th>
+              <th title="נקודות שמירה">שמירה</th>
+              <th title="נקודות תורנות">תורנות</th>
               <th title="התאמת ניקוד קודם">היסט׳</th>
             </tr>
           </thead>
@@ -1801,11 +1804,8 @@ function BurdenSummaryPanel({
                     </div>
                   </td>
                   <td className="mono">{row.guardAssignmentCount}</td>
-                  <td className="mono text-ink2">{row.guardBaseBurden.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.restPenalties.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.dutyPoints.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.kitchenPoints.toFixed(1)}</td>
-                  <td className="mono text-ink2">{row.otherMissionPoints.toFixed(1)}</td>
+                  <td className="mono text-ink2">{(row.guardPoints ?? row.dutyPoints - row.otherMissionPoints).toFixed(1)}</td>
+                  <td className="mono text-ink2">{(row.toranutPoints ?? row.kitchenPoints + row.otherMissionPoints).toFixed(1)}</td>
                   <td className="mono text-ink2">
                     {row.historicalAdjustment >= 0 ? "+" : ""}
                     {row.historicalAdjustment.toFixed(1)}

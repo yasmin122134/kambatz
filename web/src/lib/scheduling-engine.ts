@@ -23,6 +23,7 @@ import {
   resolveMissionForSlot,
   resolvePositionKind,
   slotDurationMinutes,
+  slotUsesWallClockSchedule,
 } from "@/lib/mission-utils";
 import {
   isBaseWorkPositionName,
@@ -1936,7 +1937,7 @@ export function assignKitchenShift(input: {
   return { names, usedRestSquad, squadCounts };
 }
 
-/** שיבוץ חלון עב״ס — מעדיף צוות שלם; אם אין — צוות עוגן + הלוואות; אחרת מילוי מעורב */
+/** שיבוץ חלון עב״ס — לפי צדק וזמינות, ללא חלוקה לצוותים */
 export type BaseWorkShiftDiagnostics = {
   required: number;
   assigned: number;
@@ -2003,19 +2004,15 @@ export function assignBaseWorkShift(input: {
   taken: string[];
 }): {
   names: string[];
-  workSquad: number | null;
-  usedFallback: boolean;
   diagnostics: BaseWorkShiftDiagnostics;
 } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const cfg = input.scheduling.base_work;
-  const configuredTarget = cfg?.seats_per_shift ?? 14;
+  const configuredTarget = cfg?.seats_per_shift ?? 15;
   const target = Math.max(
     13,
     Math.min(15, input.slot.seatCount || configuredTarget),
   );
-  const restList = cfg?.squad_rest_by_shift ?? [1, 2, 3];
-  const restSquad = restList[input.shiftIndex % restList.length] ?? (input.shiftIndex % 4) + 1;
   const diagnostics: BaseWorkShiftDiagnostics = {
     required: target,
     assigned: input.taken.length,
@@ -2030,9 +2027,6 @@ export function assignBaseWorkShift(input: {
   const sortedPeople = [...input.people].sort((a, b) =>
     a.name.localeCompare(b.name, "he"),
   );
-  const squadOf = (p: Person) =>
-    effectiveSquad(p, sortedPeople.findIndex((x) => x.id === p.id));
-  const groups = groupPeopleBySquad(sortedPeople, squadOf);
 
   const countRejection = (person: Person, mates: string[]) => {
     const reason = classifyCandidateRejection(
@@ -2059,8 +2053,6 @@ export function assignBaseWorkShift(input: {
     ) === null;
 
   const need = Math.max(0, target - input.taken.length);
-  const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
-  const minWholeSquad = Math.min(13, target);
 
   const sortByFairness = (pool: Person[]) =>
     [...pool].sort((a, b) => {
@@ -2078,7 +2070,8 @@ export function assignBaseWorkShift(input: {
       return cmp || a.name.localeCompare(b.name, "he");
     });
 
-  const tryAdd = (person: Person, assigned: string[]) => {
+  const assigned: string[] = [];
+  const tryAdd = (person: Person) => {
     const mates = [...input.taken, ...assigned];
     if (!fitsCandidate(person, mates)) {
       countRejection(person, mates);
@@ -2098,103 +2091,17 @@ export function assignBaseWorkShift(input: {
     return true;
   };
 
-  const dominantSquad = (names: string[]): number | null => {
-    if (!names.length) return null;
-    const counts: Record<number, number> = {};
-    for (const name of names) {
-      const p = peopleByName[name];
-      if (!p) continue;
-      const s = squadOf(p);
-      counts[s] = (counts[s] || 0) + 1;
-    }
-    let best: number | null = null;
-    let bestCount = 0;
-    for (const [s, c] of Object.entries(counts)) {
-      if (c > bestCount) {
-        bestCount = c;
-        best = Number(s);
-      }
-    }
-    return best;
-  };
-
-  const assigned: string[] = [];
-
-  // Phase 1 — whole active squad when every available member fits
-  const wholeSquadCandidates = activeSquads
-    .map((squad) => {
-      const pool = groups[squad].filter((m) => !input.taken.includes(m.name));
-      return { squad, pool };
-    })
-    .filter(({ pool }) => pool.length >= minWholeSquad)
-    .sort(
-      (a, b) =>
-        Math.abs(b.pool.length - target) - Math.abs(a.pool.length - target),
-    );
-
-  for (const { squad, pool } of wholeSquadCandidates) {
-    if (!pool.every((p) => fitsCandidate(p, input.taken))) {
-      for (const p of pool) countRejection(p, input.taken);
-      continue;
-    }
-    for (const p of pool) {
-      tryAdd(p, assigned);
-    }
-    if (assigned.length >= need) {
-      diagnostics.assigned = input.taken.length + assigned.length;
-      return { names: assigned, workSquad: squad, usedFallback: false, diagnostics };
-    }
-    break;
-  }
-
-  // Phase 2 — anchor squad + borrow from other squads (including rest squad if needed)
-  const squadFillOrder = [...activeSquads, restSquad]
-    .map((squad) => ({
-      squad,
-      pool: sortByFairness(
-        groups[squad].filter(
-          (p) => !input.taken.includes(p.name) && !assigned.includes(p.name),
-        ),
-      ),
-    }))
-    .sort((a, b) => {
-      const eligibleA = a.pool.filter((p) =>
-        fitsCandidate(p, [...input.taken, ...assigned]),
-      ).length;
-      const eligibleB = b.pool.filter((p) =>
-        fitsCandidate(p, [...input.taken, ...assigned]),
-      ).length;
-      return eligibleB - eligibleA;
-    });
-
-  for (const { pool } of squadFillOrder) {
-    for (const p of pool) {
-      if (assigned.length >= need) break;
-      if (assigned.includes(p.name)) continue;
-      tryAdd(p, assigned);
-    }
+  for (const p of sortByFairness(
+    sortedPeople.filter(
+      (person) => !input.taken.includes(person.name) && !assigned.includes(person.name),
+    ),
+  )) {
     if (assigned.length >= need) break;
-  }
-
-  // Phase 3 — any remaining eligible person
-  if (assigned.length < need) {
-    for (const p of sortByFairness(
-      sortedPeople.filter(
-        (person) => !input.taken.includes(person.name) && !assigned.includes(person.name),
-      ),
-    )) {
-      if (assigned.length >= need) break;
-      tryAdd(p, assigned);
-    }
+    tryAdd(p);
   }
 
   diagnostics.assigned = input.taken.length + assigned.length;
-  return {
-    names: assigned,
-    workSquad: dominantSquad(assigned),
-    usedFallback: true,
-    diagnostics,
-  };
+  return { names: assigned, diagnostics };
 }
 
 export type SlotAssignmentCheck =
@@ -2910,7 +2817,10 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
       if (slot.startAtMs >= slot.endAtMs) {
         messages.push(`${slot.positionName} ${slot.timeLabel}: start >= end`);
       }
-      if (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs) {
+      if (
+        !slotUsesWallClockSchedule(slot) &&
+        (slot.startAtMs < missionStartMs || slot.endAtMs > missionEndMs)
+      ) {
         messages.push(`${slot.positionName} ${slot.timeLabel}: outside mission interval`);
       }
 

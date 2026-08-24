@@ -1,19 +1,37 @@
+﻿import { fairnessRulesChanged } from "@/lib/fairness-stats";
+import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
 import {
-  GUARD_TIME_BAND_HELP,
-  GUARD_TIME_BAND_LABELS,
   REST_PENALTY_TIERS,
   guardBandScoreForFullBlock,
 } from "@/lib/guard-burden";
-import { fairnessRulesChanged } from "@/lib/fairness-stats";
-import type { FairnessBucket, FairnessRules, GuardBandRule } from "@/lib/types";
+import type { FairnessHourlyRates, FairnessRules } from "@/lib/types";
 import {
-  DEFAULT_BASE_WORK_SHIFTS,
+  DEFAULT_FAIRNESS_HOURLY_RATES,
   DEFAULT_FAIRNESS_RULES,
   FAIRNESS_BUCKET_HELP,
   FAIRNESS_BUCKET_LABELS,
+  type FairnessBucket,
 } from "@/lib/types";
 
-/** All scoring buckets — every value can be proposed for change. */
+export const HOURLY_RATE_ROWS: {
+  key: keyof FairnessHourlyRates;
+  label: string;
+  help: string;
+}[] = [
+  { key: "guard", label: "שעת שמירה", help: "שמירה רגילה (לא לילה, לא תצפיתן)" },
+  {
+    key: "guard_night",
+    label: "שעת שמירה בלילה (22:00–06:00)",
+    help: "כל שעה שחופפת לחלון הלילה",
+  },
+  { key: "observation", label: "שעת שמירה בתצפיתן", help: "עמדת תצפיתן בלבד" },
+  { key: "base_work", label: "שעת עב״ס", help: "עבודות בסיס וכוח עתודה" },
+  { key: "standby_a", label: "שעת כ\"כ א", help: "כוננות כרמל א׳" },
+  { key: "standby_b", label: "שעת כ\"כ ב", help: "כוננות כרמל ב׳" },
+  { key: "kitchen", label: "שעת מטבח", help: "תורנות מטbch" },
+];
+
+/** All scoring buckets — legacy; primary model is hourly_rates. */
 export const EDITABLE_FAIRNESS_BUCKETS = [
   "solo",
   "pair",
@@ -24,7 +42,6 @@ export const EDITABLE_FAIRNESS_BUCKETS = [
   "kitchen",
 ] as const satisfies readonly FairnessBucket[];
 
-/** Buckets scored as hours × rate (kitchen = per shift). */
 export const HOURLY_FAIRNESS_BUCKETS = [
   "solo",
   "pair",
@@ -34,83 +51,92 @@ export const HOURLY_FAIRNESS_BUCKETS = [
   "duty",
 ] as const satisfies readonly FairnessBucket[];
 
-export const FAIRNESS_EDITABLE_HELP: Record<
-  (typeof EDITABLE_FAIRNESS_BUCKETS)[number],
-  string
-> = {
-  solo: "שמירה לבד — נקודות לשעה (למשימות שאינן משתמשות בטבלת רצועות)",
-  pair: "שמירה בזוג — נקודות לשעה (למשימות שאינן משתמשות בטבלת רצועות)",
-  standby: "כיתת כוננות (כללי) — נקודות × שעות",
-  standby_a: "כרמל א׳ — יום כוננות מלא, 3 צוערים; נקודות × שעות (לא צורך מנוחה)",
-  standby_b: "כרמל ב׳ — כוננות; נקודות × שעות (מותר במקביל לעב״ס)",
-  duty: "כוח עתודה — duty × שעות. עב״ס — טבלה קבועה (לא duty).",
-  kitchen: "35 צוערים למשמרת — נקודה קבועה לכל משמרת (לא × שעות)",
-};
-
-export const BASE_WORK_SCORING_EXPLANATION = [
-  "עבודות בסיס — נקודות קבועות לכל חלון (לא × שעות).",
-  "כוח עתודה בשמירות — duty × שעות.",
-] as const;
-
 export const FAIRNESS_OVERVIEW = [
-  "בשיבוץ חכם נבחר מי שציון העומס שלו הכי נמוך.",
-  "ציון = עומס בתקופה הנוכחית + התאמת ניקוד קודם (hist).",
-  "שמירות — נקודות לפי רצועות 4 שעות; חוצה רצועות = יחסית (ציון × שעות/4).",
-  "עונש מנוחה קצרה מתווסף למשמרת שאחרי הפער.",
-  "עב״ס — נקודות קבועות לחלון; כרמל/מטבח/עתודה — לפי «נקודות לשעה» / «למשמרת».",
-  "כרמל א/ב לא צורכים מנוחה — לא נספרים לעונש מנוחה של שמירה.",
+  "נקודות שמירה — שמירות + עונש מנוחה בין משימות.",
+  "נקודות תורנות — מטbch, עב״ס, כוננות כרמל.",
+  "נקודות צדק = נקודות שמירה + נקודות תורנות.",
+  "בשיבוץ חכם נבחר מי שציון העומס שלו הכי נמוך + התאמת ניקוד קודם (hist).",
   "כל הערכים בדף זה ניתנים להצעת שינוי (לאחר אישור מפקד).",
 ] as const;
 
 export const GUARD_SCORING_EXPLANATION = [
-  "כל משמרת שמירה מחולקת לרצועות של 4 שעות (00–04, 04–08, …).",
-  "לכל רצועה ציון לסולו (מאייש יחיד) ולזוג (2+ מאיישים) — למשמרת 4 שעות מלאה.",
-  "משמרת קצרה או חוצה רצועות: sum(ציון_רצועה × שעות_בה ÷ 4) × guard_hours_factor.",
-  "דוגמה: 00:00–04:00 סולו = 10 נק׳; 08:00–12:00 בזוג = 5 נק׳.",
-  "02:00–05:00 סולו = (10×2/4) + (9×1/4) = 7.25 נק׳.",
-  "קצין תורן — אותה טבלת שעות כמו שמירה (seat_count=1 → סולו).",
+  "שעת שמירה רגילה = 1 נק׳ צדק.",
+  "שעות בלילה (22:00–06:00) = 1.25 נק׳ לשעה.",
+  "תצpיתן = 0.6 נק׳ לשעה (מחליף את תעריף השמירה).",
+  "משמרת חוצה לילה/יום — חישוב יחסי לפי שעות בכל חלון.",
 ] as const;
 
 export const SOLO_PAIR_DEFINITION = {
-  solo: "מאייש יחיד בעמדה (seat_count ≤ 1) — למשל פטל, תצפיתן, נשקייה, ש״ג רגלי ביום.",
-  pair: "שני מאיישים ומעלה — למשל ש״ג רכב קדמי/אחורי (2), כוח עתודה (3) לא נכלל כאן (נקודות עב״ס).",
+  solo: "במודל החדש — אין הבדל סולו/זוג; תצpיתן בתעריף נפרד.",
+  pair: "שמירה בזוג — אותו תעריף שעה כמו סולo (למעט תצpיתן).",
 } as const;
 
 export const REST_PENALTY_EXPLANATION = [
-  "נמדד רק בין משימות ש«צורכות מנוחה» (שמירה, עב״ס, מטבח — לא כרמל).",
-  "העונש מתווסף למשמרת השמירה שבאה אחרי הפער הקצר.",
-  "זה מדד צדק לשיבוץ — לא אילוץ קשיח (אילוץ המנוחה נקבע ב«שעות מנוחה» ביום).",
+  "נמדד רק בין משימות ש«צורכות מנוחה» (שמירה, עב״ס, מטbch — לא כרמל).",
+  "העונש מתווסף לנקודות השמירה של המשמרת שאחרי הפער הקצר.",
+  "זה מדד צדק לשיבוץ — לא אילוץ קשיח.",
+] as const;
+
+export const BASE_WORK_SCORING_EXPLANATION = [
+  "עבודות בסיס — 0.75 נק׳ לשעה (לא טבלה קבועה לחלון).",
+  "כוח עתודה — אותו תעריף עב״ס.",
 ] as const;
 
 export const SQUAD_EXPLANATION = [
   "לכל צוער שדה squad (1–4) — חלוקה ל-4 צוותים.",
-  "מטבח: בכל משמרת (06–10, 10–15, 15–19, 19–22) צוות אחד במנוחה; 35 צוערים במשמרת.",
-  "עב״ס: בכל חלון (08:30, 13:30, 18:30) צוות אחד במנוחה; ~14 צוערים בחלון.",
-  "השיבוץ מעדיף צוות שלם באותו חלון — לא רק איזון נקודות.",
+  "מטbch: בכל משמרת צוות אחד במנוחה.",
 ] as const;
 
 export const MISSION_TO_BUCKET = [
-  { mission: "שמירה (כל העמדות)", scoring: "טבלת רצועות + עונש מנוחה", editable: true },
-  { mission: "קצין תורן", scoring: "טבלת רצועות (סולו) + עונש מנוחה", editable: true },
-  { mission: "כרמל א׳ (כוננות)", scoring: "נק׳/שעה × standby_a", editable: true },
-  { mission: "כרמל ב׳ (כוננות)", scoring: "נק׳/שעה × standby_b", editable: true },
-  { mission: "עבודות בסיס", scoring: "נק׳ קבועות לחלון (08:30 / 13:30 / 18:30)", editable: false },
-  { mission: "כוח עתודה", scoring: "נק׳/שעה × duty", editable: true },
-  { mission: "מטבח", scoring: "נק׳ קבועות למשמרת × kitchen", editable: true },
+  { mission: "שמירה", scoring: "1 נק׳/שעה; לילה 1.25; תצpיתן 0.6", editable: true },
+  { mission: "קצין תורן", scoring: "כמו שמירה + עונש מנוחה", editable: true },
+  { mission: "כרמל א׳", scoring: "0.5 נק׳/שעה", editable: true },
+  { mission: "כרמel ב׳", scoring: "0.3 נק׳/שעה", editable: true },
+  { mission: "עבודות בסיס", scoring: "0.75 נק׳/שעה", editable: true },
+  { mission: "כוח עתודה", scoring: "0.75 נק׳/שעה", editable: true },
+  { mission: "מטbch", scoring: "1 נק׳/שעה", editable: true },
 ] as const;
 
+export const FAIRNESS_POINT_CATEGORIES = [
+  {
+    title: "נקודות שמירה",
+    description: "שמירות + עונש מנוחה בין משימות",
+  },
+  {
+    title: "נקודות תורנות",
+    description: "מטbch, עב״ס, כוננות כרמel",
+  },
+  {
+    title: "נקודות צדק",
+    description: "סה״כ = שמירה + תורנות (לשיבוץ והשוואה)",
+  },
+] as const;
+
+export function hourlyRateRows(rules: FairnessRules) {
+  const rates = resolveHourlyRates(rules);
+  return HOURLY_RATE_ROWS.map((row) => ({
+    ...row,
+    value: rates[row.key],
+  }));
+}
+
 export function baseWorkShiftRows() {
-  return DEFAULT_BASE_WORK_SHIFTS.map((row) => ({
-    timeLabel: `${row.start}–${row.end}`,
-    points: row.points,
+  const rate = DEFAULT_FAIRNESS_HOURLY_RATES.base_work;
+  return [
+    { timeLabel: "08:30–11:30", points: rate * 3 },
+    { timeLabel: "13:30–17:30", points: rate * 4 },
+    { timeLabel: "18:30–20:00", points: rate * 1.5 },
+  ].map((row) => ({
+    ...row,
+    points: Math.round(row.points * 100) / 100,
   }));
 }
 
 export function guardBandRows(rules: FairnessRules) {
   const factor = rules.guard_hours_factor;
   return rules.guard_bands.map((band, i) => ({
-    label: GUARD_TIME_BAND_LABELS[i],
-    help: GUARD_TIME_BAND_HELP[i],
+    label: ["00:00–04:00", "04:00–08:00", "08:00–12:00", "12:00–16:00", "16:00–20:00", "20:00–00:00"][i],
+    help: "מודל ישן — נשמר לתאימות; החישוב הפעיל לפי hourly_rates",
     solo: guardBandScoreForFullBlock(band.solo, factor),
     pair: guardBandScoreForFullBlock(band.paired, factor),
     soloBase: band.solo,
@@ -123,9 +149,6 @@ export function editableBucketLabel(bucket: FairnessBucket): string {
 }
 
 export function editableBucketHelp(bucket: FairnessBucket): string {
-  if (bucket in FAIRNESS_EDITABLE_HELP) {
-    return FAIRNESS_EDITABLE_HELP[bucket as keyof typeof FAIRNESS_EDITABLE_HELP];
-  }
   return FAIRNESS_BUCKET_HELP[bucket];
 }
 
@@ -150,12 +173,18 @@ export function mergeProposedFairnessRules(
           (value, i) => proposedVisible.rest_penalties?.[i] ?? value,
         )
       : [...current.rest_penalties],
+    hourly_rates: proposedVisible.hourly_rates
+      ? {
+          ...current.hourly_rates,
+          ...proposedVisible.hourly_rates,
+        }
+      : { ...current.hourly_rates },
   };
   return merged;
 }
 
 export function visibleProposedRules(rules: FairnessRules): FairnessRules {
-  return { ...DEFAULT_FAIRNESS_RULES, ...rules };
+  return { ...DEFAULT_FAIRNESS_RULES, ...rules, hourly_rates: { ...rules.hourly_rates } };
 }
 
 export function formatFairnessRulesDiff(
@@ -163,6 +192,15 @@ export function formatFairnessRulesDiff(
   proposed: FairnessRules,
 ): string {
   const parts: string[] = [];
+
+  for (const row of HOURLY_RATE_ROWS) {
+    const key = row.key;
+    if (current.hourly_rates[key] !== proposed.hourly_rates[key]) {
+      parts.push(
+        `${row.label}: ${current.hourly_rates[key]}→${proposed.hourly_rates[key]}`,
+      );
+    }
+  }
 
   for (const bucket of EDITABLE_FAIRNESS_BUCKETS) {
     if (current[bucket] !== proposed[bucket]) {
@@ -176,20 +214,9 @@ export function formatFairnessRulesDiff(
 
   if (current.guard_hours_factor !== proposed.guard_hours_factor) {
     parts.push(
-      `מקדם שעות שמירה: ${current.guard_hours_factor}→${proposed.guard_hours_factor}`,
+      `מקדם שעות שמירה (ישן): ${current.guard_hours_factor}→${proposed.guard_hours_factor}`,
     );
   }
-
-  proposed.guard_bands.forEach((band, i) => {
-    const prev = current.guard_bands[i];
-    if (!prev) return;
-    if (band.solo !== prev.solo) {
-      parts.push(`${GUARD_TIME_BAND_LABELS[i]} סולו: ${prev.solo}→${band.solo}`);
-    }
-    if (band.paired !== prev.paired) {
-      parts.push(`${GUARD_TIME_BAND_LABELS[i]} זוג: ${prev.paired}→${band.paired}`);
-    }
-  });
 
   proposed.rest_penalties.forEach((penalty, i) => {
     if (penalty !== current.rest_penalties[i]) {
