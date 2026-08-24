@@ -154,11 +154,19 @@ export function isReserveForceBlock(
   return isReserveForceSlot(block);
 }
 
+/** תורנות מטבch (משימת kitchen) — לא צורכת מנוחת יומית; מותרות משמרות רצופות */
+export function isKitchenMissionSlot(
+  slot: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },
+): boolean {
+  return slot.missionType === "kitchen" && slot.positionKind === "kitchen";
+}
+
 /** האם השיבוץ צורך מנוחה (נפרד מחסימת זמן) */
 export function slotEatsRest(slot: FlatSlot): boolean {
   if (isStandbyKind(slot.positionKind)) return false;
   if (isReserveForceSlot(slot)) return false;
   if (slot.positionKind === "patrol") return false;
+  if (isKitchenMissionSlot(slot)) return false;
   if (
     slot.positionKind === "kitchen" &&
     slot.missionType === "guards" &&

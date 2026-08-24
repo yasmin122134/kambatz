@@ -1138,16 +1138,19 @@ function ReplacementPicker({
   slotId,
   seatIndex,
   currentName,
+  isKitchenSlot,
   onApply,
 }: {
   missionId: string;
   slotId: string;
   seatIndex: number;
   currentName: string;
+  isKitchenSlot?: boolean;
   onApply: (option: ReplacementApplyOption) => Promise<boolean>;
 }) {
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"replace" | "swap">("replace");
+  const [mode, setMode] = useState<"replace" | "swap" | "manual">("replace");
+  const [manualName, setManualName] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [options, setOptions] = useState<
@@ -1165,6 +1168,7 @@ function ReplacementPicker({
     setMode(nextMode);
     setLoading(true);
     setOpen(true);
+    setManualName("");
     const res = await fetch(`/api/missions/${missionId}/replacements`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1211,8 +1215,48 @@ function ReplacementPicker({
             >
               החלפה ראש בראש
             </button>
+            <button
+              type="button"
+              className={`btn-sm ${mode === "manual" ? "on" : ""}`}
+              onClick={() => {
+                setMode("manual");
+                setOpen(true);
+                setOptions([]);
+                setManualName("");
+              }}
+            >
+              בחר מהרשימה
+            </button>
           </div>
-          {loading ? (
+          {isKitchenSlot && mode !== "manual" && (
+            <p className="hint text-xs mb-2">במטבch מותרות משמרות רצופות — מנוחה יומית לא חוסמת.</p>
+          )}
+          {mode === "manual" ? (
+            <div className="space-y-2">
+              <NameCombobox
+                value={manualName}
+                onChange={setManualName}
+                placeholder="שם מהרשימה…"
+                className="w-full"
+              />
+              <button
+                type="button"
+                className="btn-pri btn-sm w-full"
+                disabled={saving || !manualName.trim() || manualName.trim() === currentName}
+                onClick={async () => {
+                  setSaving(true);
+                  const ok = await onApply({
+                    type: "direct",
+                    personName: manualName.trim(),
+                  });
+                  setSaving(false);
+                  if (ok) setOpen(false);
+                }}
+              >
+                {saving ? "שומר…" : "החלף"}
+              </button>
+            </div>
+          ) : loading ? (
             <p className="hint">מחפש…</p>
           ) : options.length === 0 ? (
             <p className="hint">אין מחליף שעומד בכללים</p>
@@ -1362,6 +1406,9 @@ function SlotCard({
                     slotId={slot.slotId}
                     seatIndex={seatIndex}
                     currentName={name}
+                    isKitchenSlot={
+                      slot.missionType === "kitchen" && slot.positionKind === "kitchen"
+                    }
                     onApply={(option) =>
                       onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
                     }

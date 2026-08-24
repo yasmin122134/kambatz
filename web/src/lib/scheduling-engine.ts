@@ -14,6 +14,7 @@ import {
   slotEatsRest,
   flattenMissionSlots,
   isGuardKind,
+  isKitchenMissionSlot,
   isObservationPost,
   isReserveForceBlock,
   isStandbyKind,
@@ -565,6 +566,7 @@ function overlapsSlot(
   for (const b of tracker.busy[personName] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
+    if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
     if (parallelOverlapAllowed(slot, b)) continue;
 
     const blockIv = blockInterval(b);
@@ -2236,6 +2238,14 @@ export function canAssignPersonToSlot(input: {
       n !== input.person.name &&
       n !== currentHolder,
   );
+
+  if (
+    (mission.assignments[input.slot.slotId] || []).some(
+      (n, i) => n === input.person.name && i !== input.seatIndex,
+    )
+  ) {
+    return { ok: false, reason: `${input.person.name}: כבר משובצ/ת במשמרת זו` };
+  }
 
   if (
     !fitsPerson(
