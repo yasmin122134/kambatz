@@ -6,13 +6,13 @@ import { loadApprovedIssues } from "@/lib/issues";
 import { listMissionDays } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { createClient } from "@/lib/supabase/server";
-import { getSessionPerson } from "@/lib/session";
+import { getAuthSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function BoardPage() {
-  const session = await getSessionPerson();
-  if (!session) {
+  const authSession = await getAuthSession();
+  if (!authSession) {
     redirect("/login?next=/board");
   }
 
@@ -32,7 +32,9 @@ export default async function BoardPage() {
   return (
     <AppShell title="רשימה מלאה">
       <BoardClient
-        personName={session.person.name}
+        personName={authSession.person?.name ?? ""}
+        canAssign={authSession.person !== null}
+        viewerEmail={authSession.person ? undefined : authSession.user.email}
         initialMissions={missions}
         isAdmin={admin}
         initialPeople={initialPeople}

@@ -49,7 +49,11 @@ export default async function HomePage() {
         {!user ? (
           <HomeGuest />
         ) : !session ? (
-          <HomeUnknownUser email={user.email || ""} emailsNotReady={!emailReady} />
+          <HomeUnknownUser
+            email={user.email || ""}
+            emailsNotReady={!emailReady}
+            viewerAllowed={emailReady}
+          />
         ) : (
           <section className="card">
             <h2 className="font-display text-2xl mb-1">

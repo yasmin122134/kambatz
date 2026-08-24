@@ -261,6 +261,11 @@ button:hover,
   color: var(--color-accent);
 }
 
+.abas-leader-badge {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
 .schedule-row {
   display: flex;
   flex-wrap: wrap;

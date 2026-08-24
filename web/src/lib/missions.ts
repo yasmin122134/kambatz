@@ -14,6 +14,7 @@ import {
   syncAssignmentSeats,
   upcomingFromMissions,
 } from "@/lib/mission-utils";
+import { ensureBaseWorkLeaders } from "@/lib/base-work-template";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
 export {
@@ -101,24 +102,29 @@ export async function saveMissionDay(
   const supabase = await createClient();
   const positions = payload.positions || [];
   const assignments = syncAssignmentSeats(positions, payload.assignments || {});
+  const withLeaders = ensureBaseWorkLeaders({
+    id: payload.id || "draft",
+    title: payload.title,
+    mission_type: payload.mission_type,
+    mission_date: payload.mission_date,
+    starts_at: payload.starts_at,
+    ends_at: payload.ends_at,
+    status: payload.status,
+    positions,
+    assignments,
+    scheduling_rules: normalizeSchedulingRules(
+      payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
+    ),
+    notes: payload.notes ?? null,
+    created_at: "",
+    updated_at: "",
+  });
+  const scheduling_rules = withLeaders.scheduling_rules;
 
   if (payload.mission_type === "guards") {
     const draft: MissionDay = {
+      ...withLeaders,
       id: payload.id || "draft",
-      title: payload.title,
-      mission_type: payload.mission_type,
-      mission_date: payload.mission_date,
-      starts_at: payload.starts_at,
-      ends_at: payload.ends_at,
-      status: payload.status,
-      positions,
-      assignments,
-      scheduling_rules: normalizeSchedulingRules(
-        payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
-      ),
-      notes: payload.notes ?? null,
-      created_at: "",
-      updated_at: "",
     };
     let peopleByName: Record<string, Person> | undefined;
     let issues: Awaited<ReturnType<typeof loadApprovedIssues>> = [];
@@ -143,10 +149,8 @@ export async function saveMissionDay(
     ends_at: payload.ends_at,
     status: payload.status,
     positions,
-    assignments,
-    scheduling_rules: normalizeSchedulingRules(
-      payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
-    ),
+    assignments: withLeaders.assignments,
+    scheduling_rules,
     notes: payload.notes || null,
     updated_at: new Date().toISOString(),
   };

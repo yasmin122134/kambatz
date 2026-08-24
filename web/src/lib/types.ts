@@ -112,6 +112,8 @@ export interface BaseWorkSchedulingRules {
   seats_per_shift: number;
   /** לכל חלון (0-based): צוות במנוחה */
   squad_rest_by_shift: number[];
+  /** slotId → שם אחראי/ת הקבוצה לחלון עב״ס */
+  slot_leaders?: Record<string, string>;
 }
 
 export interface MissionSchedulingRules {

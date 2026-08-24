@@ -195,8 +195,19 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
       b.squad_rest_by_shift,
       DEFAULT_BASE_WORK_SCHEDULING_RULES.squad_rest_by_shift,
     ),
+    slot_leaders: normalizeBaseWorkSlotLeaders(b.slot_leaders),
   };
   return out;
+}
+
+function normalizeBaseWorkSlotLeaders(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const out: Record<string, string> = {};
+  for (const [slotId, name] of Object.entries(raw as Record<string, unknown>)) {
+    const trimmed = String(name || "").trim();
+    if (slotId && trimmed) out[slotId] = trimmed;
+  }
+  return Object.keys(out).length ? out : undefined;
 }
 
 function normalizeSquadRest(raw: unknown, fallback?: number[]): number[] {

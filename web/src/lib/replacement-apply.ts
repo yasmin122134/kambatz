@@ -3,6 +3,7 @@ import {
   resolveMissionForSlot,
   syncAssignmentSeats,
 } from "@/lib/mission-utils";
+import { withBaseWorkSlotLeader, getBaseWorkSlotLeader } from "@/lib/base-work-template";
 import { saveMissionDay } from "@/lib/missions";
 import {
   canAssignPersonToSlot,
@@ -82,10 +83,13 @@ export async function applyReplacementAssignment(input: {
 
     const seats = seatArray(sourceMission, input.slotId);
     seats[seatIndex] = nextName;
-    const updated = {
+    let updated = {
       ...sourceMission,
       assignments: { ...sourceMission.assignments, [input.slotId]: seats },
     };
+    if (getBaseWorkSlotLeader(sourceMission, input.slotId) === input.removeName) {
+      updated = withBaseWorkSlotLeader(updated, input.slotId, nextName);
+    }
     const { mission: saved } = await saveMissionDay(
       { ...updated, id: sourceMission.id },
       { validateAssignments: false },

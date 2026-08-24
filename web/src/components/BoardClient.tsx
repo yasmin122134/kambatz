@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AddToCalendarLink } from "@/components/AddToCalendarLink";
 import { IssueEditor } from "@/components/IssueEditor";
@@ -23,11 +23,18 @@ import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
+import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import type { FlatSlot } from "@/lib/mission-utils";
+import {
+  kitchenShiftHandoffsFromSlots,
+  type KitchenShiftHandoff,
+} from "@/lib/kitchen-handoffs";
 import type { Person } from "@/lib/types";
 
 type Props = {
   personName: string;
+  canAssign?: boolean;
+  viewerEmail?: string;
   initialMissions: MissionDay[];
   isAdmin: boolean;
   initialPeople?: Person[];
@@ -53,6 +60,8 @@ function peopleByNameFromList(people: Person[]): Record<string, Person> {
 
 export function BoardClient({
   personName,
+  canAssign = true,
+  viewerEmail,
   initialMissions,
   isAdmin,
   initialPeople = [],
@@ -288,6 +297,18 @@ export function BoardClient({
     });
   }
 
+  async function setBaseWorkLeader(
+    missionId: string,
+    slotId: string,
+    leaderName: string,
+  ) {
+    await patchAssignment(missionId, {
+      action: "set_base_work_leader",
+      slot_id: slotId,
+      name: leaderName,
+    });
+  }
+
   async function setIssueStatus(id: string, status: "approved" | "rejected") {
     await fetch("/api/issues", {
       method: "PATCH",
@@ -442,6 +463,21 @@ export function BoardClient({
         <p className={`mb-3 ${msg.includes("שובצו") ? "msg-ok" : "msg-err"}`}>{msg}</p>
       )}
 
+      {!canAssign && (
+        <div className="mb-4 rounded border px-3 py-2 text-sm" style={{ borderColor: "var(--color-line2)", background: "var(--color-accent-bg)" }}>
+          <b>צפייה בלבד</b>
+          {viewerEmail && (
+            <span className="hint mr-2">
+              {" "}
+              ({viewerEmail})
+            </span>
+          )}
+          <span className="hint block text-xs mt-1">
+            אפשר לצפות בשיבוצים — לא ניתן לקחת משמרות או להחליף.
+          </span>
+        </div>
+      )}
+
       {isAdminUser && rosterWarnings.length > 0 && (
         <section className="roster-warnings" role="alert">
           <h3>אזהרות שיבוץ — {formatDate(activeDate)}</h3>
@@ -490,6 +526,7 @@ export function BoardClient({
             <MissionPanel
               mission={guardsMission}
               personName={personName}
+              canAssign={canAssign}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
               dutyOfficerNames={dutyOfficerNames}
@@ -532,6 +569,7 @@ export function BoardClient({
             <MissionPanel
               mission={baseMission}
               personName={personName}
+              canAssign={canAssign}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
               mySlots={mySlots}
@@ -559,6 +597,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
+              onSetBaseWorkLeader={setBaseWorkLeader}
               onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
@@ -573,6 +612,7 @@ export function BoardClient({
             <MissionPanel
               mission={kitchenMission}
               personName={personName}
+              canAssign={canAssign}
               isAdmin={isAdminUser}
               fairnessRules={publishedRules}
               mySlots={mySlots}
@@ -778,6 +818,7 @@ function GuardTimeline({
   slots,
   boardStartMin,
   personName,
+  canAssign,
   isAdmin,
   fairnessRules,
   dutyOfficerNames,
@@ -796,6 +837,7 @@ function GuardTimeline({
   slots: FlatSlot[];
   boardStartMin: number;
   personName: string;
+  canAssign: boolean;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
@@ -863,6 +905,7 @@ function GuardTimeline({
                         missionId={mission.id}
                         slot={slot}
                         personName={personName}
+                        canAssign={canAssign}
                         isAdmin={isAdmin}
                         fairnessRules={fairnessRules}
                         dutyOfficerNames={dutyOfficerNames}
@@ -893,6 +936,7 @@ function GuardTimeline({
 function MissionPanel({
   mission,
   personName,
+  canAssign,
   isAdmin,
   fairnessRules,
   dutyOfficerNames,
@@ -904,11 +948,13 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
+  onSetBaseWorkLeader,
   onApplyReplacement,
   onCancelSwap,
 }: {
   mission: MissionDay;
   personName: string;
+  canAssign: boolean;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
@@ -920,6 +966,7 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onSetBaseWorkLeader?: (missionId: string, slotId: string, leaderName: string) => void;
   onApplyReplacement: (
     missionId: string,
     slotId: string,
@@ -932,6 +979,40 @@ function MissionPanel({
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
 
+  if (mission.mission_type === "kitchen") {
+    const handoffs = kitchenShiftHandoffsFromSlots(slots);
+    return (
+      <div className="space-y-3 max-w-xl">
+        {slots.map((slot, index) => (
+          <Fragment key={slot.slotId}>
+            <SlotCard
+              mission={mission}
+              missionId={mission.id}
+              slot={slot}
+              personName={personName}
+              canAssign={canAssign}
+              isAdmin={isAdmin}
+              fairnessRules={fairnessRules}
+              swapTarget={swapTarget}
+              swapMode={swapMode}
+              mySlotIds={new Set(mySlots.map((s) => s.slotId))}
+              onStartSwap={onStartSwap}
+              onSwapMode={onSwapMode}
+              onTake={onTake}
+              onSwap={onSwap}
+              onAdminSet={onAdminSet}
+              onApplyReplacement={onApplyReplacement}
+              onCancelSwap={onCancelSwap}
+            />
+            {index < handoffs.length && (
+              <KitchenHandoffBar handoff={handoffs[index]} personName={personName} />
+            )}
+          </Fragment>
+        ))}
+      </div>
+    );
+  }
+
   if (mission.mission_type === "guards") {
     return (
       <GuardTimeline
@@ -939,6 +1020,7 @@ function MissionPanel({
         slots={slots}
         boardStartMin={boardStartMin}
         personName={personName}
+        canAssign={canAssign}
         isAdmin={isAdmin}
         fairnessRules={fairnessRules}
         dutyOfficerNames={dutyOfficerNames}
@@ -965,6 +1047,7 @@ function MissionPanel({
             missionId={mission.id}
             slot={slot}
             personName={personName}
+            canAssign={canAssign}
             isAdmin={isAdmin}
             fairnessRules={fairnessRules}
             swapTarget={swapTarget}
@@ -975,10 +1058,76 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
+            onSetBaseWorkLeader={onSetBaseWorkLeader}
             onApplyReplacement={onApplyReplacement}
             onCancelSwap={onCancelSwap}
           />
         ))}
+    </div>
+  );
+}
+
+function KitchenHandoffBar({
+  handoff,
+  personName,
+}: {
+  handoff: KitchenShiftHandoff;
+  personName: string;
+}) {
+  const { boundaryTime, leaving, entering, stayingCount } = handoff;
+  const noChange = leaving.length === 0 && entering.length === 0;
+
+  function nameChip(name: string, kind: "leave" | "enter") {
+    const mine = name === personName;
+    return (
+      <span
+        key={name}
+        className={`inline-block rounded px-1.5 py-0.5 text-xs ${
+          kind === "leave" ? "bg-red-50 text-red-900" : "bg-green-50 text-green-900"
+        } ${mine ? "font-semibold ring-1 ring-[var(--color-accent)]" : ""}`}
+      >
+        {name}
+      </span>
+    );
+  }
+
+  return (
+    <div
+      className="rounded border border-dashed px-3 py-2 text-sm"
+      style={{ borderColor: "var(--color-line2)", background: "var(--color-accent-bg)" }}
+    >
+      <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="text-xs font-medium">חילוף {boundaryTime.slice(0, 5)}</span>
+        <span className="hint text-xs">
+          {handoff.fromTimeLabel} → {handoff.toTimeLabel}
+        </span>
+      </div>
+      {noChange ? (
+        <p className="hint text-xs">אין שינוי בצוות ({stayingCount} נשארים)</p>
+      ) : (
+        <div className="space-y-1.5">
+          <div>
+            <span className="hint text-xs">יוצאים ({leaving.length})</span>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {leaving.length > 0 ? (
+                leaving.map((name) => nameChip(name, "leave"))
+              ) : (
+                <span className="hint text-xs">—</span>
+              )}
+            </div>
+          </div>
+          <div>
+            <span className="hint text-xs">נכנסים ({entering.length})</span>
+            <div className="mt-0.5 flex flex-wrap gap-1">
+              {entering.length > 0 ? (
+                entering.map((name) => nameChip(name, "enter"))
+              ) : (
+                <span className="hint text-xs">—</span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1112,6 +1261,7 @@ function SlotCard({
   missionId,
   slot,
   personName,
+  canAssign,
   isAdmin,
   fairnessRules,
   dutyOfficerNames,
@@ -1124,6 +1274,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
+  onSetBaseWorkLeader,
   onApplyReplacement,
   onCancelSwap,
 }: {
@@ -1131,6 +1282,7 @@ function SlotCard({
   missionId: string;
   slot: FlatSlot;
   personName: string;
+  canAssign: boolean;
   isAdmin: boolean;
   fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
@@ -1143,6 +1295,7 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onSetBaseWorkLeader?: (missionId: string, slotId: string, leaderName: string) => void;
   onApplyReplacement: (
     missionId: string,
     slotId: string,
@@ -1152,12 +1305,14 @@ function SlotCard({
   ) => Promise<boolean>;
   onCancelSwap: () => void;
 }) {
-  const isMine = slot.assignees.includes(personName);
+  const isMine = canAssign && slot.assignees.includes(personName);
   const calendarEvent = isMine ? calendarEventFromFlatSlot(mission, slot) : null;
   const isSwapPicking =
     swapTarget &&
     swapMode === "swap" &&
     swapTarget.slotId !== slot.slotId;
+  const isBaseWork = isBaseWorkFlatSlot(slot);
+  const slotLeaderName = isBaseWork ? getBaseWorkSlotLeader(mission, slot.slotId) : null;
 
   const assigneeList = (
     <ul className={variant === "timeline" ? "space-y-0.5" : "mt-2 space-y-1"}>
@@ -1165,6 +1320,7 @@ function SlotCard({
         const name = slot.assignees[seatIndex] || "";
         const isEmpty = !name;
         const isMySeat = name === personName;
+        const isLeader = Boolean(name && slotLeaderName === name);
 
         return (
           <li key={seatIndex} className="flex flex-wrap items-center gap-1 text-sm">
@@ -1181,6 +1337,16 @@ function SlotCard({
                   }
                   className="flex-1 min-w-[100px]"
                 />
+                {name && isBaseWork && onSetBaseWorkLeader && !isLeader && (
+                  <button
+                    type="button"
+                    className="btn-sm"
+                    title="סמן כאחראי/ת קבוצת עב״ס"
+                    onClick={() => onSetBaseWorkLeader(missionId, slot.slotId, name)}
+                  >
+                    ☆ אחראי/ת
+                  </button>
+                )}
                 {name && (
                   <ReplacementPicker
                     missionId={missionId}
@@ -1196,9 +1362,12 @@ function SlotCard({
             ) : (
               <span className={isMySeat ? "schedule-you font-semibold" : ""}>
                 {name || "— פנוי —"}
+                {isLeader && (
+                  <span className="abas-leader-badge mr-1">★ אחראי/ת קבוצה</span>
+                )}
               </span>
             )}
-            {!isAdmin && (isEmpty || isMySeat) && (
+            {!isAdmin && canAssign && (isEmpty || isMySeat) && (
               <SwapButtons
                 slotId={slot.slotId}
                 seatIndex={seatIndex}
@@ -1259,6 +1428,12 @@ function SlotCard({
       )}
       {missionId && slot.positionName && (
         <div className="text-xs text-ink2">{slot.positionName}</div>
+      )}
+      {isBaseWork && slotLeaderName && (
+        <div className="text-xs text-ink2 mt-0.5">
+          אחראי/ת קבוצה:{" "}
+          <span className="abas-leader-badge">{slotLeaderName}</span>
+        </div>
       )}
       {assigneeList}
     </div>

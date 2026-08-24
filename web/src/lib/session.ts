@@ -54,13 +54,25 @@ export async function getSessionPerson(): Promise<{
   user: { id: string; email: string };
   person: Person;
 } | null> {
+  const auth = await getAuthSession();
+  if (!auth?.person) return null;
+  return { user: auth.user, person: auth.person };
+}
+
+/** Logged-in user, with optional roster match (viewers have person === null). */
+export async function getAuthSession(): Promise<{
+  user: { id: string; email: string };
+  person: Person | null;
+} | null> {
   const user = await getAuthUser();
   if (!user?.email) return null;
 
   const person = await getPersonByEmail(user.email);
-  if (!person) return null;
-
   return { user: { id: user.id, email: user.email }, person };
+}
+
+export function canSelfAssign(person: Person | null | undefined): boolean {
+  return person != null;
 }
 
 export const EDITABLE_PERSONAL_KEYS = [

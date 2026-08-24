@@ -13,12 +13,19 @@ export function AppShell({ children, title }: Props) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [onRoster, setOnRoster] = useState<boolean | null>(null);
 
   useEffect(() => {
-    fetch("/api/admin/me")
+    fetch("/api/me/role")
       .then((r) => r.json())
-      .then((d) => setIsAdmin(!!d.admin))
-      .catch(() => setIsAdmin(false));
+      .then((d) => {
+        setIsAdmin(!!d.admin);
+        setOnRoster(d.authenticated ? !!d.onRoster : null);
+      })
+      .catch(() => {
+        setIsAdmin(false);
+        setOnRoster(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -29,8 +36,12 @@ export function AppShell({ children, title }: Props) {
     { href: "/", label: "דף הבית" },
     { href: "/board", label: "רשימה מלאה" },
     { href: "/fairness", label: "טבלת צדק" },
-    { href: "/profile", label: "פרופיל" },
-    { href: "/report", label: "אילוצים" },
+    ...(onRoster !== false
+      ? [
+          { href: "/profile", label: "פרופיל" },
+          { href: "/report", label: "אילוצים" },
+        ]
+      : []),
     ...(isAdmin ? [{ href: "/admin", label: "דף מנהל" }] : []),
   ];
 

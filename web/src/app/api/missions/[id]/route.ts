@@ -31,8 +31,12 @@ import {
   resolveMissionForSlot,
 } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
-import { getSessionPerson } from "@/lib/session";
+import { getAuthSession } from "@/lib/session";
 import type { Person } from "@/lib/types";
+import {
+  isBaseWorkFlatSlot,
+  withBaseWorkSlotLeader,
+} from "@/lib/base-work-template";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -193,8 +197,8 @@ export async function DELETE(_request: Request, { params }: Params) {
 
 export async function PATCH(request: Request, { params }: Params) {
   const { id } = await params;
-  const session = await getSessionPerson();
-  if (!session) {
+  const authSession = await getAuthSession();
+  if (!authSession) {
     return NextResponse.json({ error: "לא מחובר" }, { status: 401 });
   }
 
@@ -208,7 +212,14 @@ export async function PATCH(request: Request, { params }: Params) {
     body;
 
   const admin = await isAdmin();
-  const personName = session.person.name;
+  if ((action === "take" || action === "swap") && !authSession.person) {
+    return NextResponse.json(
+      { error: "צפייה בלבד — אין הרשאת שיבוץ" },
+      { status: 403 },
+    );
+  }
+
+  const personName = authSession.person?.name ?? "";
   const peopleByName = await peopleByNameMap();
   const issues = await loadApprovedIssues();
   const [allMissions, rules] = await Promise.all([
@@ -223,7 +234,7 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (action === "take") {
     const slot = slotById(hostMission, slot_id);
-    const err = assertCanAssign(session.person, slot, personName, issues);
+    const err = assertCanAssign(authSession.person ?? undefined, slot, personName, issues);
     if (err) {
       return NextResponse.json({ error: err }, { status: 400 });
     }
@@ -338,6 +349,22 @@ export async function PATCH(request: Request, { params }: Params) {
       ...hostMission,
       assignments: { ...hostMission.assignments, [slot_id]: seats },
     };
+  } else if (action === "set_base_work_leader" && admin) {
+    const slot = slotById(hostMission, slot_id);
+    if (!slot || !isBaseWorkFlatSlot(slot)) {
+      return NextResponse.json({ error: "משמרת עב״ס לא נמצאה" }, { status: 400 });
+    }
+    const leaderName = String(name || "").trim();
+    if (leaderName) {
+      const seats = (hostMission.assignments[slot_id] || []).filter(Boolean);
+      if (!seats.includes(leaderName)) {
+        return NextResponse.json(
+          { error: `${leaderName}: חייב/ת להיות משובצ/ת בחלון עב״ס` },
+          { status: 400 },
+        );
+      }
+    }
+    updated = withBaseWorkSlotLeader(hostMission, slot_id, leaderName || null);
   } else {
     return NextResponse.json({ error: "פעולה לא תקינה" }, { status: 400 });
   }

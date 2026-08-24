@@ -1,5 +1,7 @@
-import type { MissionPosition, MissionSlot } from "@/lib/types";
+import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
 import { DEFAULT_BASE_WORK_SCHEDULING_RULES } from "@/lib/types";
+import type { FlatSlot } from "@/lib/mission-utils";
+import { normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   localMissionMidnightMs,
   materializeSlotAbsoluteBounds,
@@ -136,4 +138,86 @@ export function defaultBaseWorkPositions(options?: { seatsPerShift?: number }): 
       slots,
     },
   ];
+}
+
+export function isBaseWorkFlatSlot(
+  slot: Pick<FlatSlot, "missionType" | "baseWorkShiftIndex" | "positionName">,
+): boolean {
+  if (slot.missionType === "base_work") return true;
+  if (slot.baseWorkShiftIndex !== undefined) return true;
+  return isBaseWorkPositionName(slot.positionName);
+}
+
+export function getBaseWorkSlotLeader(mission: MissionDay, slotId: string): string | null {
+  const leader = mission.scheduling_rules.base_work?.slot_leaders?.[slotId]?.trim();
+  if (!leader) return null;
+  const seats = mission.assignments[slotId] || [];
+  return seats.includes(leader) ? leader : null;
+}
+
+export function withBaseWorkSlotLeader(
+  mission: MissionDay,
+  slotId: string,
+  leaderName: string | null,
+): MissionDay {
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const slotLeaders = { ...(rules.base_work?.slot_leaders ?? {}) };
+  const trimmed = leaderName?.trim() || "";
+  if (trimmed) slotLeaders[slotId] = trimmed;
+  else delete slotLeaders[slotId];
+
+  const nextLeaders = Object.keys(slotLeaders).length ? slotLeaders : undefined;
+  return {
+    ...mission,
+    scheduling_rules: {
+      ...rules,
+      base_work: {
+        ...rules.base_work!,
+        slot_leaders: nextLeaders,
+      },
+    },
+  };
+}
+
+/** מסיר אחראים שלא משובצים; ממלא אחראי ראשון אם חסר בחלון עם צוות. */
+export function ensureBaseWorkLeaders(mission: MissionDay): MissionDay {
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const slotLeaders = { ...(rules.base_work?.slot_leaders ?? {}) };
+  let changed = false;
+
+  for (const pos of mission.positions || []) {
+    if (!isBaseWorkPosition(pos)) continue;
+    for (const slot of pos.slots || []) {
+      const seats = (mission.assignments[slot.id] || []).filter(Boolean);
+      const current = slotLeaders[slot.id];
+      if (current && !seats.includes(current)) {
+        delete slotLeaders[slot.id];
+        changed = true;
+      }
+      if (seats.length && !slotLeaders[slot.id]) {
+        slotLeaders[slot.id] = seats[0];
+        changed = true;
+      }
+      if (!seats.length && slotLeaders[slot.id]) {
+        delete slotLeaders[slot.id];
+        changed = true;
+      }
+    }
+  }
+
+  if (!changed && Object.keys(slotLeaders).length === Object.keys(rules.base_work?.slot_leaders ?? {}).length) {
+    return mission;
+  }
+
+  const nextLeaders = Object.keys(slotLeaders).length ? slotLeaders : undefined;
+  return {
+    ...mission,
+    scheduling_rules: {
+      ...rules,
+      base_work: {
+        ...rules.base_work!,
+        slot_leaders: nextLeaders,
+      },
+    },
+  };
 }
