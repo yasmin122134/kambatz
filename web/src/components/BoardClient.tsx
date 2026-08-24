@@ -1075,7 +1075,7 @@ function KitchenHandoffBar({
   handoff: KitchenShiftHandoff;
   personName: string;
 }) {
-  const { boundaryTime, leaving, entering, stayingCount } = handoff;
+  const { boundaryTime, leaving, entering, stayingCount, fromAssignedCount, toAssignedCount, fromSeatCapacity, toSeatCapacity } = handoff;
   const noChange = leaving.length === 0 && entering.length === 0;
 
   function nameChip(name: string, kind: "leave" | "enter") {
@@ -1100,9 +1100,20 @@ function KitchenHandoffBar({
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="text-xs font-medium">חילוף {boundaryTime.slice(0, 5)}</span>
         <span className="hint text-xs">
-          {handoff.fromTimeLabel} → {handoff.toTimeLabel}
+          {handoff.fromTimeLabel} ({fromAssignedCount}/{fromSeatCapacity}) → {handoff.toTimeLabel} ({toAssignedCount}/{toSeatCapacity})
         </span>
       </div>
+      {!noChange && (
+        <p className="hint text-xs mb-1.5">
+          {stayingCount} נשארים · {leaving.length} יוצאים · {entering.length} נכנסים
+          {fromAssignedCount < fromSeatCapacity && (
+            <span> · חסרים {fromSeatCapacity - fromAssignedCount} במשמרת הקודמת</span>
+          )}
+          {toAssignedCount < toSeatCapacity && (
+            <span> · חסרים {toSeatCapacity - toAssignedCount} במשמרת הבאה</span>
+          )}
+        </p>
+      )}
       {noChange ? (
         <p className="hint text-xs">אין שינוי בצוות ({stayingCount} נשארים)</p>
       ) : (

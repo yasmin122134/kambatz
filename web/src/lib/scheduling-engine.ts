@@ -29,6 +29,10 @@ import {
   isBaseWorkShiftSlot,
 } from "@/lib/base-work-template";
 import { isHamagshiyotPositionName } from "@/lib/hamagshiyot-template";
+import {
+  hasExplicitKitchenOutLists,
+  resolveKitchenOutNames,
+} from "@/lib/kitchen-out-lists";
 import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
@@ -1812,6 +1816,8 @@ export function assignKitchenShift(input: {
   const kitchen = input.scheduling.kitchen;
   const restList = kitchen?.squad_rest_by_shift || [1, 2, 3, 4];
   const restSquad = restList[input.shiftIndex % restList.length] ?? (input.shiftIndex % 4) + 1;
+  const outNames = resolveKitchenOutNames(kitchen, input.shiftIndex, input.people);
+  const explicitOutLists = hasExplicitKitchenOutLists(kitchen);
 
   const sortedPeople = [...input.people].sort((a, b) =>
     a.name.localeCompare(b.name, "he"),
@@ -1829,6 +1835,7 @@ export function assignKitchenShift(input: {
 
   const canPick = (p: Person) => {
     if (assigned.includes(p.name)) return false;
+    if (outNames.has(p.name)) return false;
     if (
       kitchenShiftsOnMission(p.name, input.tracker, input.missionId) >=
       MAX_KITCHEN_SHIFTS_PER_DAY
@@ -1886,32 +1893,31 @@ export function assignKitchenShift(input: {
   };
 
   const groups = groupPeopleBySquad(sortedPeople, squadOf);
-  const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
-  const activeSizes = activeSquads.map((s) => groups[s].filter(canPick).length);
-  const targets = apportionSeats(Math.max(0, input.need - input.taken.length), activeSizes);
 
-  for (let i = 0; i < activeSquads.length; i++) {
-    pickFromPool(groups[activeSquads[i]], targets[i]);
-  }
-
-  let usedRestSquad = false;
-  if (assigned.length < targetTotal) {
-    const restLeft = targetTotal - assigned.length;
-    const restPool = groups[restSquad].filter(canPick);
-    if (restPool.length) usedRestSquad = true;
-    pickFromPool(restPool, restLeft);
-  }
-
-  if (assigned.length < targetTotal) {
-    pickFromPool(
-      sortedPeople.filter((p) => squadOf(p) !== restSquad),
-      targetTotal - assigned.length,
-    );
-  }
-
-  if (assigned.length < targetTotal) {
+  if (explicitOutLists) {
     pickFromPool(sortedPeople, targetTotal - assigned.length);
+  } else {
+    const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
+    const activeSizes = activeSquads.map((s) => groups[s].filter(canPick).length);
+    const targets = apportionSeats(Math.max(0, input.need - input.taken.length), activeSizes);
+
+    for (let i = 0; i < activeSquads.length; i++) {
+      pickFromPool(groups[activeSquads[i]], targets[i]);
+    }
+
+    if (assigned.length < targetTotal) {
+      pickFromPool(
+        sortedPeople.filter((p) => squadOf(p) !== restSquad),
+        targetTotal - assigned.length,
+      );
+    }
+
+    if (assigned.length < targetTotal) {
+      pickFromPool(sortedPeople.filter((p) => !outNames.has(p.name)), targetTotal - assigned.length);
+    }
   }
+
+  const usedRestSquad = false;
 
   const names = assigned.slice(input.taken.length);
   return { names, usedRestSquad, squadCounts };
@@ -2396,6 +2402,10 @@ export function canSwapReplacementAssignments(input: {
   return { ok: true };
 }
 
+export function replacementBurdenLabel(bucket: FairnessBurdenBucket): string {
+  return bucket === "kitchen" ? "עומס מטbch" : "עומס תורנות";
+}
+
 export function findReplacements(input: {
   missions: MissionDay[];
   people: Person[];
@@ -2433,6 +2443,9 @@ export function findReplacements(input: {
     (n, i) => n && i !== input.seatIndex,
   );
 
+  const burdenBucket = fairnessBurdenBucketForSlot(target);
+  const burdenLabel = replacementBurdenLabel(burdenBucket);
+
   const options: ReplacementOption[] = [];
 
   if (input.mode === "replace") {
@@ -2444,12 +2457,19 @@ export function findReplacements(input: {
       ) {
         continue;
       }
-      const cost = workScore(p, tracker, input.rules, meanPrior);
+      const cost = workScore(
+        p,
+        tracker,
+        input.rules,
+        meanPrior,
+        scheduling,
+        burdenBucket,
+      );
       options.push({
         type: "direct",
         personName: p.name,
         cost,
-        label: `${p.name} — עומס נמוך (${cost.toFixed(1)} נק׳)`,
+        label: `${p.name} — ${burdenLabel} (${cost.toFixed(1)} נק׳)`,
       });
     }
     options.sort((a, b) => a.cost - b.cost);
@@ -2509,7 +2529,14 @@ export function findReplacements(input: {
         const cost =
           durDiff +
           kindPenalty +
-          workScore(swapPerson, perRemove, input.rules, meanPrior) / 100;
+          workScore(
+            swapPerson,
+            perRemove,
+            input.rules,
+            meanPrior,
+            scheduling,
+            burdenBucket,
+          ) / 100;
 
         options.push({
           type: "swap",

@@ -14,18 +14,31 @@ export type KitchenShiftHandoff = {
   leaving: string[];
   entering: string[];
   stayingCount: number;
+  fromAssignedCount: number;
+  toAssignedCount: number;
+  fromSeatCapacity: number;
+  toSeatCapacity: number;
 };
 
 function compareNames(a: string, b: string): number {
   return a.localeCompare(b, "he");
 }
 
-function assigneeSet(slot: FlatSlot): Set<string> {
-  return new Set(slot.assignees.map((n) => n.trim()).filter(Boolean));
+function shiftWindowKey(slot: FlatSlot): string {
+  return `${slot.startTime}-${slot.endTime}`;
 }
 
-/** Compare assignees between consecutive kitchen shifts (sorted by time). */
-export function kitchenShiftHandoffsFromSlots(slots: FlatSlot[]): KitchenShiftHandoff[] {
+type ShiftRoster = {
+  shiftIndex: number;
+  sortKey: number;
+  boundaryTime: string;
+  timeLabel: string;
+  assignees: Set<string>;
+  seatCapacity: number;
+};
+
+/** One roster per shift window (merges multiple kitchen slots at the same hours). */
+export function kitchenShiftRostersFromSlots(slots: FlatSlot[]): ShiftRoster[] {
   const kitchenSlots = slots
     .filter((s) => s.kitchenShiftIndex != null)
     .slice()
@@ -35,25 +48,60 @@ export function kitchenShiftHandoffsFromSlots(slots: FlatSlot[]): KitchenShiftHa
         (a.kitchenShiftIndex ?? 0) - (b.kitchenShiftIndex ?? 0),
     );
 
+  const byWindow = new Map<string, ShiftRoster>();
+  for (const slot of kitchenSlots) {
+    const key = shiftWindowKey(slot);
+    let row = byWindow.get(key);
+    if (!row) {
+      row = {
+        shiftIndex: slot.kitchenShiftIndex ?? 0,
+        sortKey: slot.sortKey,
+        boundaryTime: slot.endTime,
+        timeLabel: slot.timeLabel,
+        assignees: new Set<string>(),
+        seatCapacity: 0,
+      };
+      byWindow.set(key, row);
+    }
+    row.seatCapacity += slot.seatCount;
+    row.sortKey = Math.min(row.sortKey, slot.sortKey);
+    row.shiftIndex = Math.min(row.shiftIndex, slot.kitchenShiftIndex ?? row.shiftIndex);
+    for (const name of slot.assignees) {
+      const trimmed = name.trim();
+      if (trimmed) row.assignees.add(trimmed);
+    }
+  }
+
+  return [...byWindow.values()].sort(
+    (a, b) => a.sortKey - b.sortKey || a.shiftIndex - b.shiftIndex,
+  );
+}
+
+/** Compare assignees between consecutive kitchen shifts (sorted by time). */
+export function kitchenShiftHandoffsFromSlots(slots: FlatSlot[]): KitchenShiftHandoff[] {
+  const rosters = kitchenShiftRostersFromSlots(slots);
   const handoffs: KitchenShiftHandoff[] = [];
-  for (let i = 0; i < kitchenSlots.length - 1; i++) {
-    const from = kitchenSlots[i];
-    const to = kitchenSlots[i + 1];
-    const fromSet = assigneeSet(from);
-    const toSet = assigneeSet(to);
-    const leaving = [...fromSet].filter((n) => !toSet.has(n)).sort(compareNames);
-    const entering = [...toSet].filter((n) => !fromSet.has(n)).sort(compareNames);
-    const stayingCount = [...fromSet].filter((n) => toSet.has(n)).length;
+
+  for (let i = 0; i < rosters.length - 1; i++) {
+    const from = rosters[i];
+    const to = rosters[i + 1];
+    const leaving = [...from.assignees].filter((n) => !to.assignees.has(n)).sort(compareNames);
+    const entering = [...to.assignees].filter((n) => !from.assignees.has(n)).sort(compareNames);
+    const stayingCount = [...from.assignees].filter((n) => to.assignees.has(n)).length;
 
     handoffs.push({
-      fromShiftIndex: from.kitchenShiftIndex!,
-      toShiftIndex: to.kitchenShiftIndex!,
-      boundaryTime: from.endTime,
+      fromShiftIndex: from.shiftIndex,
+      toShiftIndex: to.shiftIndex,
+      boundaryTime: from.boundaryTime,
       fromTimeLabel: from.timeLabel,
       toTimeLabel: to.timeLabel,
       leaving,
       entering,
       stayingCount,
+      fromAssignedCount: from.assignees.size,
+      toAssignedCount: to.assignees.size,
+      fromSeatCapacity: from.seatCapacity,
+      toSeatCapacity: to.seatCapacity,
     });
   }
   return handoffs;

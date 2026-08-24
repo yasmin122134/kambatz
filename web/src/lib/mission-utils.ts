@@ -29,6 +29,7 @@ import {
   isHamagshiyotPositionName,
   isHamagshiyotShiftSlot,
 } from "@/lib/hamagshiyot-template";
+import { normalizeKitchenOutNamesByShift } from "@/lib/kitchen-out-lists";
 import {
   isPatrolPosition,
   isPatrolShiftSlot,
@@ -215,6 +216,7 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
       Math.min(60, +k.seats_per_shift! || DEFAULT_KITCHEN_SCHEDULING_RULES.seats_per_shift),
     ),
     squad_rest_by_shift: normalizeSquadRest(k.squad_rest_by_shift),
+    out_names_by_shift: normalizeKitchenOutNamesByShift(k.out_names_by_shift),
   };
   const b: Partial<BaseWorkSchedulingRules> = src.base_work ?? {};
   out.base_work = {

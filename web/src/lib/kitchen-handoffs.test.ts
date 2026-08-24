@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
-import { kitchenShiftHandoffs, kitchenShiftHandoffsFromSlots } from "@/lib/kitchen-handoffs";
+import { kitchenShiftHandoffs, kitchenShiftHandoffsFromSlots, kitchenShiftRostersFromSlots } from "@/lib/kitchen-handoffs";
 import { emptyAssignments, flattenMissionSlots } from "@/lib/mission-utils";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -49,6 +49,37 @@ describe("kitchenShiftHandoffs", () => {
 
     expect(handoffs[1].leaving).toEqual(["Bob"]);
     expect(handoffs[1].entering).toEqual(["Frank"]);
+  });
+
+  it("merges multiple kitchen slots in the same shift window", () => {
+    const positions = defaultKitchenDayPositions({ seatsPerShift: 2 });
+    const [pos] = positions;
+    const extra = {
+      id: crypto.randomUUID(),
+      name: "משמרות מטבch נוסף",
+      kind: "kitchen" as const,
+      slots: pos.slots.map((s) => ({
+        ...s,
+        id: crypto.randomUUID(),
+        start_time: s.start_time,
+        end_time: s.end_time,
+        seat_count: 2,
+      })),
+    };
+    const mission = kitchenMission([["A", "B"], ["B", "C"], ["C", "D"], ["D", "E"]]);
+    mission.positions = [pos, extra];
+    const slot0a = pos.slots[0].id;
+    const slot0b = extra.slots[0].id;
+    mission.assignments[slot0a] = ["A", "B"];
+    mission.assignments[slot0b] = ["C", "D"];
+    mission.assignments[pos.slots[1].id] = ["B", "C", "E", "F"];
+
+    const rosters = kitchenShiftRostersFromSlots(flattenMissionSlots(mission, 0));
+    expect(rosters[0].assignees.size).toBe(4);
+    expect(rosters[0].seatCapacity).toBe(4);
+
+    const handoffs = kitchenShiftHandoffs(mission);
+    expect(handoffs[0].fromAssignedCount).toBe(4);
   });
 
   it("reports no change when roster is identical", () => {

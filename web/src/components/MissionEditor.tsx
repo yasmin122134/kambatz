@@ -31,6 +31,7 @@ import {
   summarizeGuardSlots,
 } from "@/lib/mission-templates";
 import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-utils";
+import { KitchenOutListsEditor } from "@/components/KitchenOutListsEditor";
 
 function uid() {
   return crypto.randomUUID();
@@ -731,9 +732,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                   type="number"
                   min={1}
                   max={60}
-                  value={schedulingRules.kitchen?.seats_per_shift ?? 35}
+                  value={schedulingRules.kitchen?.seats_per_shift ?? 40}
                   onChange={(e) => {
-                    const seats = Math.max(1, +e.target.value || 35);
+                    const seats = Math.max(1, +e.target.value || 40);
                     setSchedulingRules((r) => ({
                       ...r,
                       kitchen: {
@@ -778,8 +779,19 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 </div>
               ))}
             </div>
+            <KitchenOutListsEditor
+              kitchen={
+                schedulingRules.kitchen ?? DEFAULT_KITCHEN_SCHEDULING_RULES
+              }
+              onChange={(kitchen) => {
+                setSchedulingRules((r) => ({ ...r, kitchen }));
+              }}
+              shiftLabels={positions[0]?.slots?.map(
+                (s) => `${s.start_time}–${s.end_time}`,
+              )}
+            />
             <p className="hint text-xs">
-              35 צוערים בכל משמרת. בכל משמרת צוות אחד במנוחה — אותו אדם יכול במספר משמרות.
+              40 צוערים בכל משמרת (52 בדוק פחות פטורים ≈ 11 במנוחה). בכל משמרת צוות אחד במנוחה.
               נקודות צדק קבועות למשמרת (לא לפי שעות).
             </p>
             <button
@@ -794,7 +806,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                 );
               }}
             >
-              טען משמרות מטבח (4×35)
+              טען משמרות מטבח (4×40)
             </button>
           </>
         )}
@@ -941,7 +953,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             {slotSummary && <p className="hint text-xs">{slotSummary}</p>}
             {missionType === "kitchen" && (
               <p className="hint text-xs">
-                ערוך שעות ומספר מקומות לכל משמרת (ברירת מחדל 35).
+                ערוך שעות ומספר מקומות לכל משמרת (ברירת מחדל 40).
               </p>
             )}
 

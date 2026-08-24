@@ -106,6 +106,8 @@ export interface KitchenSchedulingRules {
   seats_per_shift: number;
   /** לכל משמרת (0-based): מספר הצוות (1–4) שבמנוחה (עדיפות, לא חובה אם חסר כוח) */
   squad_rest_by_shift: number[];
+  /** לכל משמרת (0-based): שמות שחייבים להיות בחוץ (עוקף צוות מנוחה כשמוגדר) */
+  out_names_by_shift?: string[][];
 }
 
 export interface BaseWorkSchedulingRules {
@@ -135,7 +137,7 @@ export interface MissionSchedulingRules {
 
 export const DEFAULT_KITCHEN_SCHEDULING_RULES: KitchenSchedulingRules = {
   points_per_shift: true,
-  seats_per_shift: 35,
+  seats_per_shift: 40,
   squad_rest_by_shift: [1, 2, 3, 4],
 };
 

@@ -19,7 +19,7 @@ export const DEFAULT_KITCHEN_SHIFTS: KitchenShiftDef[] = [
 ];
 
 /**
- * תורנות מטבח — 35 צוערים בכל משמרת, 4 משמרות ביום (06–22).
+ * תורנות מטבח — 40 צוערים בכל משמרת, 4 משמרות ביום (06–22).
  * שיבוץ לפי 4 צוותים: בכל משמרת צוות אחד במנוחה.
  */
 export function defaultKitchenDayPositions(options?: {

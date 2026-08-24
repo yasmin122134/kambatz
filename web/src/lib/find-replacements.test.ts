@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { flattenMissionSlots } from "@/lib/mission-utils";
+import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
+import { emptyAssignments } from "@/lib/mission-utils";
 import {
   canAssignPersonToSlot,
   canSwapReplacementAssignments,
@@ -178,5 +180,50 @@ describe("findReplacements", () => {
         peopleByName: Object.fromEntries(people.map((p) => [p.name, p])),
       }).ok,
     ).toBe(true);
+  });
+
+  it("labels kitchen replacement options with kitchen burden not guard duty", () => {
+    const positions = defaultKitchenDayPositions({ seatsPerShift: 2 });
+    const slotId = positions[0].slots[0].id;
+    const mission: MissionDay = {
+      id: "k1",
+      title: "מטbch",
+      mission_type: "kitchen",
+      mission_date: "2026-08-26",
+      starts_at: "2026-08-26T06:00:00+03:00",
+      ends_at: "2026-08-26T22:00:00+03:00",
+      status: "draft",
+      positions,
+      assignments: {
+        ...emptyAssignments(positions),
+        [slotId]: ["Alex", "Bob"],
+      },
+      scheduling_rules: scheduling,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const guard = guardMission(
+      [{ id: "g1", start: "08:00", end: "12:00" }],
+      { g1: ["Carl"] },
+    );
+    guard.mission_date = mission.mission_date;
+    const people = [person("Alex"), person("Bob"), person("Carl")];
+
+    const options = findReplacements({
+      missions: [mission, guard],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId,
+      seatIndex: 0,
+      removeName: "Alex",
+      mode: "replace",
+    });
+
+    expect(options.length).toBeGreaterThan(0);
+    expect(options.every((o) => o.label.includes("עומס מטbch"))).toBe(true);
+    expect(options.every((o) => !o.label.includes("עומס תורנות"))).toBe(true);
   });
 });
