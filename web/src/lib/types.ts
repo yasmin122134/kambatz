@@ -96,6 +96,7 @@ export type MissionPositionKind =
   | "standby_carmel_b"
   | "duty"
   | "kitchen"
+  | "patrol"
   | "officer_duty";
 
 export interface KitchenSchedulingRules {
@@ -158,6 +159,8 @@ export interface MissionSlot {
   start_time: string;
   end_time: string;
   seat_count: number;
+  /** תיאור משמרת (למשל סוג סיור בפטרולים) */
+  label?: string;
   /** Canonical absolute start — authoritative when present */
   starts_at?: string;
   /** Canonical absolute end — authoritative when present */
@@ -196,6 +199,7 @@ export const MISSION_POSITION_KIND_LABELS: Record<MissionPositionKind, string> =
   standby_carmel_b: "כרמל ב׳ (כוננות)",
   duty: "עב״ס / תורנות",
   kitchen: "מטבח / חמגשיות",
+  patrol: "פטרולים",
   officer_duty: "קצין תורן",
 };
 
