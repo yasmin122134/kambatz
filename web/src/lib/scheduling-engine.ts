@@ -1784,7 +1784,9 @@ export function assignStandbyRoom(
 }
 
 /** שיבוץ משמרת מטבח — תמיד 35, חלוקה יחסית בין צוותים פעילים */
-export const MAX_KITCHEN_SHIFTS_PER_DAY = 3;
+export const PREFERRED_KITCHEN_SHIFTS_PER_DAY = 3;
+/** @deprecated use PREFERRED_KITCHEN_SHIFTS_PER_DAY — אין חסימה קשה */
+export const MAX_KITCHEN_SHIFTS_PER_DAY = PREFERRED_KITCHEN_SHIFTS_PER_DAY;
 
 export function kitchenShiftsOnMission(
   personName: string,
@@ -1833,15 +1835,12 @@ export function assignKitchenShift(input: {
     if (p) squadCounts[squadOf(p)] += 1;
   }
 
-  const canPick = (p: Person) => {
+  const canPick = (
+    p: Person,
+    opts?: { ignoreOut?: boolean },
+  ) => {
     if (assigned.includes(p.name)) return false;
-    if (outNames.has(p.name)) return false;
-    if (
-      kitchenShiftsOnMission(p.name, input.tracker, input.missionId) >=
-      MAX_KITCHEN_SHIFTS_PER_DAY
-    ) {
-      return false;
-    }
+    if (!opts?.ignoreOut && outNames.has(p.name)) return false;
     return fitsPerson(
       p,
       input.slot,
@@ -1853,13 +1852,22 @@ export function assignKitchenShift(input: {
     );
   };
 
-  const pickFromPool = (pool: Person[], limit: number) => {
+  const pickFromPool = (
+    pool: Person[],
+    limit: number,
+    opts?: { ignoreOut?: boolean },
+  ) => {
     let added = 0;
     const sorted = [...pool]
-      .filter(canPick)
+      .filter((p) => canPick(p, opts))
       .sort((a, b) => {
         const ka = kitchenShiftsOnMission(a.name, input.tracker, input.missionId);
         const kb = kitchenShiftsOnMission(b.name, input.tracker, input.missionId);
+        const overPreferred = (n: number) =>
+          n > PREFERRED_KITCHEN_SHIFTS_PER_DAY ? 1 : 0;
+        const pa = overPreferred(ka);
+        const pb = overPreferred(kb);
+        if (pa !== pb) return pa - pb;
         if (ka !== kb) return ka - kb;
         const cmp = compareByFairnessThenBurden(
           a,
@@ -1898,7 +1906,7 @@ export function assignKitchenShift(input: {
     pickFromPool(sortedPeople, targetTotal - assigned.length);
   } else {
     const activeSquads = ([1, 2, 3, 4] as const).filter((s) => s !== restSquad);
-    const activeSizes = activeSquads.map((s) => groups[s].filter(canPick).length);
+    const activeSizes = activeSquads.map((s) => groups[s].filter((p) => canPick(p)).length);
     const targets = apportionSeats(Math.max(0, input.need - input.taken.length), activeSizes);
 
     for (let i = 0; i < activeSquads.length; i++) {
@@ -1915,6 +1923,11 @@ export function assignKitchenShift(input: {
     if (assigned.length < targetTotal) {
       pickFromPool(sortedPeople.filter((p) => !outNames.has(p.name)), targetTotal - assigned.length);
     }
+  }
+
+  // מילוי אחרון: אם חסרים מקומות — מאפשרים גם מי שברשימת «בחוץ» (רק חסימות/פטור מטבch)
+  if (assigned.length < targetTotal) {
+    pickFromPool(sortedPeople, targetTotal - assigned.length, { ignoreOut: true });
   }
 
   const usedRestSquad = false;

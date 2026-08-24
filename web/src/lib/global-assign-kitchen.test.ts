@@ -2,10 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import { runGlobalAssign } from "@/lib/global-assign";
 import { flattenMissionSlots } from "@/lib/mission-utils";
-import {
-  kitchenShiftsOnMission,
-  MAX_KITCHEN_SHIFTS_PER_DAY,
-} from "@/lib/scheduling-engine";
+import { PREFERRED_KITCHEN_SHIFTS_PER_DAY } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
@@ -76,15 +73,79 @@ describe("kitchen smart assign", () => {
       }
     }
 
+    expect(output.filled).toBe(3 * 4);
+    expect(output.status).toBe("complete");
+
     for (const p of people) {
       const count = shiftCounts.get(p.name) || 0;
       expect(count).toBeGreaterThanOrEqual(1);
-      expect(count).toBeLessThanOrEqual(MAX_KITCHEN_SHIFTS_PER_DAY);
-      expect(kitchenShiftsOnMission(p.name, { busy: {}, guardShifts: {}, periodPoints: {}, kitchenPoints: {}, dutyPoints: {} }, mission.id)).toBe(0);
+      // יעד רך — מותר 4 משמרות אם צריך למלא
+      expect(count).toBeLessThanOrEqual(4);
+    }
+  });
+
+  it("fills 160 kitchen seats with ~51 cadets (needs some 4th shifts)", () => {
+    const positions = defaultKitchenDayPositions({ seatsPerShift: 40 });
+    const mission: MissionDay = {
+      id: "kitchen-full",
+      title: "מטבch",
+      mission_type: "kitchen",
+      mission_date: "2026-08-26",
+      starts_at: "2026-08-26T06:00:00+03:00",
+      ends_at: "2026-08-26T22:00:00+03:00",
+      status: "draft",
+      positions,
+      assignments: {},
+      scheduling_rules: {
+        ...DEFAULT_MISSION_SCHEDULING_RULES,
+        kitchen: {
+          ...DEFAULT_MISSION_SCHEDULING_RULES.kitchen!,
+          seats_per_shift: 40,
+          squad_rest_by_shift: [1, 2, 3, 4],
+        },
+      },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+
+    const people = Array.from({ length: 51 }, (_, i) =>
+      person(`p${i}`, `cadet-${i + 1}`, (i % 4) + 1),
+    );
+
+    const output = runGlobalAssign({
+      missions: [mission],
+      people,
+      issues: [],
+      rules: DEFAULT_FAIRNESS_RULES,
+      meanPrior: 0,
+      keepExisting: false,
+    });
+
+    expect(output.filled).toBe(160);
+    expect(output.status).toBe("complete");
+
+    const assignments = output.assignmentsByMission.get(mission.id)!;
+    const shiftCounts = new Map<string, number>();
+    for (const slot of flattenMissionSlots(mission)) {
+      for (const name of assignments[slot.slotId] || []) {
+        if (!name) continue;
+        shiftCounts.set(name, (shiftCounts.get(name) || 0) + 1);
+      }
     }
 
-    const totalAssigned = [...shiftCounts.values()].reduce((a, b) => a + b, 0);
-    expect(totalAssigned).toBe(3 * 4);
-    expect(output.filled).toBeGreaterThanOrEqual(totalAssigned);
+    let fourthShiftCount = 0;
+    for (const p of people) {
+      const count = shiftCounts.get(p.name) || 0;
+      expect(count).toBeGreaterThanOrEqual(PREFERRED_KITCHEN_SHIFTS_PER_DAY - 1);
+      expect(count).toBeLessThanOrEqual(4);
+      if (count === 4) fourthShiftCount += 1;
+    }
+    expect(fourthShiftCount).toBeGreaterThan(0);
+
+    for (const slot of flattenMissionSlots(mission)) {
+      const row = assignments[slot.slotId] || [];
+      expect(row.filter(Boolean).length).toBe(40);
+    }
   });
 });
