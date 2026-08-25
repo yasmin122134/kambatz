@@ -3,6 +3,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AddToCalendarLink } from "@/components/AddToCalendarLink";
+import {
+  BurdenSummaryPanel,
+  type BurdenRosterRow,
+} from "@/components/BurdenSummaryPanel";
 import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
@@ -24,7 +28,8 @@ import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
-import { patrolAssigneeRole } from "@/lib/patrol-day-template";
+import { patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
+import { resolvePatrolAssigneeName } from "@/lib/scheduling-engine";
 import type { FlatSlot } from "@/lib/mission-utils";
 import {
   kitchenShiftHandoffsFromSlots,
@@ -99,23 +104,7 @@ export function BoardClient({
   const [msg, setMsg] = useState("");
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
-  const [burdenRoster, setBurdenRoster] = useState<
-    Array<{
-      personName: string;
-      totalBurden: number;
-      dutyPoints: number;
-      kitchenPoints: number;
-      guardAssignmentCount: number;
-      guardBaseBurden: number;
-      restPenalties: number;
-      guardPoints: number;
-      toranutPoints: number;
-      fairnessPoints: number;
-      otherMissionPoints: number;
-      historicalAdjustment: number;
-      totalWithHistory: number;
-    }>
-  >([]);
+  const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
   const [dutyOfficerNames, setDutyOfficerNames] = useState<string[]>([
     ...DUTY_OFFICER_NAMES,
   ]);
@@ -135,9 +124,17 @@ export function BoardClient({
   );
 
   const guardsMission = dayMissions.find((m) => m.mission_type === "guards");
+  const linkedBaseWorkId = guardsMission?.scheduling_rules?.linked_mission_id;
+  const visibleDayMissions = useMemo(
+    () =>
+      linkedBaseWorkId
+        ? dayMissions.filter((m) => m.id !== linkedBaseWorkId)
+        : dayMissions,
+    [dayMissions, linkedBaseWorkId],
+  );
   const baseMission =
     (guardsMission && virtualBaseWorkMission(guardsMission)) ||
-    dayMissions.find((m) => m.mission_type === "base_work") ||
+    visibleDayMissions.find((m) => m.mission_type === "base_work") ||
     null;
   const baseWorkMissionId = baseMission?.id ?? guardsMission?.id;
   const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
@@ -210,17 +207,26 @@ export function BoardClient({
   }, []);
 
   useEffect(() => {
+    fetch("/api/fairness")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.rules) setPublishedRules(data.rules);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
     loadAdminData();
   }, [loadAdminData, isAdminUser]);
 
   const loadBurden = useCallback(async () => {
-    if (!isAdminUser || !activeDate) return;
+    if (!activeDate) return;
     const res = await fetch(`/api/missions/burden?mission_date=${activeDate}`);
     if (res.ok) {
       const data = await res.json();
       setBurdenRoster(data.roster || []);
     }
-  }, [activeDate, isAdminUser]);
+  }, [activeDate]);
 
   useEffect(() => {
     if (showBurden) loadBurden();
@@ -231,6 +237,25 @@ export function BoardClient({
     body: Record<string, unknown>,
   ) {
     setMsg("");
+
+    if (body.action === "admin_set" && typeof body.slot_id === "string") {
+      const slotId = body.slot_id;
+      const seatIndex = Number(body.seat_index);
+      const nextName = String(body.name ?? "").trim();
+      setMissions((prev) =>
+        prev.map((mission) => {
+          if (mission.id !== missionId) return mission;
+          const seats = [...(mission.assignments[slotId] || [])];
+          if (Number.isNaN(seatIndex) || seatIndex < 0) return mission;
+          seats[seatIndex] = nextName;
+          return {
+            ...mission,
+            assignments: { ...mission.assignments, [slotId]: seats },
+          };
+        }),
+      );
+    }
+
     const res = await fetch(`/api/missions/${missionId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -239,6 +264,7 @@ export function BoardClient({
     const data = await res.json();
     if (!res.ok) {
       setMsg(data.error || "שגיאה");
+      await loadMissions();
       return null;
     }
     await loadMissions();
@@ -431,6 +457,13 @@ export function BoardClient({
           <button type="button" className="btn-sm" onClick={loadMissions}>
             רענון
           </button>
+          <button
+            type="button"
+            className={`btn-sm ${showBurden ? "on" : ""}`}
+            onClick={() => setShowBurden((v) => !v)}
+          >
+            עומס שיבוץ
+          </button>
           {isAdminUser && (
             <>
               <button
@@ -449,13 +482,6 @@ export function BoardClient({
                 title="מוחק שיבוצים קיימים ומחלק מחדש את כל היום"
               >
                 {autoAssigning ? "משבץ…" : "שיבוץ מחדש"}
-              </button>
-              <button
-                type="button"
-                className={`btn-sm ${showBurden ? "on" : ""}`}
-                onClick={() => setShowBurden((v) => !v)}
-              >
-                עומס שיבוץ
               </button>
               <button
                 type="button"
@@ -518,8 +544,12 @@ export function BoardClient({
         />
       )}
 
-      {showBurden && isAdminUser && (
-        <BurdenSummaryPanel roster={burdenRoster} onRefresh={loadBurden} />
+      {showBurden && (
+        <BurdenSummaryPanel
+          roster={burdenRoster}
+          onRefresh={loadBurden}
+          emptyMessage="אין נתוני שיבוץ ליום זה."
+        />
       )}
 
       <div className="day-tabs mb-6">
@@ -1554,6 +1584,7 @@ function SlotCard({
               {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
+          <PatrolAssigneeHint mission={mission} slot={slot} compact />
           {assigneeList}
           {calendarEvent && (
             <div className="mt-1">
@@ -1583,10 +1614,7 @@ function SlotCard({
       {slot.slotLabel && (
         <div className="text-xs text-ink2">{slot.slotLabel}</div>
       )}
-      {slot.positionKind === "patrol" &&
-        patrolAssigneeRole(slot.startTime, slot.endTime) === "company_commander" && (
-          <div className="text-xs text-ink3">מבצע: ככ״א (שיבוץ ידני)</div>
-        )}
+      <PatrolAssigneeHint mission={mission} slot={slot} />
       {isBaseWork && slotLeaderName && (
         <div className="text-xs text-ink2 mt-0.5">
           אחראי/ת קבוצה:{" "}
@@ -1594,6 +1622,32 @@ function SlotCard({
         </div>
       )}
       {assigneeList}
+    </div>
+  );
+}
+
+function PatrolAssigneeHint({
+  mission,
+  slot,
+  compact = false,
+}: {
+  mission: MissionDay;
+  slot: FlatSlot;
+  compact?: boolean;
+}) {
+  if (slot.positionKind !== "patrol") return null;
+  const role = patrolAssigneeRole(slot.startTime, slot.endTime);
+  if (!role) return null;
+  const name = resolvePatrolAssigneeName(mission, slot);
+  return (
+    <div className={`${compact ? "text-[10px]" : "text-xs"} text-ink2 ${compact ? "mb-0.5" : "mt-0.5"}`}>
+      מזומן: <span className="font-medium">{patrolAssigneeRoleLabel(role)}</span>
+      {name ? (
+        <>
+          {" "}
+          — <span className="font-semibold text-ink">{name}</span>
+        </>
+      ) : null}
     </div>
   );
 }
@@ -1693,129 +1747,4 @@ function guardSlotBurdenTitle(
   const solo = slot.seatCount <= 1;
   const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount, rules);
   return `${slot.timeLabel} — ${solo ? "סולו" : "זוג"}\nעומס בסיס: ${base}\n(עונש מנוחה מחושב לפי משימות קודמות/הבאות)`;
-}
-
-function BurdenSummaryPanel({
-  roster,
-  onRefresh,
-}: {
-  roster: Array<{
-    personName: string;
-    totalBurden: number;
-    dutyPoints: number;
-    kitchenPoints: number;
-    guardAssignmentCount: number;
-    guardBaseBurden: number;
-    restPenalties: number;
-    guardPoints?: number;
-    toranutPoints?: number;
-    fairnessPoints?: number;
-    otherMissionPoints: number;
-    historicalAdjustment: number;
-    totalWithHistory: number;
-  }>;
-  onRefresh: () => void;
-}) {
-  const assignedCount = roster.filter((r) => r.totalBurden > 0).length;
-  const maxTotal = roster.reduce((m, r) => Math.max(m, r.totalWithHistory), 0);
-  const assignedBurden = roster
-    .filter((r) => r.totalBurden > 0)
-    .reduce((s, r) => s + r.totalBurden, 0);
-  const avgAssignedBurden =
-    assignedCount > 0 ? Math.round((assignedBurden / assignedCount) * 10) / 10 : 0;
-
-  if (!roster.length) {
-    return (
-      <section className="card mb-6">
-        <div className="bar spread mb-2">
-          <h3 className="font-display text-base">עומס שיבוץ — יום נבחר</h3>
-          <button type="button" className="btn-sm" onClick={onRefresh}>
-            רענון
-          </button>
-        </div>
-        <p className="hint">אין נתוני שיבוץ ליום זה.</p>
-      </section>
-    );
-  }
-
-  return (
-    <section className="card mb-6">
-      <div className="bar spread mb-3 flex-wrap gap-2">
-        <h3 className="font-display text-base">עומס שיבוץ — יום נבחר</h3>
-        <button type="button" className="btn-sm" onClick={onRefresh}>
-          רענון
-        </button>
-      </div>
-      <p className="text-xs text-ink3 mb-2">
-        שמירות לפי טבלת עומס (שעה + סולו/זוג + מנוחה). מטבח ושמירה+עב״ס נספרים בנפרד לשיבוץ הוגן.
-        ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).
-      </p>
-      <div className="burden-roster-summary">
-        <span>
-          <strong>{roster.length}</strong> צוערים פעילים
-        </span>
-        <span>
-          <strong>{assignedCount}</strong> משובצים ביום
-        </span>
-        <span>
-          ממוצע עומס (משובצים): <strong>{avgAssignedBurden.toFixed(1)}</strong>
-        </span>
-        <span>
-          מקס׳ סה״כ+היסט׳: <strong>{maxTotal.toFixed(1)}</strong>
-        </span>
-      </div>
-      <div className="burden-roster-scroll" tabIndex={0} aria-label="רשימת עומס — ניתן לגלול">
-        <table className="schedule-table w-full text-sm">
-          <thead>
-            <tr>
-              <th>צוער</th>
-              <th title="עומס ביום הנבחר">עומס יום</th>
-              <th title="עומס + התאמת ניקוד קודם — לשיבוץ חכם">סה״כ+היסט׳</th>
-              <th aria-label="יחס לעומס המקסימלי" />
-              <th>#</th>
-              <th title="נקודות שמירה">שמירה</th>
-              <th title="נקודות תורנות">תורנות</th>
-              <th title="התאמת ניקוד קודם">היסט׳</th>
-            </tr>
-          </thead>
-          <tbody>
-            {roster.map((row) => {
-              const barPct =
-                maxTotal > 0
-                  ? Math.round((row.totalWithHistory / maxTotal) * 100)
-                  : 0;
-              const idle = row.totalBurden <= 0;
-              return (
-                <tr
-                  key={row.personName}
-                  className={idle ? "burden-roster-row--idle" : undefined}
-                >
-                  <td>{row.personName}</td>
-                  <td className="mono">{row.totalBurden.toFixed(1)}</td>
-                  <td className="mono font-medium">{row.totalWithHistory.toFixed(1)}</td>
-                  <td>
-                    <div className="burden-roster-bar" title={`${barPct}% מהמקסימום`}>
-                      <div className="burden-roster-bar-track">
-                        <div
-                          className="burden-roster-bar-fill"
-                          style={{ width: `${barPct}%` }}
-                        />
-                      </div>
-                    </div>
-                  </td>
-                  <td className="mono">{row.guardAssignmentCount}</td>
-                  <td className="mono text-ink2">{(row.guardPoints ?? row.dutyPoints - row.otherMissionPoints).toFixed(1)}</td>
-                  <td className="mono text-ink2">{(row.toranutPoints ?? row.kitchenPoints + row.otherMissionPoints).toFixed(1)}</td>
-                  <td className="mono text-ink2">
-                    {row.historicalAdjustment >= 0 ? "+" : ""}
-                    {row.historicalAdjustment.toFixed(1)}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
 }

@@ -223,7 +223,7 @@ describe("findReplacements", () => {
     });
 
     expect(options.length).toBeGreaterThan(0);
-    expect(options.every((o) => o.label.includes("עומס מטbch"))).toBe(true);
-    expect(options.every((o) => !o.label.includes("עומס תורנות"))).toBe(true);
+    expect(options.every((o) => o.label.includes("עומס תורנות"))).toBe(true);
+    expect(options.every((o) => !o.label.includes("עומס שמירה"))).toBe(true);
   });
 });

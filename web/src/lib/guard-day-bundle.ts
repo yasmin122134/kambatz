@@ -1,12 +1,10 @@
 import {
   defaultBaseWorkPositions,
   isBaseWorkPosition,
-  materializeBaseWorkPositions,
 } from "@/lib/base-work-template";
 import {
   defaultMissionWindow,
   defaultSchedulingForType,
-  finalizeGuardMissionPositions,
   standardMissionPositions,
 } from "@/lib/mission-templates";
 import { effectiveBoardStartLabel } from "@/lib/mission-utils";
@@ -92,19 +90,28 @@ export async function createGuardDayBundle(
   return { guards, bundleId };
 }
 
-/** ממזג עב״ס מקושר (משימה נפרדת ישנה) לתוך יום השמירות. */
-export async function consolidateGuardDayMission(
+export type LinkedBaseWorkConsolidationPlan = {
+  positions: MissionDay["positions"];
+  assignments: Record<string, string[]>;
+  scheduling_rules: MissionSchedulingRules;
+  deleteLinkedId: string | null;
+};
+
+/**
+ * One-time migration: merge legacy linked base_work mission into guards day.
+ * Does not regenerate guard/reserve slot structure — that is handled by PUT regenerate only.
+ */
+export function planLinkedBaseWorkConsolidation(
   guards: MissionDay,
-): Promise<MissionDay> {
-  if (guards.mission_type !== "guards") return guards;
+  linked: MissionDay | null,
+): LinkedBaseWorkConsolidationPlan | null {
+  if (guards.mission_type !== "guards") return null;
+
+  const linkedId = guards.scheduling_rules?.linked_mission_id;
+  if (!linkedId) return null;
 
   let positions = [...(guards.positions || [])];
   let assignments = { ...guards.assignments };
-  const linkedId = guards.scheduling_rules?.linked_mission_id;
-  let linked: MissionDay | null = null;
-  if (linkedId) {
-    linked = await getMissionDay(linkedId);
-  }
 
   const hasEmbeddedBaseWork = positions.some((p) => isBaseWorkPosition(p));
   if (!hasEmbeddedBaseWork) {
@@ -118,25 +125,9 @@ export async function consolidateGuardDayMission(
         }),
       );
     }
-  } else if (linked?.mission_type === "base_work") {
-    for (const pos of linked.positions.filter((p) => isBaseWorkPosition(p))) {
-      const existing = positions.find((p) => isBaseWorkPosition(p));
-      if (existing) {
-        for (const [slotId, seats] of Object.entries(linked.assignments)) {
-          if (!assignments[slotId]?.some(Boolean)) {
-            assignments[slotId] = seats;
-          }
-        }
-      }
-    }
   }
+  // When embedded ABAS already exists, keep its assignments — never backfill from linked.
 
-  positions = finalizeGuardMissionPositions(positions, {
-    missionDate: guards.mission_date,
-    startsAt: guards.starts_at,
-    endsAt: guards.ends_at,
-    scheduling: guards.scheduling_rules,
-  });
   assignments = syncAssignmentSeats(positions, assignments);
 
   const scheduling = {
@@ -149,17 +140,40 @@ export async function consolidateGuardDayMission(
   };
   delete scheduling.linked_mission_id;
 
-  const { mission: saved } = await saveMissionDay({
-    ...guards,
+  return {
     positions,
     assignments,
     scheduling_rules: scheduling,
-    notes: guards.notes?.includes("עב״ס") ? guards.notes : "יום שמירות — כולל עבודות בסיס כעמדות",
+    deleteLinkedId: linked?.mission_type === "base_work" ? linked.id : null,
+  };
+}
+
+/** ממזג עב״ס מקושר (משימה נפרדת ישנה) לתוך יום השמירות — פעם אחת בלבד. */
+export async function consolidateGuardDayMission(
+  guards: MissionDay,
+): Promise<MissionDay> {
+  if (guards.mission_type !== "guards") return guards;
+
+  const linkedId = guards.scheduling_rules?.linked_mission_id;
+  if (!linkedId) return guards;
+
+  const linked = await getMissionDay(linkedId);
+  const plan = planLinkedBaseWorkConsolidation(guards, linked);
+  if (!plan) return guards;
+
+  const { mission: saved } = await saveMissionDay({
+    ...guards,
+    positions: plan.positions,
+    assignments: plan.assignments,
+    scheduling_rules: plan.scheduling_rules,
+    notes: guards.notes?.includes("עב״ס")
+      ? guards.notes
+      : "יום שמירות — כולל עבודות בסיס כעמדות",
   });
 
-  if (linked?.mission_type === "base_work") {
+  if (plan.deleteLinkedId) {
     try {
-      await deleteMissionDay(linked.id);
+      await deleteMissionDay(plan.deleteLinkedId);
     } catch {
       // ignore — orphan row is harmless
     }

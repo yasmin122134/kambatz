@@ -25,6 +25,7 @@ import {
   generateGuardMissionStructure,
   STANDARD_BASE_WORK_SUMMARY,
   STANDARD_GUARD_DAY_SUMMARY,
+  STANDARD_HAMAGSHIYOT_SUMMARY,
   STANDARD_KITCHEN_SUMMARY,
   standardMissionPositions,
   guardPositionHint,
@@ -859,6 +860,18 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             >
               טען חלונות עב״ס
             </button>
+          </>
+        )}
+        {missionType === "guards" && (
+          <>
+            <ul className="hint text-sm list-disc pr-5 space-y-1">
+              {STANDARD_HAMAGSHIYOT_SUMMARY.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p className="hint text-xs">
+              5 צוערים בכל חלון · 1 נק׳ תורנות למשמרת · לא צורכת מנוחה.
+            </p>
           </>
         )}
       </div>

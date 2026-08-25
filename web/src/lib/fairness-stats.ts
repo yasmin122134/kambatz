@@ -65,6 +65,7 @@ function normalizeHourlyRates(raw: unknown): FairnessHourlyRates {
     standby_a: parseNonNegativeNumber(src.standby_a) ?? base.standby_a,
     standby_b: parseNonNegativeNumber(src.standby_b) ?? base.standby_b,
     kitchen: parseNonNegativeNumber(src.kitchen) ?? base.kitchen,
+    reserve_force: parseNonNegativeNumber(src.reserve_force) ?? base.reserve_force,
   };
 }
 
@@ -103,7 +104,8 @@ function hourlyRatesEqual(a: FairnessHourlyRates, b: FairnessHourlyRates): boole
     a.base_work === b.base_work &&
     a.standby_a === b.standby_a &&
     a.standby_b === b.standby_b &&
-    a.kitchen === b.kitchen
+    a.kitchen === b.kitchen &&
+    a.reserve_force === b.reserve_force
   );
 }
 
@@ -290,16 +292,17 @@ export function statsFromStoredHistory(
     Math.round(
       history.reduce((sum, h) => sum + (h.burdenRest ?? 0), 0) * 100,
     ) / 100;
-  const otherMissionPoints =
-    Math.round((periodPoints - guardBaseBurden - restPenalties) * 100) / 100;
-  const guardAssignmentCount = history.filter((h) => h.burdenBase != null).length;
   const kitchenPoints = Math.round(
     history.filter((h) => h.bucket === "kitchen").reduce((sum, h) => sum + h.points, 0) * 100,
   ) / 100;
-  const guardPoints = Math.round((guardBaseBurden + restPenalties) * 100) / 100;
-  const toranutPoints = Math.round((kitchenPoints + otherMissionPoints) * 100) / 100;
+  const guardPoints = Math.round((periodPoints - kitchenPoints) * 100) / 100;
+  const toranutPoints = kitchenPoints;
   const fairnessPoints = periodPoints;
-  const dutyPoints = Math.round((guardPoints + otherMissionPoints) * 100) / 100;
+  const dutyPoints = guardPoints;
+  const otherMissionPoints = Math.round(
+    (guardPoints - guardBaseBurden - restPenalties) * 100,
+  ) / 100;
+  const guardAssignmentCount = history.filter((h) => h.burdenBase != null).length;
 
   return {
     rules,

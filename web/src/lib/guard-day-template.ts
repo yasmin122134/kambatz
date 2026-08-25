@@ -688,7 +688,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "officer_duty":
       return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
     case "patrol":
-      return "סיורים לפי הפקודה — ככ״א או קצין תורן נוכחי לפי המשמרת. ללא נקודות צדק.";
+      return "סיורים לפי הפקודה — ככ״א או קצין תורן נוכחי. 1 נק׳ שמירה לסיור; חוסם זמן (לא חופף משמרות אחרות).";
     case "duty":
       if (pos.name.includes("עתודה")) {
         return "5 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
@@ -710,7 +710,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     return "בדיוק 1 שומר 06:00–19:00. אין משמרות מחוץ לשעות הפעילות.";
   }
   if (pos.name.includes("חמגש")) {
-    return "5 צוערים בכל חלון (07–08, 12–13, 18–19). ללא נקודות צדק.";
+    return "5 צוערים בכל חלון (07–08, 12–13, 18–19). 1 נק׳ תורנות למשמרת.";
   }
   if (["פטל", "תצפיתן", "ימ״ח", "נשקייה", "בונקר"].some((n) => pos.name.includes(n))) {
     return "משמרות מסתובבות ~4 שעות מעוגנות לתחילת יום המשימה.";
@@ -740,7 +740,7 @@ export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "pair", label: "שמירה בזוג+", default: 1.0, examples: "ש״ג רכב קדמי, ש״ג רכב אחורי (לילה — 2)" },
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
-  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "כוח עתודה (5)" },
+  { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "עב״ס 0.75/שעה · עתודה 0.3/שעה" },
   { bucket: "kitchen", label: "מטבch", default: 0.1, examples: "35 למשמרת" },
 ] as const;
 

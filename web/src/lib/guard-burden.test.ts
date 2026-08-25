@@ -7,6 +7,7 @@ import {
   getGuardBaseBurden,
   getRestHoursBetween,
   getRestPenalty,
+  toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
 } from "@/lib/guard-burden";
 import {
@@ -87,8 +88,9 @@ function flatSlot(
 }
 
 describe("guard base scoring", () => {
-  it("daytime 08–12 = 4 points (1/h)", () => {
-    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(4);
+  it("daytime 08–12 = 4 points solo, 3.6 paired (−0.1/h)", () => {
+    expect(getGuardBaseBurden("08:00", "12:00", 1)).toBe(4);
+    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(3.6);
   });
 
   it("night 00–04 = 5 points (1.25/h)", () => {
@@ -150,8 +152,8 @@ describe("rest hours between blocks", () => {
   });
 });
 
-describe("kitchen vs duty burden buckets", () => {
-  it("splits kitchen points from guard and base work", () => {
+describe("kitchen vs guard day point categories", () => {
+  it("kitchen mission → toranut; guard day → guard points", () => {
     const kitchen: BurdenTimelineBlock = {
       ...guardBlock("08:00", "12:00", 1),
       missionType: "kitchen",
@@ -159,12 +161,13 @@ describe("kitchen vs duty burden buckets", () => {
     };
     const guard = guardBlock("20:00", "00:00", 1);
     const breakdown = calculatePersonBurden([kitchen, guard], rules, scheduling);
-    expect(breakdown.kitchenPoints).toBe(4);
-    expect(breakdown.dutyPoints).toBeGreaterThan(0);
-    expect(breakdown.totalBurden).toBe(
-      Math.round((breakdown.dutyPoints + breakdown.kitchenPoints) * 100) / 100,
+    expect(breakdown.kitchenPoints).toBe(1);
+    expect(breakdown.toranutPoints).toBe(1);
+    expect(breakdown.guardPoints).toBeGreaterThan(0);
+    expect(breakdown.dutyPoints).toBe(breakdown.guardPoints);
+    expect(breakdown.fairnessPoints).toBe(
+      Math.round((breakdown.guardPoints + breakdown.toranutPoints) * 100) / 100,
     );
-    expect(breakdown.otherMissionPoints).toBe(0);
   });
 });
 
@@ -187,13 +190,34 @@ describe("ABAS base work shift points", () => {
     };
     const breakdown = calculatePersonBurden([morning], rules, scheduling);
     expect(breakdown.otherMissionPoints).toBe(2.25);
+    expect(breakdown.guardPoints).toBe(2.25);
+    expect(breakdown.toranutPoints).toBe(0);
+  });
+});
+
+describe("reserve force scoring", () => {
+  it("scores 0.3 points per hour", () => {
+    const block: BurdenTimelineBlock = {
+      wallStartMin: 8 * 60,
+      calendarDayOffset: 0,
+      durationMinutes: 240,
+      eatsRest: false,
+      positionKind: "duty",
+      missionType: "guards",
+      seatCount: 1,
+      startTime: "08:00",
+      endTime: "12:00",
+      slotId: "r1",
+      positionName: "כוח עתודה",
+    };
+    expect(toranutPointsForMissionBlock(block, rules)).toBe(1.2);
   });
 });
 
 describe("paired guard individual burden", () => {
-  it("each person gets paired score", () => {
+  it("each person gets paired score with hourly discount", () => {
     const detail = calculateGuardAssignmentBurden(guardBlock("00:00", "04:00", 2), null);
-    expect(detail.baseBurden).toBe(5);
+    expect(detail.baseBurden).toBe(4.6);
     expect(detail.isSolo).toBe(false);
   });
 });

@@ -48,6 +48,7 @@ export function resolveHourlyRates(rules?: FairnessRules): FairnessHourlyRates {
       standby_a: rules?.standby_a ?? base.standby_a,
       standby_b: rules?.standby_b ?? base.standby_b,
       kitchen: rules?.kitchen ?? base.kitchen,
+      reserve_force: base.reserve_force,
     };
   }
   return {
@@ -58,6 +59,7 @@ export function resolveHourlyRates(rules?: FairnessRules): FairnessHourlyRates {
     standby_a: src.standby_a ?? base.standby_a,
     standby_b: src.standby_b ?? base.standby_b,
     kitchen: src.kitchen ?? base.kitchen,
+    reserve_force: src.reserve_force ?? base.reserve_force,
   };
 }
 

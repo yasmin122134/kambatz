@@ -3,12 +3,15 @@ import { isAdmin } from "@/lib/auth";
 import { computeRosterBurdenSummary, getFairnessRules } from "@/lib/fairness";
 import { listMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
+import { getAuthSession } from "@/lib/session";
 
 export async function GET(req: Request) {
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "אין הרשאה" }, { status: 403 });
+  const session = await getAuthSession();
+  if (!session) {
+    return NextResponse.json({ error: "לא מחובר" }, { status: 401 });
   }
 
+  const admin = await isAdmin();
   const { searchParams } = new URL(req.url);
   const missionDate = searchParams.get("mission_date");
 
@@ -26,9 +29,12 @@ export async function GET(req: Request) {
 
     if (peopleRes.error) throw new Error(peopleRes.error.message);
 
-    const filtered = missionDate
-      ? missions.filter((m) => m.mission_date === missionDate.slice(0, 10))
+    const visible = admin
+      ? missions
       : missions.filter((m) => m.status === "published");
+    const filtered = missionDate
+      ? visible.filter((m) => m.mission_date === missionDate.slice(0, 10))
+      : visible;
 
     const roster = computeRosterBurdenSummary(
       (peopleRes.data || []).map((p) => ({

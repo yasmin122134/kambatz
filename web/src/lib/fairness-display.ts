@@ -4,6 +4,7 @@ import {
   REST_PENALTY_TIERS,
   guardBandScoreForFullBlock,
 } from "@/lib/guard-burden";
+import { DEFAULT_HAMAGSHIYOT_SHIFTS } from "@/lib/hamagshiyot-template";
 import type { FairnessHourlyRates, FairnessRules } from "@/lib/types";
 import {
   DEFAULT_FAIRNESS_HOURLY_RATES,
@@ -25,10 +26,11 @@ export const HOURLY_RATE_ROWS: {
     help: "כל שעה שחופפת לחלון הלילה",
   },
   { key: "observation", label: "שעת שמירה בתצפיתן", help: "עמדת תצפיתן בלבד" },
-  { key: "base_work", label: "שעת עב״ס", help: "עבודות בסיס וכוח עתודה" },
+  { key: "base_work", label: "שעת עב״ס", help: "עבודות בסיס" },
   { key: "standby_a", label: "שעת כ\"כ א", help: "כוננות כרמל א׳" },
   { key: "standby_b", label: "שעת כ\"כ ב", help: "כוננות כרמל ב׳" },
-  { key: "kitchen", label: "שעת מטבח", help: "תורנות מטbch" },
+  { key: "kitchen", label: "שעת מטבח", help: "תורנות מטבח" },
+  { key: "reserve_force", label: "שעת כוח עתודה", help: "כוח עתודה בלבד" },
 ];
 
 /** All scoring buckets — legacy; primary model is hourly_rates. */
@@ -52,8 +54,8 @@ export const HOURLY_FAIRNESS_BUCKETS = [
 ] as const satisfies readonly FairnessBucket[];
 
 export const FAIRNESS_OVERVIEW = [
-  "נקודות שמירה — שמירות + עונש מנוחה בין משימות.",
-  "נקודות תורנות — מטbch, עב״ס, כוננות כרמל.",
+  "נקודות שמירה — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, עונש מנוחה).",
+  "נקודות תורנות — מימי מטבח בלבד.",
   "נקודות צדק = נקודות שמירה + נקודות תורנות.",
   "בשיבוץ חכם נבחר מי שציון העומס שלו הכי נמוך + התאמת ניקוד קודם (hist).",
   "כל הערכים בדף זה ניתנים להצעת שינוי (לאחר אישור מפקד).",
@@ -62,24 +64,32 @@ export const FAIRNESS_OVERVIEW = [
 export const GUARD_SCORING_EXPLANATION = [
   "שעת שמירה רגילה = 1 נק׳ צדק.",
   "שעות בלילה (22:00–06:00) = 1.25 נק׳ לשעה.",
-  "תצpיתן = 0.6 נק׳ לשעה (מחליף את תעריף השמירה).",
+  "שמירה בזוג — −0.1 נק׳ לשעה מסולו (למעט תצפיתן).",
+  "תצפיתן = 0.6 נק׳ לשעה (מחליף את תעריף השמירה).",
   "משמרת חוצה לילה/יום — חישוב יחסי לפי שעות בכל חלון.",
 ] as const;
 
 export const SOLO_PAIR_DEFINITION = {
-  solo: "במודל החדש — אין הבדל סולו/זוג; תצpיתן בתעריף נפרד.",
-  pair: "שמירה בזוג — אותו תעריף שעה כמו סולo (למעט תצpיתן).",
+  solo: "שמירה לבד — תעריף מלא לשעה.",
+  pair: "שמירה בזוג — −0.1 נק׳ לשעה מסולו (למעט תצפיתן).",
 } as const;
 
 export const REST_PENALTY_EXPLANATION = [
-  "נמדד רק בין משימות ש«צורכות מנוחה» (שמירה, עב״ס, מטbch — לא כרמל).",
+  "נמדד רק בין משימות ש«צורכות מנוחה» (שמירה, עב״ס — לא כרמל).",
   "העונש מתווסף לנקודות השמירה של המשמרת שאחרי הפער הקצר.",
   "זה מדד צדק לשיבוץ — לא אילוץ קשיח.",
 ] as const;
 
 export const BASE_WORK_SCORING_EXPLANATION = [
-  "עבודות בסיס — 0.75 נק׳ לשעה (לא טבלה קבועה לחלון).",
-  "כוח עתודה — אותו תעריף עב״ס.",
+  "עבודות בסיס — 0.75 נק׳ לשעה (חישוב לפי אורך החלון).",
+  "כוח עתודה — 0.3 נק׳ לשעה.",
+  "נספר בנקודות שמירה (מימי שמירות + עב״ס).",
+] as const;
+
+export const HAMAGSHIYOT_SCORING_EXPLANATION = [
+  "תורנות חמגשיות — 1 נק׳ תורנות לכל חלון (לא לפי שעות).",
+  "5 צוערים בכל חלון · לא צורכת מנוחה.",
+  "נספר בנקודות תורנות (כמו ימי מטבח).",
 ] as const;
 
 export const SQUAD_EXPLANATION = [
@@ -93,18 +103,19 @@ export const MISSION_TO_BUCKET = [
   { mission: "כרמל א׳", scoring: "0.5 נק׳/שעה", editable: true },
   { mission: "כרמel ב׳", scoring: "0.3 נק׳/שעה", editable: true },
   { mission: "עבודות בסיס", scoring: "0.75 נק׳/שעה", editable: true },
-  { mission: "כוח עתודה", scoring: "0.75 נק׳/שעה", editable: true },
-  { mission: "מטbch", scoring: "1 נק׳/שעה", editable: true },
+  { mission: "כוח עתודה", scoring: "0.3 נק׳/שעה", editable: true },
+  { mission: "מטbch", scoring: "1 נק׳/משמרת → נקודות תורנות", editable: true },
+  { mission: "חמגשיות", scoring: "1 נק׳/חלון → נקודות תורנות", editable: true },
 ] as const;
 
 export const FAIRNESS_POINT_CATEGORIES = [
   {
     title: "נקודות שמירה",
-    description: "שמירות + עונש מנוחה בין משימות",
+    description: "מימי שמירות + עב״ס — שמירות, כוננות, עבודות בסיס, עונש מנוחה",
   },
   {
     title: "נקודות תורנות",
-    description: "מטbch, עב״ס, כוננות כרמel",
+    description: "מימי מטbch בלבד",
   },
   {
     title: "נקודות צדק",
@@ -120,15 +131,23 @@ export function hourlyRateRows(rules: FairnessRules) {
   }));
 }
 
-export function baseWorkShiftRows() {
-  const rate = DEFAULT_FAIRNESS_HOURLY_RATES.base_work;
+export function baseWorkShiftRows(rules: FairnessRules) {
+  const rate = resolveHourlyRates(rules).base_work;
   return [
-    { timeLabel: "08:30–11:30", points: rate * 3 },
-    { timeLabel: "13:30–17:30", points: rate * 4 },
-    { timeLabel: "18:30–20:00", points: rate * 1.5 },
+    { timeLabel: "08:30–11:30", hours: 3 },
+    { timeLabel: "13:30–17:30", hours: 4 },
+    { timeLabel: "18:30–20:00", hours: 1.5 },
   ].map((row) => ({
     ...row,
-    points: Math.round(row.points * 100) / 100,
+    points: Math.round(row.hours * rate * 100) / 100,
+  }));
+}
+
+export function hamagshiyotShiftRows(rules: FairnessRules) {
+  const points = rules.kitchen;
+  return DEFAULT_HAMAGSHIYOT_SHIFTS.map((shift) => ({
+    timeLabel: `${shift.start}–${shift.end}`,
+    points,
   }));
 }
 

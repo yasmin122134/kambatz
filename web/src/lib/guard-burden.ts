@@ -4,10 +4,12 @@ import {
   resolveHourlyRates,
   roundPoints,
 } from "@/lib/fairness-hourly-rates";
+import { isHamagshiyotPositionName } from "@/lib/hamagshiyot-template";
 import {
   type FlatSlot,
   isGuardKind,
   isObservationPost,
+  isReserveForceBlock,
   isStandbyKind,
   parseTimeMinutes,
   slotDurationMinutes,
@@ -24,7 +26,11 @@ import {
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
+  PAIR_GUARD_HOURLY_DISCOUNT,
 } from "@/lib/types";
+
+/** Fixed guard points per patrol tour (not hourly). */
+export const PATROL_GUARD_POINTS = 1;
 
 /** Standard 4-hour wall-clock band ranges (scores live in FairnessRules.guard_bands). */
 export const GUARD_BAND_TIME_RANGES = [
@@ -103,17 +109,17 @@ export type GuardAssignmentBurdenDetail = {
 export type PersonBurdenBreakdown = {
   guardBaseBurden: number;
   restPenalties: number;
-  /** Non-guard missions (עב״ס, כוננות, …) */
+  /** Non-guard missions on guard/base days (עב״ס, כוננות, …) */
   otherMissionPoints: number;
-  /** Kitchen-only points */
+  /** Raw kitchen-mission points (subset of toranutPoints) */
   kitchenPoints: number;
-  /** נקודות שמירה = בסיס + עונש מנוחה */
+  /** נקודות שמירה — מימי שמירות + עב״ס */
   guardPoints: number;
-  /** נקודות תורנות = מטbch + עב״ס + כוננות */
+  /** נקודות תורנות — מימי מטבח */
   toranutPoints: number;
   /** נקודות צדק = שמירה + תורנות */
   fairnessPoints: number;
-  /** לשיבוץ חכם: שמירה + תורנות ללא מטbch */
+  /** לשיבוץ ימי שמירה — זהה לנקודות שמירה */
   dutyPoints: number;
   guardAssignmentCount: number;
   totalBurden: number;
@@ -186,7 +192,6 @@ export function getGuardBaseBurden(
   rules?: FairnessRules,
   positionName?: string,
 ): number {
-  void seatCount;
   const rates = resolveHourlyRates(rules);
   const hours = slotDurationHours(startTime, endTime);
   if (hours <= 0) return 0;
@@ -195,6 +200,7 @@ export function getGuardBaseBurden(
     return roundPoints(hours * rates.observation);
   }
 
+  const pairDiscount = seatCount > 1 ? PAIR_GUARD_HOURLY_DISCOUNT : 0;
   const startMin = parseTimeMinutes(startTime);
   if (startMin === null) return 0;
   const durationMin = slotDurationMinutes(startTime, endTime);
@@ -202,7 +208,10 @@ export function getGuardBaseBurden(
   const dayMin = Math.max(0, durationMin - nightMin);
   const dayHours = dayMin / 60;
   const nightHours = nightMin / 60;
-  return roundPoints(dayHours * rates.guard + nightHours * rates.guard_night);
+  return roundPoints(
+    dayHours * Math.max(0, rates.guard - pairDiscount) +
+      nightHours * Math.max(0, rates.guard_night - pairDiscount),
+  );
 }
 
 export function getGuardBaseBurdenForSlot(
@@ -210,6 +219,9 @@ export function getGuardBaseBurdenForSlot(
   seatCount?: number,
   rules?: FairnessRules,
 ): number {
+  if (slot.positionKind === "patrol") {
+    return PATROL_GUARD_POINTS;
+  }
   return getGuardBaseBurden(
     slot.startTime,
     slot.endTime,
@@ -277,15 +289,17 @@ function isRestRelevantBlock(block: BurdenTimelineBlock): boolean {
   return block.eatsRest;
 }
 
+function isHamagshiyotBlock(block: BurdenTimelineBlock): boolean {
+  return (
+    block.missionType === "guards" &&
+    block.positionKind === "kitchen" &&
+    isHamagshiyotPositionName(block.positionName ?? "")
+  );
+}
+
 function isKitchenBlock(block: BurdenTimelineBlock): boolean {
   if (block.positionKind === "patrol") return false;
-  if (
-    block.positionKind === "kitchen" &&
-    block.missionType === "guards" &&
-    block.positionName?.includes("חמגש")
-  ) {
-    return false;
-  }
+  if (isHamagshiyotBlock(block)) return false;
   return block.positionKind === "kitchen" || block.missionType === "kitchen";
 }
 
@@ -293,18 +307,26 @@ function isBaseWorkBlock(block: BurdenTimelineBlock): boolean {
   return block.missionType === "base_work";
 }
 
+function isKitchenMissionBlock(block: BurdenTimelineBlock): boolean {
+  return block.missionType === "kitchen";
+}
+
+function kitchenUsesPointsPerShift(
+  block: BurdenTimelineBlock,
+  scheduling?: MissionSchedulingRules,
+): boolean {
+  if (block.missionType === "kitchen") return true;
+  return scheduling?.kitchen?.points_per_shift !== false;
+}
+
 function toranutPointsForBlock(
   block: BurdenTimelineBlock,
   rules: FairnessRules,
-  _scheduling?: MissionSchedulingRules,
+  scheduling?: MissionSchedulingRules,
 ): number {
   if (block.positionKind === "patrol") return 0;
-  if (
-    block.positionKind === "kitchen" &&
-    block.missionType === "guards" &&
-    block.positionName?.includes("חמגש")
-  ) {
-    return 0;
+  if (isHamagshiyotBlock(block)) {
+    return roundPoints(rules.kitchen);
   }
 
   const rates = resolveHourlyRates(rules);
@@ -312,7 +334,13 @@ function toranutPointsForBlock(
   if (hours <= 0) return 0;
 
   if (isKitchenBlock(block)) {
+    if (kitchenUsesPointsPerShift(block, scheduling)) {
+      return roundPoints(rules.kitchen);
+    }
     return roundPoints(hours * rates.kitchen);
+  }
+  if (isReserveForceBlock(block)) {
+    return roundPoints(hours * rates.reserve_force);
   }
   if (isBaseWorkBlock(block) || block.positionKind === "duty") {
     return roundPoints(hours * rates.base_work);
@@ -393,13 +421,16 @@ export function calculateGuardAssignmentBurden(
   prevRelevant: BurdenTimelineBlock | null,
   rules?: FairnessRules,
 ): GuardAssignmentBurdenDetail {
-  const baseBurden = getGuardBaseBurden(
-    guard.startTime,
-    guard.endTime,
-    guard.seatCount,
-    rules,
-    guard.positionName,
-  );
+  const baseBurden =
+    guard.positionKind === "patrol"
+      ? PATROL_GUARD_POINTS
+      : getGuardBaseBurden(
+          guard.startTime,
+          guard.endTime,
+          guard.seatCount,
+          rules,
+          guard.positionName,
+        );
   const { penalty, restHours } = restPenaltyBeforeGuard(guard, prevRelevant, rules);
   return {
     slotId: guard.slotId,
@@ -458,27 +489,26 @@ export function calculatePersonBurden(
   const guardDetails: GuardAssignmentBurdenDetail[] = [];
 
   for (const block of sorted) {
-    if (isGuardKind(block.positionKind)) {
+    if (isGuardKind(block.positionKind) || block.positionKind === "patrol") {
       guardAssignmentCount += 1;
       const prev = findPreviousRelevant(relevant, block);
       const detail = calculateGuardAssignmentBurden(block, prev, rules);
       guardBaseBurden += detail.baseBurden;
       restPenalties += detail.restPenaltyBefore;
       guardDetails.push(detail);
-    } else if (isKitchenBlock(block)) {
+    } else if (isKitchenMissionBlock(block) || isHamagshiyotBlock(block)) {
       kitchenPoints += toranutPointsForBlock(block, rules, scheduling);
     } else {
       otherMissionPoints += toranutPointsForBlock(block, rules, scheduling);
     }
   }
 
-  const guardPoints =
-    Math.round((guardBaseBurden + restPenalties) * 100) / 100;
-  const toranutPoints =
-    Math.round((kitchenPoints + otherMissionPoints) * 100) / 100;
+  const guardPoints = Math.round(
+    (guardBaseBurden + restPenalties + otherMissionPoints) * 100,
+  ) / 100;
+  const toranutPoints = Math.round(kitchenPoints * 100) / 100;
   const fairnessPoints = Math.round((guardPoints + toranutPoints) * 100) / 100;
-  const dutyPoints =
-    Math.round((guardPoints + otherMissionPoints) * 100) / 100;
+  const dutyPoints = guardPoints;
 
   return {
     guardBaseBurden: Math.round(guardBaseBurden * 100) / 100,

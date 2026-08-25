@@ -247,7 +247,12 @@ export type FairnessHourlyRates = {
   standby_b: number;
   /** שעת מטבch */
   kitchen: number;
+  /** שעת כוח עתודה */
+  reserve_force: number;
 };
+
+/** הנחה לשעה לכל מאייש בשמירה בזוג (2+ מקומות באותה משמרת) */
+export const PAIR_GUARD_HOURLY_DISCOUNT = 0.1;
 
 export const DEFAULT_FAIRNESS_HOURLY_RATES: FairnessHourlyRates = {
   guard: 1,
@@ -257,6 +262,7 @@ export const DEFAULT_FAIRNESS_HOURLY_RATES: FairnessHourlyRates = {
   standby_a: 0.5,
   standby_b: 0.3,
   kitchen: 1,
+  reserve_force: 0.3,
 };
 
 export type FairnessRules = Record<FairnessBucket, number> & {
@@ -331,7 +337,7 @@ export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
 
 export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
   solo: "שעת שמירה רגילה",
-  pair: "שעת שמירה — אותו תעריף במודל החדש",
+  pair: "שעת שמירה — −0.1 לשעה מסולו",
   standby: "כיתת כוננות (כללי)",
   standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
   standby_b: "כרמל ב׳ — כוננות",
@@ -368,13 +374,13 @@ export type PersonFairnessStats = {
     restPenalties: number;
     otherMissionPoints: number;
     kitchenPoints: number;
-    /** נקודות שמירה = בסיס + עונש מנוחה */
+    /** נקודות שמירה — מימי שמירות + עb״ס */
     guardPoints: number;
-    /** נקודות תורנות = מטבch + עב״ס + כוננות */
+    /** נקודות תורנות — מימי מטבח */
     toranutPoints: number;
     /** נקודות צדק = שמירה + תורנות */
     fairnessPoints: number;
-    /** לשיבוץ: שמירה + תורנות ללא מטבח */
+    /** לשיבוץ ימי שמירה — זהה לנקודות שמירה */
     dutyPoints: number;
     guardAssignmentCount: number;
     totalBurden: number;
@@ -382,11 +388,10 @@ export type PersonFairnessStats = {
 };
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
-  "שמירה — 1 נק׳/שעה; לילה (22:00–06:00) — 1.25; תצפיתן — 0.6.",
-  "תורנות — עב״ס 0.75; כרמל א׳ 0.5; כרמל ב׳ 0.3; מטבח 1 נק׳/שעה.",
+  "נקודות שמירה — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, עונש מנוחה).",
+  "נקודות תורנות — מימי מטבח (1 נק׳ למשמרת).",
   "נקודות צדק = נקודות שמירה + נקודות תורנות.",
-  "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2).",
-  "עב״ס — נקודות קבועות לחלון (08:30, 13:30, 18:30); כוח עתודה — duty × שעות.",
-  "מטבח, כוננות — לפי טבלת הצדק.",
+  "שמירה — 1 נק׳/שעה; לילה 1.25; תצפיתן 0.6; בזוג −0.1/שעה.",
+  "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2) — נספר בנקודות שמירה.",
   "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];

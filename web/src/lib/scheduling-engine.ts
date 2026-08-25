@@ -1,10 +1,13 @@
 import { slotDurationHours } from "@/lib/fairness-math";
+import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
 import { spreadWithOverrides } from "@/lib/fairness-spread";
 import {
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
   calculateProjectedKitchenBurden,
+  getGuardBaseBurdenForSlot,
   guardSlotDifficultyRank,
+  PATROL_GUARD_POINTS,
   type BurdenTimelineBlock,
   type PersonBurdenBreakdown,
 } from "@/lib/guard-burden";
@@ -17,6 +20,7 @@ import {
   isKitchenMissionSlot,
   isObservationPost,
   isReserveForceBlock,
+  isReserveForceSlot,
   isStandbyKind,
   normalizeSchedulingRules,
   parseTimeMinutes,
@@ -123,7 +127,7 @@ export function fairnessBurdenBucketForSlot(slot: FlatSlot): FairnessBurdenBucke
     slot.missionType === "guards" &&
     isHamagshiyotPositionName(slot.positionName)
   ) {
-    return "duty";
+    return "kitchen";
   }
   if (slot.positionKind === "kitchen" || slot.missionType === "kitchen") return "kitchen";
   return "duty";
@@ -207,7 +211,7 @@ function needsDutyGuardGap(
   return (aBase && bGuard) || (aGuard && bBase);
 }
 
-/** כרמל ב׳ מותר במקביל לעב״ס — אותו צוער בשתי המשימות בו-זמנית. */
+/** כרמל ב׳ מותר במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
 export function allowsParallelAssignmentOverlap(
   kindA: MissionPositionKind,
   typeA: MissionType,
@@ -220,7 +224,12 @@ export function allowsParallelAssignmentOverlap(
   const bCarmelB = kindB === "standby_carmel_b";
   const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
   const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
-  return (aCarmelB && bBaseWork) || (bCarmelB && aBaseWork);
+  if ((aCarmelB && bBaseWork) || (bCarmelB && aBaseWork)) return true;
+  const aPatrol = kindA === "patrol";
+  const bPatrol = kindB === "patrol";
+  const aOfficer = kindA === "officer_duty";
+  const bOfficer = kindB === "officer_duty";
+  return (aPatrol && bOfficer) || (bPatrol && aOfficer);
 }
 
 function parallelOverlapAllowed(
@@ -405,6 +414,20 @@ export function dutyOfficerAtPatrolTime(
         if (name && isDutyOfficerName(name)) return name;
       }
     }
+  }
+  return null;
+}
+
+/** שם המבצע לסיור — שיבוץ בפועל, או קצין תורן מהמשמרת החופפת. */
+export function resolvePatrolAssigneeName(
+  mission: MissionDay,
+  slot: FlatSlot,
+): string | null {
+  const assigned = slot.assignees.find((name) => name?.trim());
+  if (assigned) return assigned.trim();
+  const role = patrolAssigneeRole(slot.startTime, slot.endTime);
+  if (role === "duty_officer") {
+    return dutyOfficerAtPatrolTime(mission, slot, mission.assignments || {});
   }
   return null;
 }
@@ -643,7 +666,7 @@ export function bucketForSlot(
     slot.missionType === "guards" &&
     isHamagshiyotPositionName(slot.positionName)
   ) {
-    return "duty";
+    return "kitchen";
   }
   if (slot.positionKind === "standby_carmel_a") return "standby_a";
   if (slot.positionKind === "standby_carmel_b") return "standby_b";
@@ -659,13 +682,20 @@ export function pointsForSlot(
   rules: FairnessRules,
   options?: { missionType?: MissionType; scheduling?: MissionSchedulingRules },
 ): number {
-  if (slot.positionKind === "patrol") return 0;
+  if (slot.positionKind === "patrol") {
+    return PATROL_GUARD_POINTS;
+  }
   if (
     slot.positionKind === "kitchen" &&
     options?.missionType === "guards" &&
     isHamagshiyotPositionName(slot.positionName)
   ) {
-    return 0;
+    return Math.round(rules.kitchen * 100) / 100;
+  }
+  if (isReserveForceSlot(slot)) {
+    const hours = slotDurationHours(slot.startTime, slot.endTime);
+    const rate = resolveHourlyRates(rules).reserve_force;
+    return Math.round(hours * rate * 100) / 100;
   }
   const bucket = bucketForSlot(slot, seatCount, rules);
   const weight = rules[bucket as keyof FairnessRules] as number;
@@ -2323,7 +2353,7 @@ export function canSwapReplacementAssignments(input: {
 }
 
 export function replacementBurdenLabel(bucket: FairnessBurdenBucket): string {
-  return bucket === "kitchen" ? "עומס מטbch" : "עומס תורנות";
+  return bucket === "kitchen" ? "עומס תורנות" : "עומס שמירה";
 }
 
 export function findReplacements(input: {

@@ -1,14 +1,21 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import {
+  BurdenSummaryPanel,
+  type BurdenRosterRow,
+} from "@/components/BurdenSummaryPanel";
 import {
   BASE_WORK_SCORING_EXPLANATION,
   FAIRNESS_OVERVIEW,
   FAIRNESS_POINT_CATEGORIES,
   GUARD_SCORING_EXPLANATION,
+  HAMAGSHIYOT_SCORING_EXPLANATION,
   HOURLY_RATE_ROWS,
+  baseWorkShiftRows,
+  hamagshiyotShiftRows,
   hourlyRateRows,
   mergeProposedFairnessRules,
   REST_PENALTY_EXPLANATION,
@@ -39,20 +46,42 @@ export default function FairnessPage() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [loggedIn, setLoggedIn] = useState(false);
+  const [authenticated, setAuthenticated] = useState(false);
+  const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
+  const [burdenLoading, setBurdenLoading] = useState(false);
+
+  const loadBurden = useCallback(async () => {
+    setBurdenLoading(true);
+    try {
+      const res = await fetch("/api/missions/burden");
+      if (res.ok) {
+        const data = await res.json();
+        setBurdenRoster(data.roster || []);
+      }
+    } finally {
+      setBurdenLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     Promise.all([
       fetch("/api/fairness").then((r) => r.json()),
       fetch("/api/me").then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/me/role").then((r) => r.json()),
     ])
-      .then(([fair, me]) => {
+      .then(([fair, me, role]) => {
         const r = cloneRules(fair.rules || DEFAULT_FAIRNESS_RULES);
         setRules(r);
         setProposed(cloneRules(r));
         setLoggedIn(!!me?.name);
+        setAuthenticated(!!role?.authenticated);
       })
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (authenticated) loadBurden();
+  }, [authenticated, loadBurden]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -99,6 +128,8 @@ export default function FairnessPage() {
 
   const rateRows = hourlyRateRows(rules);
   const restTiers = restPenaltyTiersFromRules(rules);
+  const abasRows = baseWorkShiftRows(rules);
+  const hamagshiyotRows = hamagshiyotShiftRows(rules);
 
   return (
     <AppShell title="טבלת צדק">
@@ -126,6 +157,40 @@ export default function FairnessPage() {
             ))}
           </ul>
         </div>
+
+        {authenticated ? (
+          burdenLoading && !burdenRoster.length ? (
+            <div className="card">
+              <p className="hint">טוען טבלת עומס…</p>
+            </div>
+          ) : (
+            <>
+              <BurdenSummaryPanel
+                roster={burdenRoster}
+                onRefresh={loadBurden}
+                title="עומס שיבוץ — כל הימים שפורסמו"
+                emptyMessage="אין נתוני שיבוץ בימים שפורסמו."
+                assignedLabel="משובצים בתקופה"
+              />
+              <p className="text-xs text-ink3 -mt-4 mb-6">
+                לעומס לפי יום בודד —{" "}
+                <Link href="/board" className="text-brick hover:underline">
+                  רשימה מלאה → עומס שיבוץ
+                </Link>
+              </p>
+            </>
+          )
+        ) : (
+          <div className="card">
+            <h3 className="font-display text-lg mb-2">עומס שיבוץ לפי צוער</h3>
+            <p className="lede mb-3">
+              טבלת העומסים (נקודות צדק, שמירה, תורנות והיסטוריה) זמינה לכל צוער מחובר.
+            </p>
+            <Link href="/login?next=/fairness" className="btn-pri btn-sm">
+              התחברות לצפייה
+            </Link>
+          </div>
+        )}
 
         <div className="card space-y-4">
           <div>
@@ -165,13 +230,51 @@ export default function FairnessPage() {
               <li key={line}>{line}</li>
             ))}
           </ul>
-          <p className="text-sm">
-            דוגמה: חלון 3 שעות ={" "}
-            <span className="mono font-bold">
-              {(rules.hourly_rates.base_work * 3).toFixed(2)}
-            </span>{" "}
-            נק׳ תורנות
-          </p>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>חלון</th>
+                  <th>נק׳ שמירה</th>
+                </tr>
+              </thead>
+              <tbody>
+                {abasRows.map((row) => (
+                  <tr key={row.timeLabel}>
+                    <td>{row.timeLabel}</td>
+                    <td className="mono font-bold text-accent">{row.points.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card space-y-3">
+          <h3 className="font-display text-lg">תורנות חמגשיות</h3>
+          <ul className="text-sm text-ink2 space-y-1 list-disc list-inside">
+            {HAMAGSHIYOT_SCORING_EXPLANATION.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <div className="schedule-table-wrap overflow-x-auto">
+            <table className="schedule-table w-full text-sm">
+              <thead>
+                <tr>
+                  <th>חלון</th>
+                  <th>נק׳ תורנות</th>
+                </tr>
+              </thead>
+              <tbody>
+                {hamagshiyotRows.map((row) => (
+                  <tr key={row.timeLabel}>
+                    <td>{row.timeLabel}</td>
+                    <td className="mono font-bold text-accent">{row.points.toFixed(0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card space-y-3">

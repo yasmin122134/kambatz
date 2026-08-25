@@ -74,6 +74,15 @@ export function patrolAssigneeRole(start: string, end: string): PatrolAssigneeRo
   return PATROL_ROLE_BY_WINDOW.get(patrolWindowKey(start, end)) ?? null;
 }
 
+export const PATROL_ASSIGNEE_ROLE_LABELS: Record<PatrolAssigneeRole, string> = {
+  company_commander: "ככ״א",
+  duty_officer: "קצין תורן",
+};
+
+export function patrolAssigneeRoleLabel(role: PatrolAssigneeRole): string {
+  return PATROL_ASSIGNEE_ROLE_LABELS[role];
+}
+
 export function isPatrolPositionName(name: string): boolean {
   return name.trim().includes("פטרול");
 }

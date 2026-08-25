@@ -167,7 +167,7 @@ export async function PUT(request: Request, { params }: Params) {
       notes: body.notes ?? existing.notes,
     });
     const out =
-      mission_type === "guards"
+      mission_type === "guards" && existing.scheduling_rules?.linked_mission_id
         ? await consolidateGuardDayMission(saved)
         : saved;
     return NextResponse.json(out);
