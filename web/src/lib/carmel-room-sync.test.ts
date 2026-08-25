@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import {
-  applyNameMappingToMissions,
-  buildRoomSwapMapping,
+  applyPersonSwapsToMissions,
+  buildRoomBidirectionalPairs,
   swapCarmelARoom,
 } from "@/lib/carmel-room-sync";
 import { flattenMissionSlots } from "@/lib/mission-utils";
@@ -59,13 +59,13 @@ function guardMissionWithAssignments(
 }
 
 describe("carmel room sync", () => {
-  it("maps Carmel first then other room assignments", () => {
-    const mapping = buildRoomSwapMapping({
+  it("builds bidirectional pairs — Carmel first, then other assignments", () => {
+    const pairs = buildRoomBidirectionalPairs({
       fromRoom: "101",
       targetRoom: "204",
       oldCarmelNames: ["A1", "A2", "A3"],
       newCarmelNames: ["B1", "B2", "B3"],
-      assignedNames: new Set(["A1", "A2", "A3", "A4"]),
+      assignedNames: new Set(["A1", "A2", "A3", "A4", "B4"]),
       people: [
         person("A1", "101"),
         person("A2", "101"),
@@ -78,29 +78,34 @@ describe("carmel room sync", () => {
       ],
       carmelBNames: new Set(),
     });
-    expect(mapping).toEqual({
-      A1: "B1",
-      A2: "B2",
-      A3: "B3",
-      A4: "B4",
-    });
+    expect(pairs).toEqual([
+      ["A1", "B1"],
+      ["A2", "B2"],
+      ["A3", "B3"],
+      ["A4", "B4"],
+    ]);
   });
 
-  it("applyNameMappingToMissions replaces names across slots", () => {
+  it("applyPersonSwapsToMissions exchanges both directions", () => {
     const mission = guardMissionWithAssignments({});
     const slots = flattenMissionSlots(mission);
     const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a")!;
     const guard = slots.find((s) => s.positionKind === "guard")!;
     const assignments = {
-      [carmelA.slotId]: ["Old1", "Old2", "Old3"],
-      [guard.slotId]: ["Old4", ""],
+      [carmelA.slotId]: ["A1", "A2", "A3"],
+      [guard.slotId]: ["B4", ""],
     };
-    const updated = applyNameMappingToMissions(
+    const updated = applyPersonSwapsToMissions(
       [{ ...mission, assignments }],
-      { Old1: "New1", Old2: "New2", Old3: "New3", Old4: "New4" },
+      [
+        ["A1", "B1"],
+        ["A2", "B2"],
+        ["A3", "B3"],
+        ["A4", "B4"],
+      ],
     )[0];
-    expect(updated.assignments[carmelA.slotId]).toEqual(["New1", "New2", "New3"]);
-    expect(updated.assignments[guard.slotId][0]).toBe("New4");
+    expect(updated.assignments[carmelA.slotId]).toEqual(["B1", "B2", "B3"]);
+    expect(updated.assignments[guard.slotId][0]).toBe("A4");
   });
 
   it("swapCarmelARoom replaces room across Carmel and guards", () => {
@@ -127,6 +132,10 @@ describe("carmel room sync", () => {
     assignments[carmelA.slotId] = ["R101-1", "R101-2", "R101-3"];
     assignments[carmelB.slotId] = ["Flex-0", "Flex-1", "Flex-2"];
     assignments[guard.slotId] = ["R101-4", ""];
+    assignments[slots.find((s) => s.slotId !== guard.slotId && s.positionKind === "guard")!.slotId] = [
+      "R204-4",
+      "",
+    ];
 
     const result = swapCarmelARoom({
       missions: [{ ...mission, assignments }],
@@ -140,12 +149,52 @@ describe("carmel room sync", () => {
     if (!result.ok) {
       throw new Error(result.error);
     }
-    expect(result.ok).toBe(true);
 
     const out = result.missions[0];
     expect(out.assignments[carmelA.slotId]).toEqual(["R204-1", "R204-2", "R204-3"]);
     expect(out.assignments[guard.slotId][0]).toBe("R204-4");
     expect(result.fromRoom).toBe("101");
     expect(result.targetRoom).toBe("204");
+  });
+
+  it("succeeds even when target room people have existing guard shifts (head-to-head swap)", () => {
+    const people = [
+      person("R101-1", "101"),
+      person("R101-2", "101"),
+      person("R101-3", "101"),
+      person("R204-1", "204"),
+      person("R204-2", "204"),
+      person("R204-3", "204"),
+    ];
+    const mission = guardMissionWithAssignments({});
+    const slots = flattenMissionSlots(mission);
+    const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a")!;
+    const guardSlots = slots.filter((s) => s.positionKind === "guard");
+    const assignments: Record<string, string[]> = {};
+    for (const slot of slots) {
+      assignments[slot.slotId] = Array.from({ length: slot.seatCount }, () => "");
+    }
+    assignments[carmelA.slotId] = ["R101-1", "R101-2", "R101-3"];
+    assignments[guardSlots[0].slotId] = ["R204-1", ""];
+    assignments[guardSlots[1].slotId] = ["R204-2", ""];
+
+    const result = swapCarmelARoom({
+      missions: [{ ...mission, assignments }],
+      guardsMission: { ...mission, assignments },
+      targetRoom: "204",
+      people,
+      issues: [],
+      rules,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.missions[0].assignments[carmelA.slotId]).toEqual([
+      "R204-1",
+      "R204-2",
+      "R204-3",
+    ]);
+    expect(result.missions[0].assignments[guardSlots[0].slotId][0]).toBe("R101-1");
+    expect(result.missions[0].assignments[guardSlots[1].slotId][0]).toBe("R101-2");
   });
 });

@@ -1,15 +1,4 @@
-import {
-  assignStandbyRoom,
-  buildTrackerFromMissions,
-  findAssignmentConflicts,
-  unplacePerson,
-  validateNoPersonOverlaps,
-} from "@/lib/scheduling-engine";
-import {
-  flattenMissionSlots,
-  syncAssignmentSeats,
-  type FlatSlot,
-} from "@/lib/mission-utils";
+import { flattenMissionSlots, syncAssignmentSeats, type FlatSlot } from "@/lib/mission-utils";
 import type { FairnessRules, Issue, MissionDay, Person } from "@/lib/types";
 
 export type SwapCarmelARoomInput = {
@@ -27,7 +16,7 @@ export type SwapCarmelARoomResult =
       missions: MissionDay[];
       fromRoom: string | null;
       targetRoom: string;
-      mapping: Record<string, string>;
+      pairs: Array<[string, string]>;
     }
   | { ok: false; error: string };
 
@@ -115,6 +104,26 @@ function activePeopleInRoom(
     .sort((a, b) => a.localeCompare(b, "he"));
 }
 
+/** בוחר צוערים מחדר לכרמל א׳ — אותו מגדר, לא על כרמל ב׳. */
+export function pickCarmelTrioFromRoom(
+  room: string,
+  people: Person[],
+  exclude: Set<string>,
+  need: number,
+): string[] {
+  const pool = people
+    .filter((p) => p.active && p.room?.trim() === room && !exclude.has(p.name))
+    .sort((a, b) => a.name.localeCompare(b.name, "he"));
+  if (!pool.length || need <= 0) return [];
+
+  const anchorGender = pool[0].gender?.trim() || "";
+  const sameGender = anchorGender
+    ? pool.filter((p) => (p.gender?.trim() || "") === anchorGender)
+    : pool;
+  return sameGender.slice(0, need).map((p) => p.name);
+}
+
+/** מחליף שמות בכל המשימות לפי מיפוי חד-כיווני (legacy). */
 export function applyNameMappingToMissions(
   missions: MissionDay[],
   mapping: Record<string, string>,
@@ -133,8 +142,35 @@ export function applyNameMappingToMissions(
   });
 }
 
-/** בונה מיפוי 1:1 בין חדר ישן לחדר חדש — קודם כרמל א׳, אחר כך שאר השיבוצים. */
-export function buildRoomSwapMapping(input: {
+/** החלפת שמות דו-כיוונית — כל שיבוץ של א׳ עובר ל-ב׳ ולהפך (ראש בראש). */
+export function applyPersonSwapsToMissions(
+  missions: MissionDay[],
+  pairs: Array<[string, string]>,
+): MissionDay[] {
+  if (!pairs.length) return missions;
+  const swap = new Map<string, string>();
+  for (const [a, b] of pairs) {
+    if (!a || !b || a === b) continue;
+    swap.set(a, b);
+    swap.set(b, a);
+  }
+  if (!swap.size) return missions;
+
+  return missions.map((mission) => {
+    const next = cloneMissionAssignments(mission);
+    for (const [slotId, seats] of Object.entries(next.assignments)) {
+      next.assignments[slotId] = seats.map((name) => {
+        const trimmed = name?.trim();
+        if (!trimmed) return name;
+        return swap.get(trimmed) ?? name;
+      });
+    }
+    return next;
+  });
+}
+
+/** זוגות 1:1 לחילוף — קודם כרמל א׳, אחר כך שאר השיבוצים ביום. */
+export function buildRoomBidirectionalPairs(input: {
   fromRoom: string;
   targetRoom: string;
   oldCarmelNames: string[];
@@ -142,39 +178,37 @@ export function buildRoomSwapMapping(input: {
   assignedNames: Set<string>;
   people: Person[];
   carmelBNames: Set<string>;
-}): Record<string, string> | { error: string } {
+}): Array<[string, string]> {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
-  const mapping: Record<string, string> = {};
+  const pairs: Array<[string, string]> = [];
+  const paired = new Set<string>();
+
+  const link = (a: string, b: string) => {
+    if (!a || !b || a === b || paired.has(a) || paired.has(b)) return;
+    pairs.push([a, b]);
+    paired.add(a);
+    paired.add(b);
+  };
 
   const oldCarmel = input.oldCarmelNames.filter(Boolean);
   const newCarmel = input.newCarmelNames.filter(Boolean);
-  if (newCarmel.length < oldCarmel.length) {
-    return { error: `בחדר ${input.targetRoom} אין מספיק צוערים לכרמל א׳ (${newCarmel.length}/${oldCarmel.length})` };
-  }
-  for (let i = 0; i < oldCarmel.length; i++) {
-    mapping[oldCarmel[i]] = newCarmel[i];
+  for (let i = 0; i < Math.min(oldCarmel.length, newCarmel.length); i++) {
+    link(oldCarmel[i], newCarmel[i]);
   }
 
-  const usedNew = new Set(Object.values(mapping));
   const otherOld = namesAssignedInRoom(
     input.fromRoom,
     input.assignedNames,
     peopleByName,
-  ).filter((n) => !mapping[n]);
+  ).filter((n) => !paired.has(n));
   const otherNew = activePeopleInRoom(input.targetRoom, input.people, input.carmelBNames).filter(
-    (n) => !usedNew.has(n),
+    (n) => !paired.has(n),
   );
-
-  if (otherOld.length > otherNew.length) {
-    return {
-      error: `בחדר ${input.targetRoom} אין מספיק צוערים להחלפת כל השיבוצים (${otherNew.length}/${otherOld.length} נוספים)`,
-    };
-  }
-  for (let i = 0; i < otherOld.length; i++) {
-    mapping[otherOld[i]] = otherNew[i];
+  for (let i = 0; i < Math.min(otherOld.length, otherNew.length); i++) {
+    link(otherOld[i], otherNew[i]);
   }
 
-  return mapping;
+  return pairs;
 }
 
 export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomResult {
@@ -183,6 +217,7 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
     return { ok: false, error: "חסר מספר חדר" };
   }
 
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const carmelSlot = findCarmelASlot(input.guardsMission);
   if (!carmelSlot) {
     return { ok: false, error: "לא נמצאה עמדת כרמל א׳ ביום השמירות" };
@@ -193,6 +228,11 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
     (input.guardsMission.assignments[carmelBSlot?.slotId || ""] || []).filter(Boolean),
   );
 
+  const targetRoomPeople = activePeopleInRoom(targetRoom, input.people, carmelBNames);
+  if (!targetRoomPeople.length) {
+    return { ok: false, error: `אין צוערים פעילים בחדר ${targetRoom}` };
+  }
+
   let missions = input.missions.map(cloneMissionAssignments);
   const guardsIdx = missions.findIndex((m) => m.id === input.guardsMission.id);
   if (guardsIdx < 0) {
@@ -200,75 +240,30 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
   }
   const guardsMission = missions[guardsIdx];
 
-  const oldCarmelNames = [
-    ...(guardsMission.assignments[carmelSlot.slotId] || []),
-  ].map((n) => n?.trim() || "");
-  const fromRoom = roomFromNames(
-    oldCarmelNames.filter(Boolean),
-    Object.fromEntries(input.people.map((p) => [p.name, p])),
+  const oldCarmelNames = (guardsMission.assignments[carmelSlot.slotId] || []).map(
+    (n) => n?.trim() || "",
   );
+  const fromRoom = roomFromNames(oldCarmelNames.filter(Boolean), peopleByName);
 
   if (fromRoom === targetRoom) {
     return { ok: false, error: "כרמל א׳ כבר משובץ מחדר זה" };
   }
 
-  const scheduling = guardsMission.scheduling_rules;
-  const meanPrior =
-    input.people.reduce((s, p) => s + (p.prior_score || 0), 0) /
-    Math.max(1, input.people.length);
-
-  const tracker = buildTrackerFromMissions(missions, input.rules);
-  for (const name of oldCarmelNames) {
-    if (!name) continue;
-    unplacePerson(name, carmelSlot, guardsMission.id, tracker, input.rules, scheduling);
-  }
-
-  const newCarmelNames = assignStandbyRoom(
+  const newCarmelNames = pickCarmelTrioFromRoom(
+    targetRoom,
     input.people,
-    carmelSlot,
+    carmelBNames,
     carmelSlot.seatCount,
-    [],
-    tracker,
-    input.issues,
-    scheduling,
-    input.rules,
-    meanPrior,
-    guardsMission.id,
-    guardsMission.mission_type,
-    { onlyRoom: targetRoom },
   );
 
-  if (newCarmelNames.length < carmelSlot.seatCount) {
-    return {
-      ok: false,
-      error: `לא ניתן לשבץ ${carmelSlot.seatCount} צוערים מחדר ${targetRoom} בכרמל א׳ (כללים / חפיפות / כרמל ב׳)`,
-    };
-  }
-
-  const assignedNames = collectAssignedNames(missions);
-  let mapping: Record<string, string> = {};
-
-  if (fromRoom) {
-    const built = buildRoomSwapMapping({
-      fromRoom,
-      targetRoom,
-      oldCarmelNames: oldCarmelNames.filter(Boolean),
-      newCarmelNames,
-      assignedNames,
-      people: input.people,
-      carmelBNames,
-    });
-    if ("error" in built) {
-      return { ok: false, error: built.error };
+  if (!fromRoom) {
+    if (newCarmelNames.length < carmelSlot.seatCount) {
+      return {
+        ok: false,
+        error: `בחדר ${targetRoom} אין ${carmelSlot.seatCount} צוערים מאותו מגדר לכרמל א׳`,
+      };
     }
-    mapping = built;
-    missions = applyNameMappingToMissions(missions, mapping);
-  } else {
-    const seats = [...(missions[guardsIdx].assignments[carmelSlot.slotId] || [])];
-    while (seats.length < carmelSlot.seatCount) seats.push("");
-    for (let i = 0; i < newCarmelNames.length; i++) {
-      seats[i] = newCarmelNames[i];
-    }
+    const seats = Array.from({ length: carmelSlot.seatCount }, (_, i) => newCarmelNames[i] || "");
     missions[guardsIdx] = {
       ...missions[guardsIdx],
       assignments: {
@@ -276,25 +271,40 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
         [carmelSlot.slotId]: seats,
       },
     };
+    return {
+      ok: true,
+      missions,
+      fromRoom: null,
+      targetRoom,
+      pairs: [],
+    };
   }
 
-  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
-  const overlapErrors = validateNoPersonOverlaps(missions);
-  if (overlapErrors.length) {
-    return { ok: false, error: overlapErrors[0] };
+  const assignedNames = collectAssignedNames(missions);
+  const pairs = buildRoomBidirectionalPairs({
+    fromRoom,
+    targetRoom,
+    oldCarmelNames: oldCarmelNames.filter(Boolean),
+    newCarmelNames,
+    assignedNames,
+    people: input.people,
+    carmelBNames,
+  });
+
+  if (!pairs.length) {
+    return {
+      ok: false,
+      error: `לא נמצאו זוגות להחלפה בין חדר ${fromRoom} ל-${targetRoom}`,
+    };
   }
-  for (const mission of missions) {
-    const conflicts = findAssignmentConflicts(mission, peopleByName, input.issues);
-    if (conflicts.length) {
-      return { ok: false, error: conflicts[0] };
-    }
-  }
+
+  missions = applyPersonSwapsToMissions(missions, pairs);
 
   return {
     ok: true,
     missions,
     fromRoom,
     targetRoom,
-    mapping,
+    pairs,
   };
 }
