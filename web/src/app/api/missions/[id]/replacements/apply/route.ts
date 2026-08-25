@@ -6,8 +6,8 @@ import { loadApprovedIssues } from "@/lib/issues";
 import { fetchActivePeople } from "@/lib/people";
 import {
   applyReplacementAssignment,
+  normalizeReplacementApplyOption,
   sameDayMissionsFor,
-  type ReplacementApplyOption,
 } from "@/lib/replacement-apply";
 import { resolveMissionForSlot } from "@/lib/mission-utils";
 import { createClient } from "@/lib/supabase/server";
@@ -24,15 +24,12 @@ export async function POST(request: Request, { params }: Params) {
   const slotId = String(body.slot_id || "");
   const seatIndex = Number(body.seat_index);
   const removeName = String(body.remove_name || "").trim();
-  const option = body.option as ReplacementApplyOption | undefined;
+  const option = normalizeReplacementApplyOption(body.option, body.force === true);
 
-  if (!slotId || !Number.isFinite(seatIndex) || !removeName || !option?.type) {
+  if (!slotId || !Number.isFinite(seatIndex) || !removeName || !option) {
     return NextResponse.json({ error: "חסרים פרמטרים" }, { status: 400 });
   }
 
-  if (option.type === "direct" && !String(option.personName || "").trim()) {
-    return NextResponse.json({ error: "חסר שם מחליף" }, { status: 400 });
-  }
   if (
     option.type === "swap" &&
     (!option.swapMissionId || !option.swapSlotId || !Number.isFinite(option.swapSeatIndex))

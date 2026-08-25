@@ -23,7 +23,11 @@ import {
   issueBlockMessage,
   canSwapReplacementAssignments,
 } from "@/lib/scheduling-engine";
-import { sameDayMissionsFor } from "@/lib/replacement-apply";
+import {
+  missionsWithChangedAssignments,
+  missionsWithForcedAssignment,
+  sameDayMissionsFor,
+} from "@/lib/replacement-apply";
 import {
   flattenMissionSlots,
   reconcileAssignmentsOnStructureChange,
@@ -322,14 +326,45 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
     }
     const nextName = String(name || "").trim();
+    const currentName = (hostMission.assignments[slot_id] || [])[seat_index]?.trim() || "";
     if (nextName) {
       const person = peopleByName[nextName];
       if (!person) {
         return NextResponse.json({ error: `${nextName}: לא נמצא במחזור` }, { status: 400 });
       }
+      const before = sameDay.map((m) => ({
+        ...m,
+        assignments: Object.fromEntries(
+          Object.entries(syncAssignmentSeats(m.positions, m.assignments)).map(([sid, seats]) => [
+            sid,
+            [...seats],
+          ]),
+        ),
+      }));
+      const forced = missionsWithForcedAssignment(
+        before,
+        hostMission.id,
+        slot_id,
+        seat_index,
+        nextName,
+        currentName,
+      );
+      const dirty = missionsWithChangedAssignments(before, forced);
+      const savedMissions = await Promise.all(
+        dirty.map((m) =>
+          saveMissionDay({ ...m, id: m.id }, { validateAssignments: false }).then(
+            (r) => r.mission,
+          ),
+        ),
+      );
+      const primary =
+        savedMissions.find((m) => m.id === hostMission.id) ??
+        savedMissions[0] ??
+        forced.find((m) => m.id === hostMission.id)!;
+      return NextResponse.json(primary);
     }
     const seats = [...(hostMission.assignments[slot_id] || [])];
-    seats[seat_index] = String(name || "").trim();
+    seats[seat_index] = "";
     updated = {
       ...hostMission,
       assignments: { ...hostMission.assignments, [slot_id]: seats },

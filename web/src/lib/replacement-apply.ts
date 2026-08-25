@@ -12,7 +12,8 @@ import {
 import type { FairnessRules, Issue, MissionDay, Person } from "@/lib/types";
 
 export type ReplacementApplyOption =
-  | { type: "direct"; personName: string; /** admin override — skip scheduling rules */ force?: boolean }
+  | { type: "direct"; personName: string; force?: boolean }
+  | { type: "manual"; personName: string }
   | {
       type: "swap";
       swapMissionId: string;
@@ -28,6 +29,67 @@ function slotById(mission: MissionDay, slotId: string) {
 
 function seatArray(mission: MissionDay, slotId: string): string[] {
   return [...(syncAssignmentSeats(mission.positions, mission.assignments)[slotId] || [])];
+}
+
+function cloneMissionAssignments(mission: MissionDay): MissionDay {
+  const synced = syncAssignmentSeats(mission.positions, mission.assignments);
+  const assignments = Object.fromEntries(
+    Object.entries(synced).map(([slotId, seats]) => [slotId, [...seats]]),
+  );
+  return { ...mission, assignments };
+}
+
+export function isForcedReplacementOption(option: ReplacementApplyOption): boolean {
+  return option.type === "manual" || (option.type === "direct" && option.force === true);
+}
+
+/** שיבוץ כפוי — מסיר את המחליף מכל משבצת אחרת ביום ואז משבץ. */
+export function missionsWithForcedAssignment(
+  sameDayMissions: MissionDay[],
+  targetMissionId: string,
+  slotId: string,
+  seatIndex: number,
+  nextName: string,
+  removeName: string,
+): MissionDay[] {
+  return sameDayMissions.map((mission) => {
+    const next = cloneMissionAssignments(mission);
+    for (const [sid, seats] of Object.entries(next.assignments)) {
+      next.assignments[sid] = seats.map((n, i) => {
+        if (
+          n === nextName &&
+          !(mission.id === targetMissionId && sid === slotId && i === seatIndex)
+        ) {
+          return "";
+        }
+        return n;
+      });
+    }
+    if (mission.id !== targetMissionId) return next;
+
+    const seats = [...(next.assignments[slotId] || [])];
+    while (seats.length <= seatIndex) seats.push("");
+    seats[seatIndex] = nextName;
+    next.assignments[slotId] = seats;
+
+    if (getBaseWorkSlotLeader(mission, slotId) === removeName) {
+      return withBaseWorkSlotLeader(next, slotId, nextName);
+    }
+    return next;
+  });
+}
+
+export function missionsWithChangedAssignments(
+  before: MissionDay[],
+  after: MissionDay[],
+): MissionDay[] {
+  const out: MissionDay[] = [];
+  for (let i = 0; i < after.length; i++) {
+    if (JSON.stringify(before[i]?.assignments) !== JSON.stringify(after[i]?.assignments)) {
+      out.push(after[i]);
+    }
+  }
+  return out;
 }
 
 export async function applyReplacementAssignment(input: {
@@ -63,25 +125,48 @@ export async function applyReplacementAssignment(input: {
     throw new Error("השיבוץ השתנה — רעננו ונסו שוב");
   }
 
-  if (input.option.type === "direct") {
+  if (input.option.type === "direct" || input.option.type === "manual") {
     const nextName = input.option.personName.trim();
     const person = input.peopleByName[nextName];
     if (!person) throw new Error(`${nextName}: לא נמצא במחזור`);
 
-    if (!input.option.force) {
-      const check = canAssignPersonToSlot({
-        missions: input.sameDayMissions,
-        rules: input.rules,
-        missionId: sourceMission.id,
-        slot: srcSlot,
+    if (isForcedReplacementOption(input.option)) {
+      const before = input.sameDayMissions.map(cloneMissionAssignments);
+      const updated = missionsWithForcedAssignment(
+        before,
+        sourceMission.id,
+        input.slotId,
         seatIndex,
-        person,
-        issues: input.issues,
-        peopleByName: input.peopleByName,
-        replaceName: input.removeName,
-      });
-      if (!check.ok) throw new Error(check.reason);
+        nextName,
+        input.removeName,
+      );
+      const dirty = missionsWithChangedAssignments(before, updated);
+      const saved = await Promise.all(
+        dirty.map((m) =>
+          saveMissionDay({ ...m, id: m.id }, { validateAssignments: false }).then(
+            (r) => r.mission,
+          ),
+        ),
+      );
+      const primary =
+        saved.find((m) => m.id === sourceMission.id) ??
+        saved[0] ??
+        updated.find((m) => m.id === sourceMission.id)!;
+      return { missions: saved.length ? saved : [primary] };
     }
+
+    const check = canAssignPersonToSlot({
+      missions: input.sameDayMissions,
+      rules: input.rules,
+      missionId: sourceMission.id,
+      slot: srcSlot,
+      seatIndex,
+      person,
+      issues: input.issues,
+      peopleByName: input.peopleByName,
+      replaceName: input.removeName,
+    });
+    if (!check.ok) throw new Error(check.reason);
 
     const seats = seatArray(sourceMission, input.slotId);
     seats[seatIndex] = nextName;
@@ -199,4 +284,34 @@ export function sameDayMissionsFor(
 ): MissionDay[] {
   const date = mission.mission_date.slice(0, 10);
   return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
+}
+
+export function normalizeReplacementApplyOption(
+  raw: unknown,
+  bodyForce?: boolean,
+): ReplacementApplyOption | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const type = o.type;
+  if (type === "manual") {
+    const personName = String(o.personName || "").trim();
+    return personName ? { type: "manual", personName } : null;
+  }
+  if (type === "direct") {
+    const personName = String(o.personName || "").trim();
+    if (!personName) return null;
+    if (o.force === true || bodyForce === true) {
+      return { type: "manual", personName };
+    }
+    return { type: "direct", personName };
+  }
+  if (type === "swap") {
+    return {
+      type: "swap",
+      swapMissionId: String(o.swapMissionId || ""),
+      swapSlotId: String(o.swapSlotId || ""),
+      swapSeatIndex: Number(o.swapSeatIndex),
+    };
+  }
+  return null;
 }

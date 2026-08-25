@@ -323,6 +323,7 @@ export function BoardClient({
         seat_index: seatIndex,
         remove_name: removeName,
         option,
+        force: option.type === "manual",
       }),
     });
     const data = await res.json();
@@ -1503,9 +1504,8 @@ function ReplacementPicker({
                 onClick={async () => {
                   setSaving(true);
                   const ok = await onApply({
-                    type: "direct",
+                    type: "manual",
                     personName: manualName.trim(),
-                    force: true,
                   });
                   setSaving(false);
                   if (ok) setOpen(false);

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyReplacementAssignment } from "@/lib/replacement-apply";
+import {
+  applyReplacementAssignment,
+  missionsWithForcedAssignment,
+} from "@/lib/replacement-apply";
 import type { MissionDay, Person } from "@/lib/types";
 import {
   DEFAULT_FAIRNESS_RULES,
@@ -110,7 +113,7 @@ describe("applyReplacementAssignment", () => {
     expect(result.missions[0].assignments.g2).toEqual(["Bob"]);
   });
 
-  it("force direct replace bypasses scheduling rules", async () => {
+  it("manual replace bypasses guard spacing and clears other guard slots", async () => {
     const mission = guardMission({
       g1: ["Alex"],
       g2: ["Bob"],
@@ -139,12 +142,31 @@ describe("applyReplacementAssignment", () => {
       slotId: "g2",
       seatIndex: 0,
       removeName: "Bob",
-      option: { type: "direct", personName: "Alex", force: true },
+      option: { type: "manual", personName: "Alex" },
       peopleByName,
       issues: [],
       rules,
     });
+    expect(forced.missions[0].assignments.g1).toEqual([""]);
     expect(forced.missions[0].assignments.g2).toEqual(["Alex"]);
+  });
+
+  it("missionsWithForcedAssignment assigns person even when guard spacing would fail", () => {
+    const mission = guardMission({
+      g1: ["Alex"],
+      g2: ["Bob"],
+    });
+    mission.scheduling_rules = { ...scheduling, guard_ratio: 2 };
+    const updated = missionsWithForcedAssignment(
+      [mission],
+      mission.id,
+      "g2",
+      0,
+      "Alex",
+      "Bob",
+    );
+    expect(updated[0].assignments.g1).toEqual([""]);
+    expect(updated[0].assignments.g2).toEqual(["Alex"]);
   });
 
   it("rejects stale remove_name", async () => {
