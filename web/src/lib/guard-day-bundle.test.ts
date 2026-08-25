@@ -7,7 +7,7 @@ import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 function guardsMission(
   overrides: Partial<MissionDay> & Pick<MissionDay, "assignments">,
 ): MissionDay {
-  const [baseWork] = defaultBaseWorkPositions({ seatsPerShift: 15 });
+  const [baseWork] = defaultBaseWorkPositions({ seatsPerShift: 20 });
   return {
     id: "guard-1",
     title: "שמירות",

@@ -50,6 +50,8 @@ import {
 } from "@/lib/time-interval";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
+  clampBaseWorkSeatsPerShift,
+  DEFAULT_BASE_WORK_SCHEDULING_RULES,
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
   type FairnessRules,
@@ -2082,10 +2084,10 @@ export function assignBaseWorkShift(input: {
 } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const cfg = input.scheduling.base_work;
-  const configuredTarget = cfg?.seats_per_shift ?? 15;
-  const target = Math.max(
-    13,
-    Math.min(15, input.slot.seatCount || configuredTarget),
+  const configuredTarget =
+    cfg?.seats_per_shift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift;
+  const target = clampBaseWorkSeatsPerShift(
+    input.slot.seatCount || configuredTarget,
   );
   const diagnostics: BaseWorkShiftDiagnostics = {
     required: target,

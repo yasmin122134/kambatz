@@ -345,7 +345,7 @@ export const STANDARD_KITCHEN_SUMMARY = [
 
 export const STANDARD_BASE_WORK_SUMMARY = [
   "בוקר 08:30–11:30 · צהריים 13:30–17:30 · ערב 18:30–20:00",
-  "13–15 צוערים בחלון · שיבוץ לפי צדק",
+  "20 צוערים בחלון · שיבוץ לפי צדק",
 ] as const;
 
 export const STANDARD_HAMAGSHIYOT_SUMMARY = [

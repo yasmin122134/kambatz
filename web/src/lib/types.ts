@@ -109,8 +109,11 @@ export interface KitchenSchedulingRules {
   out_names_by_shift?: string[][];
 }
 
+export const BASE_WORK_SEATS_MIN = 13;
+export const BASE_WORK_SEATS_MAX = 20;
+
 export interface BaseWorkSchedulingRules {
-  /** יעד צוערים בחלון עב״ס (13–15) */
+  /** יעד צוערים בחלון עב״ס (13–20, ברירת מחדל 20) */
   seats_per_shift: number;
   /** @deprecated לא בשימוש — שיבוץ עב״ס לא לפי צוותים */
   squad_rest_by_shift?: number[];
@@ -141,8 +144,13 @@ export const DEFAULT_KITCHEN_SCHEDULING_RULES: KitchenSchedulingRules = {
 };
 
 export const DEFAULT_BASE_WORK_SCHEDULING_RULES: BaseWorkSchedulingRules = {
-  seats_per_shift: 15,
+  seats_per_shift: 20,
 };
+
+export function clampBaseWorkSeatsPerShift(raw: number | undefined | null): number {
+  const n = +raw! || DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift;
+  return Math.max(BASE_WORK_SEATS_MIN, Math.min(BASE_WORK_SEATS_MAX, n));
+}
 
 /** מאיישים בכל משמרת כוח עתודה */
 export const DEFAULT_RESERVE_FORCE_SEATS = 5;

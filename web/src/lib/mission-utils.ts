@@ -10,6 +10,7 @@ import type {
   Person,
 } from "@/lib/types";
 import {
+  clampBaseWorkSeatsPerShift,
   DEFAULT_BASE_WORK_SCHEDULING_RULES,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
@@ -252,10 +253,7 @@ export function normalizeSchedulingRules(raw: unknown): MissionSchedulingRules {
   };
   const b: Partial<BaseWorkSchedulingRules> = src.base_work ?? {};
   out.base_work = {
-    seats_per_shift: Math.max(
-      13,
-      Math.min(15, +b.seats_per_shift! || DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift),
-    ),
+    seats_per_shift: clampBaseWorkSeatsPerShift(b.seats_per_shift),
     slot_leaders: normalizeBaseWorkSlotLeaders(b.slot_leaders),
   };
   return out;

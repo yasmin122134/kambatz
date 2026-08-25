@@ -4,6 +4,9 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
+  BASE_WORK_SEATS_MAX,
+  BASE_WORK_SEATS_MIN,
+  clampBaseWorkSeatsPerShift,
   DEFAULT_BASE_WORK_SCHEDULING_RULES,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
@@ -820,14 +823,17 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             </ul>
             <div className="rowf">
               <div className="field">
-                <label>יעד צוערים בחלון (13–15)</label>
+                <label>יעד צוערים בחלון ({BASE_WORK_SEATS_MIN}–{BASE_WORK_SEATS_MAX})</label>
                 <input
                   type="number"
-                  min={13}
-                  max={15}
-                  value={schedulingRules.base_work?.seats_per_shift ?? 15}
+                  min={BASE_WORK_SEATS_MIN}
+                  max={BASE_WORK_SEATS_MAX}
+                  value={
+                    schedulingRules.base_work?.seats_per_shift ??
+                    DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift
+                  }
                   onChange={(e) => {
-                    const seats = Math.max(13, Math.min(15, +e.target.value || 15));
+                    const seats = clampBaseWorkSeatsPerShift(+e.target.value);
                     setSchedulingRules((r) => ({
                       ...r,
                       base_work: {
@@ -840,7 +846,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               </div>
             </div>
             <p className="hint text-xs">
-              בכל חלון משובצים 13–15 צוערים לפי צדק וזמינות (לא לפי צוותים).
+              בכל חלון משובצים {BASE_WORK_SEATS_MIN}–{BASE_WORK_SEATS_MAX} צוערים לפי צדק
+              וזמינות (ברירת מחדל {DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift}, לא לפי
+              צוותים).
             </p>
             <button
               type="button"
@@ -943,7 +951,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               const isBaseWorkSlot =
                 missionType === "base_work" || isBaseWorkPosition(pos);
               const seatMax =
-                missionType === "kitchen" ? 60 : isBaseWorkSlot ? 15 : 10;
+                missionType === "kitchen"
+                  ? 60
+                  : isBaseWorkSlot
+                    ? BASE_WORK_SEATS_MAX
+                    : 10;
               return (
               <div
                 key={slot.id}

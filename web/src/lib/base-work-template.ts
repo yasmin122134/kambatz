@@ -121,7 +121,7 @@ export function materializeBaseWorkPositions(
   );
 }
 
-/** עבודות בסיס — 3 חלונות; 13–15 צוערים בכל חלון */
+/** עבודות בסיס — 3 חלונות; עד 20 צוערים בכל חלון (ברירת מחדל 20) */
 export function defaultBaseWorkPositions(options?: { seatsPerShift?: number }): MissionPosition[] {
   const seats = options?.seatsPerShift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift;
   const slots: MissionSlot[] = [

@@ -694,7 +694,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
         return "5 צוערים תמיד — משמרות מסתובבות לאורך כל יום המשימה.";
       }
       if (pos.name.includes("עבודות בסיס") || pos.name.includes("עב״ס")) {
-        return "3 חלונות (בוקר/צהריים/ערב) — 13–15 צוערים בכל חלון לפי צדק.";
+        return "3 חלונות (בוקר/צהריים/ערב) — עד 20 צוערים בכל חלון לפי צדק.";
       }
       return null;
     default:
