@@ -14,7 +14,7 @@ import {
   validateGeneratedRoster,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
-import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
+import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import { calculatePersonBurden } from "@/lib/guard-burden";
 
 const rules = { ...DEFAULT_FAIRNESS_RULES };
@@ -302,8 +302,8 @@ describe("patrol and hamagshiyot guard day positions", () => {
   it("resolves duty officer name for patrol from overlapping officer duty shift", () => {
     const positions = buildGuardDayPositions({
       missionDate: "2026-03-01",
-      startsAt: "2026-03-01T08:00:00+03:00",
-      endsAt: "2026-03-02T08:00:00+03:00",
+      missionStartsAt: "2026-03-01T08:00:00+03:00",
+      missionEndsAt: "2026-03-02T08:00:00+03:00",
     });
     const patrolPos = positions.find((p) => p.name === "פטרולים")!;
     const officerPos = positions.find((p) => p.kind === "officer_duty")!;
@@ -318,7 +318,7 @@ describe("patrol and hamagshiyot guard day positions", () => {
       status: "published",
       positions,
       assignments: {},
-      scheduling_rules: {},
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES },
       notes: null,
       created_at: "",
       updated_at: "",
@@ -348,8 +348,8 @@ describe("patrol and hamagshiyot guard day positions", () => {
   it("uses assigned name on company commander patrol", () => {
     const positions = buildGuardDayPositions({
       missionDate: "2026-03-01",
-      startsAt: "2026-03-01T08:00:00+03:00",
-      endsAt: "2026-03-02T08:00:00+03:00",
+      missionStartsAt: "2026-03-01T08:00:00+03:00",
+      missionEndsAt: "2026-03-02T08:00:00+03:00",
     });
     const patrolPos = positions.find((p) => p.name === "פטרולים")!;
     const ccPatrolSlot = patrolPos.slots.find((s) => s.start_time === "09:30")!;
@@ -365,7 +365,7 @@ describe("patrol and hamagshiyot guard day positions", () => {
       assignments: {
         [ccPatrolSlot.id]: ["דני כהן"],
       },
-      scheduling_rules: {},
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES },
       notes: null,
       created_at: "",
       updated_at: "",
