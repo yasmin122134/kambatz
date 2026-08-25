@@ -2415,6 +2415,37 @@ export function replacementBurdenLabel(bucket: FairnessBurdenBucket): string {
   return bucket === "kitchen" ? "עומס תורנות" : "עומס שמירה";
 }
 
+const REPLACEMENT_DIRECT_LIMIT = 12;
+const REPLACEMENT_SWAP_LIMIT = 200;
+
+/** lower = better swap suggestion (adjacent / same post preferred) */
+function swapReplacementCost(
+  target: FlatSlot,
+  other: FlatSlot,
+  swapPerson: Person,
+  tracker: ScheduleTracker,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling: MissionSchedulingRules,
+  burdenBucket: FairnessBurdenBucket,
+): number {
+  const gapMs = Math.min(
+    Math.abs(other.startAtMs - target.endAtMs),
+    Math.abs(target.startAtMs - other.endAtMs),
+  );
+  let cost = 0;
+  if (target.positionId === other.positionId) cost -= 30;
+  else if (target.positionName === other.positionName) cost -= 20;
+  else if (target.positionKind === other.positionKind) cost -= 8;
+  if (gapMs === 0) cost -= 40;
+  else if (gapMs <= 90 * 60 * 1000) cost -= 15;
+  cost += Math.abs(other.durationMinutes - target.durationMinutes) / 60;
+  if (target.positionKind !== other.positionKind) cost += 2;
+  cost +=
+    workScore(swapPerson, tracker, rules, meanPrior, scheduling, burdenBucket) / 100;
+  return cost;
+}
+
 export function findReplacements(input: {
   missions: MissionDay[];
   people: Person[];
@@ -2482,20 +2513,26 @@ export function findReplacements(input: {
       });
     }
     options.sort((a, b) => a.cost - b.cost);
-    return options.slice(0, 8);
+    return options.slice(0, REPLACEMENT_DIRECT_LIMIT);
   }
 
-  for (const p of input.people) {
-    if (p.name === input.removeName) continue;
-    for (const otherMission of input.missions) {
-      for (const otherSlot of flattenMissionSlots(otherMission)) {
-        const arr = otherMission.assignments[otherSlot.slotId] || [];
-        const oi = arr.indexOf(p.name);
-        if (oi < 0) continue;
-        if (arr.includes(input.removeName)) continue;
+  const seen = new Set<string>();
 
-        const swapPerson = peopleByName[p.name];
+  for (const otherMission of input.missions) {
+    for (const otherSlot of flattenMissionSlots(otherMission)) {
+      const arr = otherMission.assignments[otherSlot.slotId] || [];
+      for (let oi = 0; oi < arr.length; oi++) {
+        const swapName = arr[oi]?.trim();
+        if (!swapName || swapName === input.removeName) continue;
+        if (otherMission.id === mission.id && otherSlot.slotId === input.slotId && oi === input.seatIndex) {
+          continue;
+        }
+
+        const swapPerson = peopleByName[swapName];
         if (!swapPerson) continue;
+
+        const dedupeKey = `${otherMission.id}:${otherSlot.slotId}:${oi}`;
+        if (seen.has(dedupeKey)) continue;
 
         const check = canSwapReplacementAssignments({
           missions: input.missions,
@@ -2512,6 +2549,7 @@ export function findReplacements(input: {
           peopleByName,
         });
         if (!check.ok) continue;
+        seen.add(dedupeKey);
 
         const perRemove = buildTrackerFromMissions(input.missions, input.rules);
         unplacePerson(
@@ -2531,27 +2569,22 @@ export function findReplacements(input: {
           normalizeSchedulingRules(otherMission.scheduling_rules),
         );
 
-        const durDiff =
-          Math.abs(otherSlot.durationMinutes - target.durationMinutes) / 60;
-        const kindPenalty =
-          otherSlot.positionKind === target.positionKind ? 0 : 2;
-        const cost =
-          durDiff +
-          kindPenalty +
-          workScore(
-            swapPerson,
-            perRemove,
-            input.rules,
-            meanPrior,
-            scheduling,
-            burdenBucket,
-          ) / 100;
+        const cost = swapReplacementCost(
+          target,
+          otherSlot,
+          swapPerson,
+          perRemove,
+          input.rules,
+          meanPrior,
+          scheduling,
+          burdenBucket,
+        );
 
         options.push({
           type: "swap",
-          personName: p.name,
+          personName: swapPerson.name,
           cost,
-          label: `${p.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel}`,
+          label: `${swapPerson.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel}`,
           swapMissionId: otherMission.id,
           swapSlotId: otherSlot.slotId,
           swapSeatIndex: oi,
@@ -2562,7 +2595,7 @@ export function findReplacements(input: {
   }
 
   options.sort((a, b) => a.cost - b.cost);
-  return options.slice(0, 8);
+  return options.slice(0, REPLACEMENT_SWAP_LIMIT);
 }
 
 function blockLabel(block: BusyBlock): string {

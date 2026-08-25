@@ -110,6 +110,43 @@ describe("applyReplacementAssignment", () => {
     expect(result.missions[0].assignments.g2).toEqual(["Bob"]);
   });
 
+  it("force direct replace bypasses scheduling rules", async () => {
+    const mission = guardMission({
+      g1: ["Alex"],
+      g2: ["Bob"],
+    });
+    mission.scheduling_rules = { ...scheduling, guard_ratio: 2 };
+    const people = [person("Alex"), person("Bob")];
+    const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+
+    await expect(
+      applyReplacementAssignment({
+        sourceMission: mission,
+        sameDayMissions: [mission],
+        slotId: "g2",
+        seatIndex: 0,
+        removeName: "Bob",
+        option: { type: "direct", personName: "Alex" },
+        peopleByName,
+        issues: [],
+        rules,
+      }),
+    ).rejects.toThrow();
+
+    const forced = await applyReplacementAssignment({
+      sourceMission: mission,
+      sameDayMissions: [mission],
+      slotId: "g2",
+      seatIndex: 0,
+      removeName: "Bob",
+      option: { type: "direct", personName: "Alex", force: true },
+      peopleByName,
+      issues: [],
+      rules,
+    });
+    expect(forced.missions[0].assignments.g2).toEqual(["Alex"]);
+  });
+
   it("rejects stale remove_name", async () => {
     const mission = guardMission({ g1: ["Bob"], g2: [""] });
     const peopleByName = { Bob: person("Bob"), Carl: person("Carl") };

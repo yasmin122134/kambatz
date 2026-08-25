@@ -12,7 +12,7 @@ import {
 import type { FairnessRules, Issue, MissionDay, Person } from "@/lib/types";
 
 export type ReplacementApplyOption =
-  | { type: "direct"; personName: string }
+  | { type: "direct"; personName: string; /** admin override — skip scheduling rules */ force?: boolean }
   | {
       type: "swap";
       swapMissionId: string;
@@ -68,18 +68,20 @@ export async function applyReplacementAssignment(input: {
     const person = input.peopleByName[nextName];
     if (!person) throw new Error(`${nextName}: לא נמצא במחזור`);
 
-    const check = canAssignPersonToSlot({
-      missions: input.sameDayMissions,
-      rules: input.rules,
-      missionId: sourceMission.id,
-      slot: srcSlot,
-      seatIndex,
-      person,
-      issues: input.issues,
-      peopleByName: input.peopleByName,
-      replaceName: input.removeName,
-    });
-    if (!check.ok) throw new Error(check.reason);
+    if (!input.option.force) {
+      const check = canAssignPersonToSlot({
+        missions: input.sameDayMissions,
+        rules: input.rules,
+        missionId: sourceMission.id,
+        slot: srcSlot,
+        seatIndex,
+        person,
+        issues: input.issues,
+        peopleByName: input.peopleByName,
+        replaceName: input.removeName,
+      });
+      if (!check.ok) throw new Error(check.reason);
+    }
 
     const seats = seatArray(sourceMission, input.slotId);
     seats[seatIndex] = nextName;

@@ -1489,6 +1489,7 @@ function ReplacementPicker({
           )}
           {mode === "manual" ? (
             <div className="space-y-2">
+              <p className="hint text-xs">שיבוץ ידני — מתבצע גם אם נשברים כללי מנוחה/חפיפה.</p>
               <NameCombobox
                 value={manualName}
                 onChange={setManualName}
@@ -1504,6 +1505,7 @@ function ReplacementPicker({
                   const ok = await onApply({
                     type: "direct",
                     personName: manualName.trim(),
+                    force: true,
                   });
                   setSaving(false);
                   if (ok) setOpen(false);
@@ -1517,7 +1519,7 @@ function ReplacementPicker({
           ) : options.length === 0 ? (
             <p className="hint">אין מחליף שעומד בכללים</p>
           ) : (
-            <ul className="space-y-2 max-h-48 overflow-y-auto">
+            <ul className="space-y-2 max-h-72 overflow-y-auto">
               {options.map((o) => (
                 <li key={`${o.type}-${o.personName}-${o.swapSlotId || ""}`}>
                   <button

@@ -138,6 +138,35 @@ describe("findReplacements", () => {
     expect(options.map((o) => o.personName)).not.toContain("Carl");
   });
 
+  it("suggests adjacent consecutive guard for head-to-head swap first", () => {
+    const mission = guardMission(
+      [
+        { id: "g1", start: "08:00", end: "12:00" },
+        { id: "g2", start: "12:00", end: "16:00" },
+        { id: "g3", start: "16:00", end: "20:00" },
+      ],
+      { g1: ["Alex"], g2: ["Bob"], g3: ["Carl"] },
+    );
+    const people = [person("Alex"), person("Bob"), person("Carl")];
+
+    const options = findReplacements({
+      missions: [mission],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "Alex",
+      mode: "swap",
+    });
+
+    const adjacent = options.find((o) => o.swapSlotId === "g2");
+    expect(adjacent).toBeDefined();
+    expect(adjacent?.personName).toBe("Bob");
+    expect(options[0].swapSlotId).toBe("g2");
+  });
+
   it("suggests valid head-to-head swaps", () => {
     const mission = guardMission(
       [

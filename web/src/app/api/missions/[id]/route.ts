@@ -21,7 +21,6 @@ import {
   canAssignKind,
   blockedByIssue,
   issueBlockMessage,
-  canAssignPersonToSlot,
   canSwapReplacementAssignments,
 } from "@/lib/scheduling-engine";
 import { sameDayMissionsFor } from "@/lib/replacement-apply";
@@ -323,25 +322,10 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
     }
     const nextName = String(name || "").trim();
-    const currentName = String((hostMission.assignments[slot_id] || [])[seat_index] || "").trim();
     if (nextName) {
       const person = peopleByName[nextName];
       if (!person) {
         return NextResponse.json({ error: `${nextName}: לא נמצא במחזור` }, { status: 400 });
-      }
-      const check = canAssignPersonToSlot({
-        missions: sameDay,
-        rules,
-        missionId: hostMission.id,
-        slot,
-        seatIndex: seat_index,
-        person,
-        issues,
-        peopleByName,
-        replaceName: currentName || null,
-      });
-      if (!check.ok) {
-        return NextResponse.json({ error: check.reason }, { status: 400 });
       }
     }
     const seats = [...(hostMission.assignments[slot_id] || [])];
