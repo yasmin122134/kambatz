@@ -11,18 +11,24 @@ function person(name: string, prior = 0): Person {
     id: name,
     name,
     email: null,
-    room: null,
-    gender: "male",
-    prior_score: prior,
+    room: "101",
+    gender: "m",
+    squad: 1,
     active: true,
-    squad: null,
-    role: "scout",
+    no_guard: false,
+    no_standby: false,
+    no_standing: false,
+    no_base_work: false,
+    no_kitchen: false,
+    prior_score: prior,
+    created_at: "",
   };
 }
 
 function guardSlot(): FlatSlot {
   return {
     slotId: "rear",
+    positionId: "rear-pos",
     positionName: "ש״ג רכב אחורי",
     positionKind: "guard",
     missionType: "guards",
@@ -32,8 +38,14 @@ function guardSlot(): FlatSlot {
     timeLabel: "08:00–12:00",
     sameGender: false,
     sameRoom: false,
+    assignees: [],
+    sortKey: 0,
+    durationMinutes: 240,
     cyclicStart: 480,
-    kitchenShiftIndex: null,
+    wallStartMin: 480,
+    calendarDayOffset: 0,
+    startAtMs: 0,
+    endAtMs: 14_400_000,
   };
 }
 
