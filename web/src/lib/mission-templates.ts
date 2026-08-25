@@ -2,6 +2,7 @@ import {
   defaultBaseWorkPositions,
   isBaseWorkPosition,
   materializeBaseWorkPositions,
+  syncBaseWorkSeatCounts,
 } from "@/lib/base-work-template";
 import {
   isHamagshiyotPosition,
@@ -147,10 +148,14 @@ export function finalizeGuardMissionPositions(
     missionEndsAt: input.endsAt,
     baseWorkSeatsPerShift: input.scheduling?.base_work?.seats_per_shift,
   });
+  const syncedBaseWork = syncBaseWorkSeatCounts(
+    baseWorkPositions,
+    input.scheduling?.base_work?.seats_per_shift,
+  );
   const baseWork =
-    baseWorkPositions.length > 0
+    syncedBaseWork.length > 0
       ? materializeBaseWorkPositions(
-          baseWorkPositions,
+          syncedBaseWork,
           input.startsAt,
           input.endsAt,
           input.missionDate,
@@ -237,11 +242,20 @@ export function resolveMissionPositions(input: ResolveMissionPositionsInput): Mi
         season: input.season,
       });
 
+  if (input.missionType === "base_work") {
+    return syncBaseWorkSeatCounts(base, scheduling.base_work?.seats_per_shift);
+  }
+
   if (input.missionType !== "guards") return base;
 
-  if (!input.regenerateStructure) return base;
+  const withSyncedSeats = syncBaseWorkSeatCounts(
+    base,
+    scheduling.base_work?.seats_per_shift,
+  );
 
-  return generateGuardMissionStructure(base, {
+  if (!input.regenerateStructure) return withSyncedSeats;
+
+  return generateGuardMissionStructure(withSyncedSeats, {
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     scheduling,

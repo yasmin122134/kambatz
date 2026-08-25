@@ -34,6 +34,7 @@ import {
   guardPositionHint,
   summarizeGuardSlots,
 } from "@/lib/mission-templates";
+import { syncBaseWorkSeatCounts } from "@/lib/base-work-template";
 import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-utils";
 import { KitchenOutListsEditor } from "@/components/KitchenOutListsEditor";
 
@@ -91,7 +92,11 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   const createInitDone = useRef(false);
   const templateFixDone = useRef(false);
   const loadedTimesRef = useRef<{ startsAt: string; endsAt: string } | null>(null);
-  const loadedSchedulingRef = useRef<{ shift_hours: number; board_start: string } | null>(
+  const loadedSchedulingRef = useRef<{
+    shift_hours: number;
+    board_start: string;
+    base_work_seats: number;
+  } | null>(
     null,
   );
   const structureDirtyRef = useRef(false);
@@ -171,7 +176,16 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           clientPositions: m.positions,
           regenerateStructure: m.mission_type === "guards",
         })
-      : m.positions;
+      : m.mission_type === "guards" || m.mission_type === "base_work"
+        ? resolveMissionPositions({
+            missionType: m.mission_type,
+            startsAt: m.starts_at,
+            endsAt: m.ends_at,
+            scheduling: rules,
+            clientPositions: m.positions,
+            regenerateStructure: false,
+          })
+        : m.positions;
 
     setTitle(m.title);
     setMissionType(m.mission_type);
@@ -182,6 +196,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     loadedSchedulingRef.current = {
       shift_hours: rules.shift_hours ?? 4,
       board_start: rules.board_start ?? "20:00",
+      base_work_seats:
+        rules.base_work?.seats_per_shift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift,
     };
     structureDirtyRef.current = false;
     setStatus(m.status);
@@ -280,7 +296,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       missionType === "guards" &&
       loadedSchedulingRef.current != null &&
       (loadedSchedulingRef.current.shift_hours !== (scheduling_rules.shift_hours ?? 4) ||
-        loadedSchedulingRef.current.board_start !== (scheduling_rules.board_start ?? "20:00"));
+        loadedSchedulingRef.current.board_start !== (scheduling_rules.board_start ?? "20:00") ||
+        loadedSchedulingRef.current.base_work_seats !==
+          clampBaseWorkSeatsPerShift(scheduling_rules.base_work?.seats_per_shift));
 
     const regenerateOnSave =
       missionType === "guards" &&
@@ -321,6 +339,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     loadedSchedulingRef.current = {
       shift_hours: scheduling_rules.shift_hours ?? 4,
       board_start: scheduling_rules.board_start ?? "20:00",
+      base_work_seats: clampBaseWorkSeatsPerShift(scheduling_rules.base_work?.seats_per_shift),
     };
     structureDirtyRef.current = false;
     setMsg(
@@ -841,6 +860,9 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
                         seats_per_shift: seats,
                       },
                     }));
+                    if (missionType === "guards" || missionType === "base_work") {
+                      setPositions((prev) => syncBaseWorkSeatCounts(prev, seats));
+                    }
                   }}
                 />
               </div>

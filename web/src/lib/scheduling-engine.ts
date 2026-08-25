@@ -215,7 +215,7 @@ function needsDutyGuardGap(
   return (aBase && bGuard) || (aGuard && bBase);
 }
 
-/** כרמל ב׳ מותר במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
+/** כרמל ב׳ וכוח עתודה מותרים במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
 export function allowsParallelAssignmentOverlap(
   kindA: MissionPositionKind,
   typeA: MissionType,
@@ -229,6 +229,17 @@ export function allowsParallelAssignmentOverlap(
   const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
   const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
   if ((aCarmelB && bBaseWork) || (bCarmelB && aBaseWork)) return true;
+  const aReserve = isReserveForceSlot({
+    positionKind: kindA,
+    missionType: typeA,
+    positionName: metaA?.positionName,
+  });
+  const bReserve = isReserveForceSlot({
+    positionKind: kindB,
+    missionType: typeB,
+    positionName: metaB?.positionName,
+  });
+  if ((aReserve && bBaseWork) || (bReserve && aBaseWork)) return true;
   const aPatrol = kindA === "patrol";
   const bPatrol = kindB === "patrol";
   const aOfficer = kindA === "officer_duty";

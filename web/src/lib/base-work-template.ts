@@ -1,5 +1,8 @@
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
-import { DEFAULT_BASE_WORK_SCHEDULING_RULES } from "@/lib/types";
+import {
+  clampBaseWorkSeatsPerShift,
+  DEFAULT_BASE_WORK_SCHEDULING_RULES,
+} from "@/lib/types";
 import type { FlatSlot } from "@/lib/mission-utils";
 import { normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
@@ -121,9 +124,25 @@ export function materializeBaseWorkPositions(
   );
 }
 
+/** מסנכרן seat_count בחלונות עב״ס לפי seats_per_shift (גם בלי regenerate מלא). */
+export function syncBaseWorkSeatCounts(
+  positions: MissionPosition[],
+  seatsPerShift?: number,
+): MissionPosition[] {
+  const seats = clampBaseWorkSeatsPerShift(seatsPerShift);
+  return positions.map((pos) =>
+    isBaseWorkPosition(pos)
+      ? {
+          ...pos,
+          slots: (pos.slots || []).map((slot) => ({ ...slot, seat_count: seats })),
+        }
+      : pos,
+  );
+}
+
 /** עבודות בסיס — 3 חלונות; עד 20 צוערים בכל חלון (ברירת מחדל 20) */
 export function defaultBaseWorkPositions(options?: { seatsPerShift?: number }): MissionPosition[] {
-  const seats = options?.seatsPerShift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift;
+  const seats = clampBaseWorkSeatsPerShift(options?.seatsPerShift);
   const slots: MissionSlot[] = [
     newSlot("08:30", "11:30", seats),
     newSlot("13:30", "17:30", seats),
