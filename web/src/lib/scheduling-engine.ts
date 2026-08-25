@@ -1791,6 +1791,7 @@ export function assignStandbyRoom(
   meanPrior: number,
   missionId: string,
   missionType: MissionType = slot.missionType,
+  options?: { onlyRoom?: string },
 ): string[] {
   const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
   const fixed = taken.filter(Boolean);
@@ -1809,6 +1810,7 @@ export function assignStandbyRoom(
     );
 
   let rooms = Object.keys(byRoom).filter((rn) => {
+    if (options?.onlyRoom && rn !== options.onlyRoom) return false;
     if (fixed.some((n) => peopleByName[n]?.room && peopleByName[n]?.room !== rn)) {
       return false;
     }

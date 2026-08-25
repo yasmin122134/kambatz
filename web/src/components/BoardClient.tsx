@@ -28,6 +28,7 @@ import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
+import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
 import { patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
 import { resolvePatrolAssigneeName } from "@/lib/scheduling-engine";
 import type { FlatSlot } from "@/lib/mission-utils";
@@ -117,6 +118,15 @@ export function BoardClient({
         .sort((a, b) => a.localeCompare(b, "he")),
     [peopleByName],
   );
+
+  const dormRooms = useMemo(() => {
+    const rooms = new Set<string>();
+    for (const person of Object.values(peopleByName)) {
+      const room = person.room?.trim();
+      if (room) rooms.add(room);
+    }
+    return [...rooms].sort((a, b) => a.localeCompare(b, "he", { numeric: true }));
+  }, [peopleByName]);
 
   const dayMissions = useMemo(
     () => missions.filter((m) => m.mission_date === activeDate),
@@ -349,6 +359,32 @@ export function BoardClient({
       slot_id: slotId,
       name: leaderName,
     });
+  }
+
+  async function handleSwapCarmelARoom(missionId: string, targetRoom: string) {
+    if (
+      !confirm(
+        `להחליף את כרמל א׳ לחדר ${targetRoom} ולסנכרן את כל השיבוצים של החדר הישן ביום זה?`,
+      )
+    ) {
+      return;
+    }
+    setMsg("");
+    const res = await fetch(`/api/missions/${missionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "swap_carmel_a_room",
+        target_room: targetRoom,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setMsg(data.error || "שגיאה בהחלפת חדר כרמל א׳");
+      return;
+    }
+    await loadMissions();
+    setMsg(`כרמל א׳ הוחלף לחדר ${targetRoom} — השמירות סונכרנו`);
   }
 
   async function setIssueStatus(id: string, status: "approved" | "rejected") {
@@ -602,6 +638,9 @@ export function BoardClient({
               }}
               onAdminSet={adminSetName}
               onApplyReplacement={applyReplacement}
+              onSwapCarmelRoom={handleSwapCarmelARoom}
+              dormRooms={dormRooms}
+              peopleByName={peopleByName}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -860,6 +899,66 @@ function durationToPx(durationMin: number): number {
   return Math.max((durationMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX, 32);
 }
 
+function CarmelARoomSwap({
+  missionId,
+  currentRoom,
+  rooms,
+  onSwap,
+}: {
+  missionId: string;
+  currentRoom: string | null;
+  rooms: string[];
+  onSwap: (missionId: string, room: string) => Promise<void>;
+}) {
+  const [targetRoom, setTargetRoom] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const options = rooms.filter((room) => room !== currentRoom);
+
+  return (
+    <div className="carmel-room-swap mt-1 space-y-1 rounded border border-line2 bg-accent-bg/40 p-2 text-xs">
+      <div className="text-ink2">
+        {currentRoom ? (
+          <>חדר נוכחי: <b>{currentRoom}</b></>
+        ) : (
+          <>כרמל א׳ — לא משובץ מחדר</>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <select
+          className="min-w-[5rem] flex-1 rounded border px-2 py-1 text-sm"
+          value={targetRoom}
+          onChange={(e) => setTargetRoom(e.target.value)}
+          disabled={busy || options.length === 0}
+        >
+          <option value="">בחר חדר…</option>
+          {options.map((room) => (
+            <option key={room} value={room}>
+              חדר {room}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          className="btn-sm btn-pri"
+          disabled={busy || !targetRoom}
+          onClick={async () => {
+            setBusy(true);
+            await onSwap(missionId, targetRoom);
+            setBusy(false);
+            setTargetRoom("");
+          }}
+        >
+          {busy ? "מסנכרן…" : "החלף וסנכרן"}
+        </button>
+      </div>
+      <p className="hint text-[10px] leading-snug">
+        מחליף את כל כרמל א׳ לחדר שנבחר, ומעדכן את כל השמירות/שיבוצים של החדר הישן לפי התאמה 1:1.
+      </p>
+    </div>
+  );
+}
+
 function GuardTimeline({
   mission,
   slots,
@@ -879,6 +978,9 @@ function GuardTimeline({
   onAdminSet,
   onApplyReplacement,
   onCancelSwap,
+  onSwapCarmelRoom,
+  dormRooms = [],
+  peopleByName = {},
 }: {
   mission: MissionDay;
   slots: FlatSlot[];
@@ -904,7 +1006,17 @@ function GuardTimeline({
     option: ReplacementApplyOption,
   ) => Promise<boolean>;
   onCancelSwap: () => void;
+  onSwapCarmelRoom?: (missionId: string, room: string) => Promise<void>;
+  dormRooms?: string[];
+  peopleByName?: Record<string, Person>;
 }) {
+  const carmelASlot = findCarmelASlot(mission);
+  const carmelRoom = carmelASlot
+    ? inferRoomFromAssignees(
+        (mission.assignments[carmelASlot.slotId] || []).filter(Boolean),
+        peopleByName,
+      )
+    : null;
   const positions = mission.positions || [];
   const hourStepPx = TIMELINE_HEIGHT_PX / 24;
   const ticks = Array.from(
@@ -936,7 +1048,17 @@ function GuardTimeline({
             const posSlots = slots.filter((s) => s.positionId === pos.id);
             return (
               <div key={pos.id} className="guard-timeline-col">
-                <div className="guard-timeline-col-header">{pos.name}</div>
+                <div className="guard-timeline-col-header">
+                  <div>{pos.name}</div>
+                  {pos.kind === "standby_carmel_a" && isAdmin && onSwapCarmelRoom && (
+                    <CarmelARoomSwap
+                      missionId={mission.id}
+                      currentRoom={carmelRoom}
+                      rooms={dormRooms}
+                      onSwap={onSwapCarmelRoom}
+                    />
+                  )}
+                </div>
                 <div className="guard-timeline-col-body">
                   {posSlots.map((slot) => (
                     <div
@@ -999,6 +1121,9 @@ function MissionPanel({
   onSetBaseWorkLeader,
   onApplyReplacement,
   onCancelSwap,
+  onSwapCarmelRoom,
+  dormRooms,
+  peopleByName,
 }: {
   mission: MissionDay;
   personName: string;
@@ -1024,6 +1149,9 @@ function MissionPanel({
     option: ReplacementApplyOption,
   ) => Promise<boolean>;
   onCancelSwap: () => void;
+  onSwapCarmelRoom?: (missionId: string, room: string) => Promise<void>;
+  dormRooms?: string[];
+  peopleByName?: Record<string, Person>;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
@@ -1104,6 +1232,9 @@ function MissionPanel({
         onAdminSet={onAdminSet}
         onApplyReplacement={onApplyReplacement}
         onCancelSwap={onCancelSwap}
+        onSwapCarmelRoom={onSwapCarmelRoom}
+        dormRooms={dormRooms}
+        peopleByName={peopleByName}
       />
     );
   }

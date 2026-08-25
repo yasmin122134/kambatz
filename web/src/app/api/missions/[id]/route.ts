@@ -37,6 +37,7 @@ import {
   isBaseWorkFlatSlot,
   withBaseWorkSlotLeader,
 } from "@/lib/base-work-template";
+import { swapCarmelARoom } from "@/lib/carmel-room-sync";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -208,7 +209,7 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const body = await request.json();
-  const { action, slot_id, seat_index, target_slot_id, target_seat_index, name } =
+  const { action, slot_id, seat_index, target_slot_id, target_seat_index, name, target_room } =
     body;
 
   const admin = await isAdmin();
@@ -365,6 +366,34 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
     updated = withBaseWorkSlotLeader(hostMission, slot_id, leaderName || null);
+  } else if (action === "swap_carmel_a_room" && admin) {
+    if (hostMission.mission_type !== "guards") {
+      return NextResponse.json({ error: "החלפת חדר כרמל א׳ זמינה רק ביום שמירות" }, { status: 400 });
+    }
+    const targetRoom = String(target_room || "").trim();
+    if (!targetRoom) {
+      return NextResponse.json({ error: "חסר מספר חדר יעד" }, { status: 400 });
+    }
+    const people = Object.values(peopleByName);
+    const swapResult = swapCarmelARoom({
+      missions: sameDay,
+      guardsMission: hostMission,
+      targetRoom,
+      people,
+      issues,
+      rules,
+    });
+    if (!swapResult.ok) {
+      return NextResponse.json({ error: swapResult.error }, { status: 400 });
+    }
+    const savedMissions = await Promise.all(
+      swapResult.missions.map((m) =>
+        saveMissionDay({ ...m, id: m.id }, { validateAssignments: false }).then((r) => r.mission),
+      ),
+    );
+    const primary =
+      savedMissions.find((m) => m.id === hostMission.id) ?? savedMissions[0] ?? hostMission;
+    return NextResponse.json(primary);
   } else {
     return NextResponse.json({ error: "פעולה לא תקינה" }, { status: 400 });
   }
