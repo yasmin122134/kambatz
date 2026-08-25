@@ -737,7 +737,7 @@ export function summarizeGuardSlots(slots: MissionSlot[]): string {
 
 export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "solo", label: "שמירה לבד", default: 1.5, examples: "פטל, נשקייה, תצפיתן, ש״ג רגלי (יום)" },
-  { bucket: "pair", label: "שמירה בזוג+", default: 1.0, examples: "ש״ג רכב קדמי, ש״ג רכב אחורי (לילה — 2)" },
+  { bucket: "pair", label: "שמירה בזוג+", default: 0.9, examples: "ש״ג רכב קדמי, ש״ג רכב אחורי (לילה — 2)" },
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
   { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "עב״ס 0.75/שעה · עתודה 0.3/שעה" },

@@ -303,7 +303,7 @@ export const DEFAULT_BASE_WORK_SHIFTS: BaseWorkShiftRule[] = [
 
 export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   solo: 1,
-  pair: 1,
+  pair: 0.9,
   standby: 0.15,
   standby_a: 0.5,
   standby_b: 0.3,

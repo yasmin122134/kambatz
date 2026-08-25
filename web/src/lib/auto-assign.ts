@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
+import { hashStringsToSeed } from "@/lib/seeded-random";
 import {
   filterStaleUnresolvedRequirements,
   formatUnresolvedSummary,
@@ -119,6 +120,13 @@ async function smartAssignScope(input: {
     }
   }
 
+  const randomSeed = hashStringsToSeed([
+    ...input.scopeMissions.map((m) => m.mission_date),
+    ...input.scopeMissions.map((m) => m.id),
+    String(Date.now()),
+    String(Math.random()),
+  ]);
+
   const output = runGlobalAssign({
     missions: input.scopeMissions,
     people: input.people,
@@ -129,6 +137,7 @@ async function smartAssignScope(input: {
     crossDayMissions: input.allMissions.filter(
       (m) => !input.scopeMissions.some((s) => s.id === m.id),
     ),
+    randomSeed,
   });
 
   for (const mission of input.scopeMissions) {
@@ -165,6 +174,7 @@ async function smartAssignScope(input: {
         scheduling,
         rules: input.rules,
         meanPrior,
+        randomSeed,
       });
       currentAssignments = repaired;
 
@@ -188,6 +198,7 @@ async function smartAssignScope(input: {
           scheduling,
           rules: input.rules,
           meanPrior,
+          randomSeed,
         });
       currentAssignments = forceFilled;
       if (fillWarnings.length) {

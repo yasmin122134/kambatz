@@ -1,6 +1,8 @@
 import { slotDurationHours } from "@/lib/fairness-math";
 import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
 import { spreadWithOverrides } from "@/lib/fairness-spread";
+import { mulberry32 } from "@/lib/seeded-random";
+import { pickStochasticGuardCandidate } from "@/lib/stochastic-guard-pick";
 import {
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
@@ -320,6 +322,7 @@ export function canAssignKind(
     return !person.no_guard;
   }
   if (isGuardKind(kind)) {
+    if (kind === "guard" && personIsDutyOfficer(person)) return false;
     if (person.no_guard) return false;
     if (
       person.no_standing &&
@@ -370,6 +373,9 @@ function ineligibilityMessage(
     return `${person.name}: פטור מעב״ס`;
   }
   if (isGuardKind(kind)) {
+    if (kind === "guard" && personIsDutyOfficer(person)) {
+      return `${person.name}: קצין תורן לא משובץ לשמירה נוספת`;
+    }
     if (person.no_guard) return `${person.name}: פטור משמירה`;
     if (
       person.no_standing &&
@@ -383,6 +389,21 @@ function ineligibilityMessage(
     return `${person.name}: פטור משמירה`;
   }
   return `${person.name}: לא זכאי ל«${slot.positionName}»`;
+}
+
+function dutyOfficerAlreadyOnGuardDuty(
+  personName: string,
+  slot: FlatSlot,
+  tracker: ScheduleTracker,
+): boolean {
+  const blocks = tracker.busy[personName] || [];
+  if (slot.positionKind === "guard") {
+    return blocks.some((b) => b.positionKind === "officer_duty");
+  }
+  if (slot.positionKind === "officer_duty") {
+    return blocks.some((b) => b.positionKind === "guard");
+  }
+  return false;
 }
 
 /** קצין תורן שכבר משובץ במשמרת האחות (חצי יום שני) */
@@ -684,6 +705,9 @@ export function pointsForSlot(
 ): number {
   if (slot.positionKind === "patrol") {
     return PATROL_GUARD_POINTS;
+  }
+  if (isGuardKind(slot.positionKind)) {
+    return getGuardBaseBurdenForSlot(slot, seatCount, rules);
   }
   if (
     slot.positionKind === "kitchen" &&
@@ -999,6 +1023,7 @@ export function explainFitsPersonFailure(
   ignoreSlotId?: string,
 ): string | null {
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "canAssignKind";
+  if (dutyOfficerAlreadyOnGuardDuty(person.name, slot, tracker)) return "dutyOfficerGuard";
   if (blockedByIssue(person.name, slot, issues)) return "blockedByIssue";
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
   if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) return "guardOk";
@@ -1019,6 +1044,7 @@ export function fitsPerson(
   ignoreSlotId?: string,
 ): boolean {
   if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return false;
+  if (dutyOfficerAlreadyOnGuardDuty(person.name, slot, tracker)) return false;
   if (blockedByIssue(person.name, slot, issues)) return false;
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return false;
   if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) {
@@ -1098,6 +1124,7 @@ export function repairGuardAssignmentGaps(input: {
   scheduling: MissionSchedulingRules;
   rules: FairnessRules;
   meanPrior: number;
+  randomSeed?: number;
 }): { assignments: Record<string, string[]>; filled: number } {
   const assignments = { ...input.assignments };
   for (const key of Object.keys(assignments)) {
@@ -1147,6 +1174,7 @@ export function repairGuardAssignmentGaps(input: {
                 slot,
                 assignments,
               ) ?? undefined,
+              randomSeed: input.randomSeed,
             },
           ) ??
           pickRelaxedCandidate(
@@ -1247,7 +1275,7 @@ export function repairGuardAssignmentGaps(input: {
               input.tracker,
               input.rules,
               input.meanPrior,
-              { scheduling: input.scheduling, roster: input.people },
+              { scheduling: input.scheduling, roster: input.people, randomSeed: input.randomSeed },
             );
 
             if (!replacement) {
@@ -1477,6 +1505,7 @@ export function forceFillEmptySeats(input: {
   scheduling: MissionSchedulingRules;
   rules: FairnessRules;
   meanPrior: number;
+  randomSeed?: number;
 }): { assignments: Record<string, string[]>; filled: number; warnings: string[] } {
   const assignments = { ...input.assignments };
   for (const key of Object.keys(assignments)) {
@@ -1523,6 +1552,7 @@ export function forceFillEmptySeats(input: {
               slot,
               assignments,
             ) ?? undefined,
+            randomSeed: input.randomSeed,
           },
         ) ??
         pickRelaxedCandidate(
@@ -1672,6 +1702,8 @@ export function pickBestCandidate(
     dutyOfficerAlreadyAssigned?: string;
     /** Full active roster — enables spread-aware fairness when provided */
     roster?: Person[];
+    /** When set, guard seats pick randomly among fairly-ranked candidates */
+    randomSeed?: number;
   },
 ): Person | null {
   if (!candidates.length) return null;
@@ -1719,6 +1751,18 @@ export function pickBestCandidate(
     }
     return a.name.localeCompare(b.name, "he");
   });
+  if (useGuardBurden && options?.randomSeed != null && roster?.length) {
+    return pickStochasticGuardCandidate(sorted, {
+      slot,
+      roster,
+      tracker,
+      rules,
+      meanPrior,
+      scheduling,
+      seatCount: slot.seatCount,
+      rng: mulberry32((options.randomSeed + slot.slotId.length * 31) >>> 0),
+    });
+  }
   return sorted[0];
 }
 

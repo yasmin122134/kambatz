@@ -200,7 +200,12 @@ export function getGuardBaseBurden(
     return roundPoints(hours * rates.observation);
   }
 
-  const pairDiscount = seatCount > 1 ? PAIR_GUARD_HOURLY_DISCOUNT : 0;
+  const isPair = seatCount > 1;
+  const dayRate = isPair
+    ? Math.max(0, rules?.pair ?? rates.guard - PAIR_GUARD_HOURLY_DISCOUNT)
+    : rates.guard;
+  const nightPremium = Math.max(0, rates.guard_night - rates.guard);
+  const nightRate = isPair ? dayRate + nightPremium : rates.guard_night;
   const startMin = parseTimeMinutes(startTime);
   if (startMin === null) return 0;
   const durationMin = slotDurationMinutes(startTime, endTime);
@@ -208,10 +213,7 @@ export function getGuardBaseBurden(
   const dayMin = Math.max(0, durationMin - nightMin);
   const dayHours = dayMin / 60;
   const nightHours = nightMin / 60;
-  return roundPoints(
-    dayHours * Math.max(0, rates.guard - pairDiscount) +
-      nightHours * Math.max(0, rates.guard_night - pairDiscount),
-  );
+  return roundPoints(dayHours * dayRate + nightHours * nightRate);
 }
 
 export function getGuardBaseBurdenForSlot(

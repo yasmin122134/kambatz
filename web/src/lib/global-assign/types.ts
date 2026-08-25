@@ -104,6 +104,8 @@ export type GlobalAssignInput = {
   maxAttempts?: number;
   /** Wall-clock budget for the whole search (ms). */
   deadlineMs?: number;
+  /** Seed for guard-position randomness; omit for a fresh seed each run. */
+  randomSeed?: number;
 };
 
 export type GlobalAssignOutput = {

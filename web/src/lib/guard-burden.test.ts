@@ -15,6 +15,7 @@ import {
   createEmptyScheduleTracker,
   fitsPerson,
   pickBestCandidate,
+  placePerson,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
 import type { FlatSlot } from "@/lib/mission-utils";
@@ -91,6 +92,11 @@ describe("guard base scoring", () => {
   it("daytime 08–12 = 4 points solo, 3.6 paired (−0.1/h)", () => {
     expect(getGuardBaseBurden("08:00", "12:00", 1)).toBe(4);
     expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(3.6);
+  });
+
+  it("single daytime hour = 1 solo, 0.9 paired", () => {
+    expect(getGuardBaseBurden("08:00", "09:00", 1)).toBe(1);
+    expect(getGuardBaseBurden("08:00", "09:00", 2)).toBe(0.9);
   });
 
   it("night 00–04 = 5 points (1.25/h)", () => {
@@ -325,6 +331,33 @@ describe("hard constraints still gate eligibility", () => {
     });
     expect(canAssignKind(yasmin, "officer_duty")).toBe(true);
     expect(canAssignKind(yasmin, "guard")).toBe(false);
+  });
+
+  it("duty officer cannot be assigned to regular guard even without no_guard flag", () => {
+    const rani = basePerson({ id: "r1", name: "רני פלג", is_officer: true });
+    expect(canAssignKind(rani, "guard")).toBe(false);
+    expect(
+      fitsPerson(rani, slot, emptyTracker, [], scheduling, [], peopleByName),
+    ).toBe(false);
+  });
+
+  it("duty officer already on officer_duty cannot take another guard slot", () => {
+    const rani = basePerson({ id: "r1", name: "רני פלג", is_officer: true });
+    const tracker = createEmptyScheduleTracker();
+    placePerson(
+      rani.name,
+      { ...flatSlot("08:00", "20:00", 1), positionKind: "officer_duty", positionName: "קצין תורן" },
+      "m1",
+      tracker,
+      rules,
+      scheduling,
+      1,
+    );
+    expect(
+      fitsPerson(rani, flatSlot("20:00", "00:00", 1), tracker, [], scheduling, [], {
+        [rani.name]: rani,
+      }),
+    ).toBe(false);
   });
 
   it("prefers the other duty officer for the second half-day shift", () => {

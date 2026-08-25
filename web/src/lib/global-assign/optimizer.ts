@@ -1,6 +1,7 @@
 import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
   compareByFairnessThenBurden,
+  projectedGuardCandidateScore,
   rosterBurdenSpread,
   spreadAfterGroupAssign,
 } from "@/lib/scheduling-engine";
@@ -26,6 +27,11 @@ import {
 import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
 import { DUTY_OFFICER_NAMES, personIsDutyOfficer } from "@/lib/officers";
+import { mulberry32, hashStringsToSeed } from "@/lib/seeded-random";
+import {
+  pickStochasticGuardCandidate,
+  pickStochasticGuardPair,
+} from "@/lib/stochastic-guard-pick";
 import { enumerateCarmelGroups, hasCarmelGroupCandidates, summarizeCarmelRooms } from "./carmel-groups";
 import {
   buildUnresolvedRequirements,
@@ -420,24 +426,18 @@ function countGuardPairCandidates(
   people: Person[],
   issues: Issue[],
   peopleByName: Record<string, Person>,
+  rules: FairnessRules,
+  meanPrior: number,
 ): number {
-  return listGuardPairCandidates(
-    unit,
-    state,
-    people,
-    issues,
-    peopleByName,
-    0,
-  ).length;
+  return enumerateGuardPairs(unit, state, people, issues, peopleByName).length;
 }
 
-function listGuardPairCandidates(
+function enumerateGuardPairs(
   unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
   state: SolverState,
   people: Person[],
   issues: Issue[],
   peopleByName: Record<string, Person>,
-  seed: number,
 ): Person[][] {
   const scheduling = schedulingFor(unit.mission);
   const need = unit.seatIndices.length;
@@ -464,13 +464,131 @@ function listGuardPairCandidates(
       }
     }
   }
+  return pairs;
+}
 
-  return pairs.sort((groupA, groupB) => {
-    const tieA = (groupA[0].name.charCodeAt(0) + seed) % 7;
-    const tieB = (groupB[0].name.charCodeAt(0) + seed) % 7;
+function guardPairFairnessScore(
+  group: Person[],
+  unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
+  state: SolverState,
+  rules: FairnessRules,
+  meanPrior: number,
+  scheduling: MissionSchedulingRules,
+): number {
+  return group.reduce(
+    (sum, person) =>
+      sum +
+      projectedGuardCandidateScore(
+        person,
+        unit.slot,
+        state.tracker,
+        rules,
+        meanPrior,
+        scheduling,
+        unit.slot.seatCount,
+      ),
+    0,
+  );
+}
+
+function listGuardPairCandidates(
+  unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  peopleByName: Record<string, Person>,
+  seed: number,
+  rules: FairnessRules,
+  meanPrior: number,
+): Person[][] {
+  const scheduling = schedulingFor(unit.mission);
+  const pairs = enumerateGuardPairs(unit, state, people, issues, peopleByName);
+  const scored = pairs.map((group) => ({
+    group,
+    score: guardPairFairnessScore(group, unit, state, rules, meanPrior, scheduling),
+  }));
+  scored.sort((a, b) => {
+    if (a.score !== b.score) return a.score - b.score;
+    const tieA = (a.group[0].name.charCodeAt(0) + seed) % 7;
+    const tieB = (b.group[0].name.charCodeAt(0) + seed) % 7;
     if (tieA !== tieB) return tieA - tieB;
-    return groupA[0].name.localeCompare(groupB[0].name, "he");
+    return a.group[0].name.localeCompare(b.group[0].name, "he");
   });
+  return scored.map((entry) => entry.group);
+}
+
+function guardPickRng(seed: number, unitId: string, assignedCount: number): () => number {
+  return mulberry32((seed + unitId.length * 17 + assignedCount * 997) >>> 0);
+}
+
+function pickGuardSeatPerson(
+  unit: Extract<AssignmentUnit, { kind: "seat" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  rules: FairnessRules,
+  meanPrior: number,
+  peopleByName: Record<string, Person>,
+  seed: number,
+  units: AssignmentUnit[],
+): Person | null {
+  const candidates = listSeatCandidates(
+    unit,
+    state,
+    people,
+    issues,
+    rules,
+    meanPrior,
+    peopleByName,
+    seed,
+    units,
+  );
+  if (!candidates.length) return null;
+  return pickStochasticGuardCandidate(candidates, {
+    slot: unit.slot,
+    roster: people,
+    tracker: state.tracker,
+    rules,
+    meanPrior,
+    scheduling: schedulingFor(unit.mission),
+    seatCount: unit.slot.seatCount,
+    rng: guardPickRng(seed, unit.id, state.assignedUnitIds.size),
+  });
+}
+
+function pickGuardPairPeople(
+  unit: Extract<AssignmentUnit, { kind: "guard_pair" }>,
+  state: SolverState,
+  people: Person[],
+  issues: Issue[],
+  peopleByName: Record<string, Person>,
+  seed: number,
+  rules: FairnessRules,
+  meanPrior: number,
+): Person[] | null {
+  const pairs = listGuardPairCandidates(
+    unit,
+    state,
+    people,
+    issues,
+    peopleByName,
+    seed,
+    rules,
+    meanPrior,
+  );
+  if (!pairs.length) return null;
+  return (
+    pickStochasticGuardPair(pairs, {
+      slot: unit.slot,
+      roster: people,
+      tracker: state.tracker,
+      rules,
+      meanPrior,
+      scheduling: schedulingFor(unit.mission),
+      seatCount: unit.slot.seatCount,
+      rng: guardPickRng(seed, unit.id, state.assignedUnitIds.size),
+    }) ?? null
+  );
 }
 
 function unitDifficulty(
@@ -490,7 +608,7 @@ function unitDifficulty(
         : unit.kind === "kitchen"
           ? countKitchenCandidates(unit, state, people, issues, rules, meanPrior)
           : unit.kind === "guard_pair"
-          ? countGuardPairCandidates(unit, state, people, issues, peopleByName)
+          ? countGuardPairCandidates(unit, state, people, issues, peopleByName, rules, meanPrior)
           : countSeatCandidates(unit, state, people, issues, peopleByName);
 
   if (unit.kind === "carmel") {
@@ -1187,20 +1305,22 @@ function solveGreedy(input: {
               })()
             : unit.kind === "guard_pair"
             ? (() => {
-                const group = listGuardPairCandidates(
+                const group = pickGuardPairPeople(
                   unit,
                   state,
                   input.people,
                   input.issues,
                   peopleByName,
                   input.seed,
-                )[0];
+                  input.rules,
+                  input.meanPrior,
+                );
                 return group?.length
                   ? { kind: "guard_pair", people: group }
                   : null;
               })()
             : (() => {
-              const person = listSeatCandidates(
+              const person = pickGuardSeatPerson(
                 unit,
                 state,
                 input.people,
@@ -1210,7 +1330,7 @@ function solveGreedy(input: {
                 peopleByName,
                 input.seed,
                 input.units,
-              )[0];
+              );
               return person ? { kind: "seat", person } : null;
             })();
 
@@ -1340,6 +1460,8 @@ function solveBacktracking(input: {
                 input.issues,
                 peopleByName,
                 input.seed,
+                input.rules,
+                input.meanPrior,
               )
                 .slice(0, MAX_SEAT_BRANCH)
                 .map((people) => ({ kind: "guard_pair" as const, people }))
@@ -1477,6 +1599,15 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   let totalNodes = 0;
   let timedOut = false;
 
+  const randomSeed =
+    input.randomSeed ??
+    (hashStringsToSeed([
+      ...missions.map((m) => m.mission_date),
+      ...missions.map((m) => m.id),
+      String(Date.now()),
+      String(Math.random()),
+    ]) >>> 0);
+
   const greedyState = solveGreedy({
     units,
     people: input.people,
@@ -1484,7 +1615,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     rules: input.rules,
     meanPrior: input.meanPrior,
     initialState,
-    seed: 0,
+    seed: randomSeed,
   });
   bestResult = {
     state: greedyState,
@@ -1504,7 +1635,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       rules: input.rules,
       meanPrior: input.meanPrior,
       initialState,
-      seed,
+      seed: randomSeed + seed,
       maxNodes: Math.floor(maxNodes / maxAttempts),
       deadlineMs: Math.floor(deadlineMs / maxAttempts),
     });
