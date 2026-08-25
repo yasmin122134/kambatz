@@ -43,53 +43,56 @@ export function isForcedReplacementOption(option: ReplacementApplyOption): boole
   return option.type === "manual" || (option.type === "direct" && option.force === true);
 }
 
-/** שיבוץ כפוי — מסיר את המחליף מכל משבצת אחרת ביום ואז משבץ. */
-export function missionsWithForcedAssignment(
-  sameDayMissions: MissionDay[],
-  targetMissionId: string,
+/** שיבוץ ידני — רק המשבצת הנוכחית; משמרות אחרות של אותו אדם נשארות. */
+export function applyManualSlotAssignment(
+  mission: MissionDay,
   slotId: string,
   seatIndex: number,
   nextName: string,
   removeName: string,
-): MissionDay[] {
-  return sameDayMissions.map((mission) => {
-    const next = cloneMissionAssignments(mission);
-    for (const [sid, seats] of Object.entries(next.assignments)) {
-      next.assignments[sid] = seats.map((n, i) => {
-        if (
-          n === nextName &&
-          !(mission.id === targetMissionId && sid === slotId && i === seatIndex)
-        ) {
-          return "";
-        }
-        return n;
-      });
-    }
-    if (mission.id !== targetMissionId) return next;
+): MissionDay {
+  const next = cloneMissionAssignments(mission);
+  const seats = [...(next.assignments[slotId] || [])];
+  while (seats.length <= seatIndex) seats.push("");
+  seats[seatIndex] = nextName;
+  next.assignments[slotId] = seats;
 
-    const seats = [...(next.assignments[slotId] || [])];
-    while (seats.length <= seatIndex) seats.push("");
-    seats[seatIndex] = nextName;
-    next.assignments[slotId] = seats;
-
-    if (getBaseWorkSlotLeader(mission, slotId) === removeName) {
-      return withBaseWorkSlotLeader(next, slotId, nextName);
-    }
-    return next;
-  });
+  if (getBaseWorkSlotLeader(mission, slotId) === removeName) {
+    return withBaseWorkSlotLeader(next, slotId, nextName);
+  }
+  return next;
 }
 
-export function missionsWithChangedAssignments(
-  before: MissionDay[],
-  after: MissionDay[],
-): MissionDay[] {
-  const out: MissionDay[] = [];
-  for (let i = 0; i < after.length; i++) {
-    if (JSON.stringify(before[i]?.assignments) !== JSON.stringify(after[i]?.assignments)) {
-      out.push(after[i]);
-    }
-  }
-  return out;
+export function manualSlotAssignmentWarnings(input: {
+  sameDayMissions: MissionDay[];
+  missionId: string;
+  slotId: string;
+  seatIndex: number;
+  nextName: string;
+  removeName: string;
+  peopleByName: Record<string, Person>;
+  issues: Issue[];
+  rules: FairnessRules;
+}): string[] {
+  const mission =
+    resolveMissionForSlot(input.sameDayMissions, input.missionId, input.slotId) ??
+    input.sameDayMissions.find((m) => m.id === input.missionId);
+  const slot = mission ? slotById(mission, input.slotId) : undefined;
+  const person = input.peopleByName[input.nextName];
+  if (!mission || !slot || !person) return [];
+
+  const check = canAssignPersonToSlot({
+    missions: input.sameDayMissions,
+    rules: input.rules,
+    missionId: mission.id,
+    slot,
+    seatIndex: input.seatIndex,
+    person,
+    issues: input.issues,
+    peopleByName: input.peopleByName,
+    replaceName: input.removeName,
+  });
+  return check.ok ? [] : [check.reason];
 }
 
 export async function applyReplacementAssignment(input: {
@@ -102,7 +105,7 @@ export async function applyReplacementAssignment(input: {
   peopleByName: Record<string, Person>;
   issues: Issue[];
   rules: FairnessRules;
-}): Promise<{ missions: MissionDay[] }> {
+}): Promise<{ missions: MissionDay[]; warnings?: string[] }> {
   const seatIndex = Number(input.seatIndex);
   if (!Number.isFinite(seatIndex) || seatIndex < 0) {
     throw new Error("מספר מושב לא תקין");
@@ -131,28 +134,29 @@ export async function applyReplacementAssignment(input: {
     if (!person) throw new Error(`${nextName}: לא נמצא במחזור`);
 
     if (isForcedReplacementOption(input.option)) {
-      const before = input.sameDayMissions.map(cloneMissionAssignments);
-      const updated = missionsWithForcedAssignment(
-        before,
-        sourceMission.id,
+      const warnings = manualSlotAssignmentWarnings({
+        sameDayMissions: input.sameDayMissions,
+        missionId: sourceMission.id,
+        slotId: input.slotId,
+        seatIndex,
+        nextName,
+        removeName: input.removeName,
+        peopleByName: input.peopleByName,
+        issues: input.issues,
+        rules: input.rules,
+      });
+      const updated = applyManualSlotAssignment(
+        sourceMission,
         input.slotId,
         seatIndex,
         nextName,
         input.removeName,
       );
-      const dirty = missionsWithChangedAssignments(before, updated);
-      const saved = await Promise.all(
-        dirty.map((m) =>
-          saveMissionDay({ ...m, id: m.id }, { validateAssignments: false }).then(
-            (r) => r.mission,
-          ),
-        ),
+      const { mission: saved } = await saveMissionDay(
+        { ...updated, id: sourceMission.id },
+        { validateAssignments: false },
       );
-      const primary =
-        saved.find((m) => m.id === sourceMission.id) ??
-        saved[0] ??
-        updated.find((m) => m.id === sourceMission.id)!;
-      return { missions: saved.length ? saved : [primary] };
+      return warnings.length ? { missions: [saved], warnings } : { missions: [saved] };
     }
 
     const check = canAssignPersonToSlot({

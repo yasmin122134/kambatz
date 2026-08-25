@@ -24,8 +24,8 @@ import {
   canSwapReplacementAssignments,
 } from "@/lib/scheduling-engine";
 import {
-  missionsWithChangedAssignments,
-  missionsWithForcedAssignment,
+  applyManualSlotAssignment,
+  manualSlotAssignmentWarnings,
   sameDayMissionsFor,
 } from "@/lib/replacement-apply";
 import {
@@ -332,36 +332,29 @@ export async function PATCH(request: Request, { params }: Params) {
       if (!person) {
         return NextResponse.json({ error: `${nextName}: לא נמצא במחזור` }, { status: 400 });
       }
-      const before = sameDay.map((m) => ({
-        ...m,
-        assignments: Object.fromEntries(
-          Object.entries(syncAssignmentSeats(m.positions, m.assignments)).map(([sid, seats]) => [
-            sid,
-            [...seats],
-          ]),
-        ),
-      }));
-      const forced = missionsWithForcedAssignment(
-        before,
-        hostMission.id,
+      const warnings = manualSlotAssignmentWarnings({
+        sameDayMissions: sameDay,
+        missionId: hostMission.id,
+        slotId: slot_id,
+        seatIndex: seat_index,
+        nextName,
+        removeName: currentName,
+        peopleByName,
+        issues,
+        rules,
+      });
+      const updatedMission = applyManualSlotAssignment(
+        hostMission,
         slot_id,
         seat_index,
         nextName,
         currentName,
       );
-      const dirty = missionsWithChangedAssignments(before, forced);
-      const savedMissions = await Promise.all(
-        dirty.map((m) =>
-          saveMissionDay({ ...m, id: m.id }, { validateAssignments: false }).then(
-            (r) => r.mission,
-          ),
-        ),
+      const { mission: saved } = await saveMissionDay(
+        { ...updatedMission, id: hostMission.id },
+        { validateAssignments: false },
       );
-      const primary =
-        savedMissions.find((m) => m.id === hostMission.id) ??
-        savedMissions[0] ??
-        forced.find((m) => m.id === hostMission.id)!;
-      return NextResponse.json(primary);
+      return NextResponse.json(warnings.length ? { mission: saved, warnings } : saved);
     }
     const seats = [...(hostMission.assignments[slot_id] || [])];
     seats[seat_index] = "";

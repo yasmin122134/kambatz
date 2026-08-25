@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  applyManualSlotAssignment,
   applyReplacementAssignment,
-  missionsWithForcedAssignment,
+  manualSlotAssignmentWarnings,
 } from "@/lib/replacement-apply";
 import type { MissionDay, Person } from "@/lib/types";
 import {
@@ -113,7 +114,7 @@ describe("applyReplacementAssignment", () => {
     expect(result.missions[0].assignments.g2).toEqual(["Bob"]);
   });
 
-  it("manual replace bypasses guard spacing and clears other guard slots", async () => {
+  it("manual replace keeps other slots and returns guard-spacing warning", async () => {
     const mission = guardMission({
       g1: ["Alex"],
       g2: ["Bob"],
@@ -147,26 +148,45 @@ describe("applyReplacementAssignment", () => {
       issues: [],
       rules,
     });
-    expect(forced.missions[0].assignments.g1).toEqual([""]);
+    expect(forced.missions[0].assignments.g1).toEqual(["Alex"]);
     expect(forced.missions[0].assignments.g2).toEqual(["Alex"]);
+    expect(forced.warnings?.length).toBeGreaterThan(0);
+    expect(forced.warnings?.[0]).toMatch(/מרווח שמירות|יחס שמירות/);
   });
 
-  it("missionsWithForcedAssignment assigns person even when guard spacing would fail", () => {
+  it("applyManualSlotAssignment only changes the target seat", () => {
     const mission = guardMission({
       g1: ["Alex"],
       g2: ["Bob"],
     });
     mission.scheduling_rules = { ...scheduling, guard_ratio: 2 };
-    const updated = missionsWithForcedAssignment(
-      [mission],
-      mission.id,
-      "g2",
-      0,
-      "Alex",
-      "Bob",
-    );
-    expect(updated[0].assignments.g1).toEqual([""]);
-    expect(updated[0].assignments.g2).toEqual(["Alex"]);
+    const updated = applyManualSlotAssignment(mission, "g2", 0, "Alex", "Bob");
+    expect(updated.assignments.g1).toEqual(["Alex"]);
+    expect(updated.assignments.g2).toEqual(["Alex"]);
+  });
+
+  it("manualSlotAssignmentWarnings describes guard-ratio violation", () => {
+    const mission = guardMission({
+      g1: ["Alex"],
+      g2: ["Bob"],
+    });
+    mission.scheduling_rules = { ...scheduling, guard_ratio: 2 };
+    const peopleByName = {
+      Alex: person("Alex"),
+      Bob: person("Bob"),
+    };
+    const warnings = manualSlotAssignmentWarnings({
+      sameDayMissions: [mission],
+      missionId: mission.id,
+      slotId: "g2",
+      seatIndex: 0,
+      nextName: "Alex",
+      removeName: "Bob",
+      peopleByName,
+      issues: [],
+      rules,
+    });
+    expect(warnings.length).toBeGreaterThan(0);
   });
 
   it("rejects stale remove_name", async () => {

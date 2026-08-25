@@ -278,7 +278,11 @@ export function BoardClient({
       return null;
     }
     await loadMissions();
-    return data as MissionDay;
+    if (Array.isArray(data.warnings) && data.warnings.length) {
+      setMsg(`נשמר · אזהרה: ${data.warnings.join(" · ")}`);
+      return (data.mission ?? data) as MissionDay;
+    }
+    return (data.mission ?? data) as MissionDay;
   }
 
   async function handleTake(missionId: string, slotId: string, seatIndex: number) {
@@ -332,7 +336,11 @@ export function BoardClient({
       return false;
     }
     await loadMissions();
-    setMsg("ההחלפה נשמרה");
+    if (Array.isArray(data.warnings) && data.warnings.length) {
+      setMsg(`ההחלפה נשמרה · אזהרה: ${data.warnings.join(" · ")}`);
+    } else {
+      setMsg("ההחלפה נשמרה");
+    }
     return true;
   }
 
@@ -1490,7 +1498,9 @@ function ReplacementPicker({
           )}
           {mode === "manual" ? (
             <div className="space-y-2">
-              <p className="hint text-xs">שיבוץ ידני — מתבצע גם אם נשברים כללי מנוחה/חפיפה.</p>
+              <p className="hint text-xs">
+                שיבוץ ידני — מתבצע גם אם נשברים כללים; משמרות אחרות של אותו אדם נשארות, תוצג אזהרה.
+              </p>
               <NameCombobox
                 value={manualName}
                 onChange={setManualName}
