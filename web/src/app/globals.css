@@ -468,6 +468,103 @@ button:hover,
   font-weight: 600;
 }
 
+.guard-shift-roster {
+  border: 1px solid var(--color-line2);
+  border-radius: var(--radius-md);
+  background: #fff;
+  padding: 0.65rem 0.85rem;
+}
+
+.guard-shift-roster-summary {
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  list-style: none;
+}
+
+.guard-shift-roster-summary::-webkit-details-marker {
+  display: none;
+}
+
+.guard-shift-roster-list {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+
+.guard-shift-roster-block {
+  border: 1px solid var(--color-line2);
+  border-radius: var(--radius-md);
+  padding: 0.55rem 0.65rem;
+  background: var(--color-bone2);
+}
+
+.guard-shift-roster-block-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--color-line2);
+}
+
+.guard-shift-roster-positions {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.guard-shift-roster-position {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem 0.65rem;
+  font-size: 0.8125rem;
+}
+
+.guard-shift-roster-position-name {
+  min-width: 6.5rem;
+  color: var(--color-ink2);
+  font-weight: 500;
+}
+
+.guard-shift-roster-position-assignees {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.guard-shift-roster-chip {
+  display: inline-block;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.75rem;
+  background: #fff;
+  border: 1px solid var(--color-line2);
+}
+
+.guard-shift-roster-chip.is-you {
+  font-weight: 700;
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.guard-shift-roster-all {
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed var(--color-line2);
+}
+
 .guard-timeline-wrap {
   overflow-x: auto;
   margin: 0 -0.25rem;

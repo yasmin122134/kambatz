@@ -40,6 +40,10 @@ import {
   type KitchenShiftHandoff,
   type KitchenShiftRosterView,
 } from "@/lib/kitchen-handoffs";
+import {
+  guardShiftRosterViews,
+  type GuardShiftRosterView,
+} from "@/lib/guard-shift-roster";
 import { hourlyAbsenceViews } from "@/lib/hourly-absence";
 import type { Person } from "@/lib/types";
 
@@ -1244,6 +1248,13 @@ function MissionPanel({
 }) {
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
+  const guardShiftRoster = useMemo(
+    () =>
+      mission.mission_type === "guards"
+        ? guardShiftRosterViews(mission, boardStartMin)
+        : [],
+    [mission, boardStartMin],
+  );
 
   if (mission.mission_type === "kitchen") {
     const handoffs = kitchenShiftHandoffsFromSlots(slots);
@@ -1302,31 +1313,36 @@ function MissionPanel({
 
   if (mission.mission_type === "guards") {
     return (
-      <GuardTimeline
-        mission={mission}
-        slots={slots}
-        boardStartMin={boardStartMin}
-        personName={personName}
-        canAssign={canAssign}
-        isAdmin={isAdmin}
-        fairnessRules={fairnessRules}
-        dutyOfficerNames={dutyOfficerNames}
-        swapTarget={swapTarget}
-        swapMode={swapMode}
-        mySlotIds={new Set(mySlots.map((s) => s.slotId))}
-        onStartSwap={onStartSwap}
-        onSwapMode={onSwapMode}
-        onTake={onTake}
-        onSwap={onSwap}
-        onAdminSet={onAdminSet}
-        onApplyReplacement={onApplyReplacement}
-        onCancelSwap={onCancelSwap}
-        onSwapCarmelRoom={onSwapCarmelRoom}
-        dormRooms={dormRooms}
-        peopleByName={peopleByName}
-        rosterNames={rosterNames}
-        dayMissionsForAbsence={dayMissionsForAbsence}
-      />
+      <div className="space-y-4">
+        {guardShiftRoster.length > 0 && (
+          <GuardShiftRosterPanel views={guardShiftRoster} personName={personName} />
+        )}
+        <GuardTimeline
+          mission={mission}
+          slots={slots}
+          boardStartMin={boardStartMin}
+          personName={personName}
+          canAssign={canAssign}
+          isAdmin={isAdmin}
+          fairnessRules={fairnessRules}
+          dutyOfficerNames={dutyOfficerNames}
+          swapTarget={swapTarget}
+          swapMode={swapMode}
+          mySlotIds={new Set(mySlots.map((s) => s.slotId))}
+          onStartSwap={onStartSwap}
+          onSwapMode={onSwapMode}
+          onTake={onTake}
+          onSwap={onSwap}
+          onAdminSet={onAdminSet}
+          onApplyReplacement={onApplyReplacement}
+          onCancelSwap={onCancelSwap}
+          onSwapCarmelRoom={onSwapCarmelRoom}
+          dormRooms={dormRooms}
+          peopleByName={peopleByName}
+          rosterNames={rosterNames}
+          dayMissionsForAbsence={dayMissionsForAbsence}
+        />
+      </div>
     );
   }
 
@@ -1356,6 +1372,67 @@ function MissionPanel({
           />
         ))}
     </div>
+  );
+}
+
+function GuardShiftRosterPanel({
+  views,
+  personName,
+}: {
+  views: GuardShiftRosterView[];
+  personName: string;
+}) {
+  function nameChip(name: string) {
+    const mine = name === personName;
+    return (
+      <span
+        key={name}
+        className={`guard-shift-roster-chip ${mine ? "is-you" : ""}`}
+      >
+        {name}
+      </span>
+    );
+  }
+
+  return (
+    <details className="guard-shift-roster" open>
+      <summary className="guard-shift-roster-summary">
+        <span className="font-semibold">גלגולי שמירה</span>
+        <span className="hint text-xs font-normal">
+          {views.length} משמרות · לפי שעות
+        </span>
+      </summary>
+      <div className="guard-shift-roster-list">
+        {views.map((view) => (
+          <section key={view.windowKey} className="guard-shift-roster-block">
+            <header className="guard-shift-roster-block-header">
+              <span className="mono font-semibold">{view.timeLabel}</span>
+              <span className="hint text-xs">
+                {view.assignedCount}/{view.seatCapacity} משובצים
+              </span>
+            </header>
+            <ul className="guard-shift-roster-positions">
+              {view.positions.map((pos) => (
+                <li key={pos.positionId} className="guard-shift-roster-position">
+                  <span className="guard-shift-roster-position-name">{pos.positionName}</span>
+                  <span className="guard-shift-roster-position-assignees">
+                    {pos.assignees.length > 0
+                      ? pos.assignees.map(nameChip)
+                      : <span className="text-ink3 text-xs">— פנוי —</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {view.allNames.length > 0 && (
+              <div className="guard-shift-roster-all">
+                <span className="text-xs text-ink2">עולים לשמירה:</span>
+                <div className="flex flex-wrap gap-1 mt-0.5">{view.allNames.map(nameChip)}</div>
+              </div>
+            )}
+          </section>
+        ))}
+      </div>
+    </details>
   );
 }
 
