@@ -39,6 +39,7 @@ import {
   type KitchenShiftHandoff,
   type KitchenShiftRosterView,
 } from "@/lib/kitchen-handoffs";
+import { hourlyAbsenceViews } from "@/lib/hourly-absence";
 import type { Person } from "@/lib/types";
 
 type Props = {
@@ -327,7 +328,8 @@ export function BoardClient({
         seat_index: seatIndex,
         remove_name: removeName,
         option,
-        force: option.type === "manual",
+        force:
+          option.type === "manual" || (option.type === "swap" && option.force === true),
       }),
     });
     const data = await res.json();
@@ -650,6 +652,8 @@ export function BoardClient({
               onSwapCarmelRoom={handleSwapCarmelARoom}
               dormRooms={dormRooms}
               peopleByName={peopleByName}
+              rosterNames={activeRosterNames}
+              dayMissionsForAbsence={visibleDayMissions}
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -990,6 +994,8 @@ function GuardTimeline({
   onSwapCarmelRoom,
   dormRooms = [],
   peopleByName = {},
+  rosterNames = [],
+  dayMissionsForAbsence = [],
 }: {
   mission: MissionDay;
   slots: FlatSlot[];
@@ -1018,6 +1024,8 @@ function GuardTimeline({
   onSwapCarmelRoom?: (missionId: string, room: string) => Promise<void>;
   dormRooms?: string[];
   peopleByName?: Record<string, Person>;
+  rosterNames?: string[];
+  dayMissionsForAbsence?: MissionDay[];
 }) {
   const carmelASlot = findCarmelASlot(mission);
   const carmelRoom = carmelASlot
@@ -1028,6 +1036,18 @@ function GuardTimeline({
     : null;
   const positions = mission.positions || [];
   const hourStepPx = TIMELINE_HEIGHT_PX / 24;
+  const hourlyAbsence = useMemo(
+    () =>
+      rosterNames.length && dayMissionsForAbsence.length
+        ? hourlyAbsenceViews({
+            missions: dayMissionsForAbsence,
+            rosterNames,
+            anchorMission: mission,
+            boardStartMin,
+          })
+        : [],
+    [dayMissionsForAbsence, rosterNames, mission, boardStartMin],
+  );
   const ticks = Array.from(
     { length: TIMELINE_CYCLE_MIN / TIMELINE_TICK_STEP_MIN + 1 },
     (_, i) => i * TIMELINE_TICK_STEP_MIN,
@@ -1052,6 +1072,9 @@ function GuardTimeline({
             </div>
           ))}
         </div>
+        {hourlyAbsence.length > 0 && (
+          <HourlyAbsenceColumn views={hourlyAbsence} personName={personName} />
+        )}
         <div className="guard-timeline-cols">
           {positions.map((pos) => {
             const posSlots = slots.filter((s) => s.positionId === pos.id);
@@ -1133,6 +1156,8 @@ function MissionPanel({
   onSwapCarmelRoom,
   dormRooms,
   peopleByName,
+  rosterNames = [],
+  dayMissionsForAbsence = [],
 }: {
   mission: MissionDay;
   personName: string;
@@ -1141,6 +1166,7 @@ function MissionPanel({
   fairnessRules: FairnessRules;
   dutyOfficerNames?: string[];
   rosterNames?: string[];
+  dayMissionsForAbsence?: MissionDay[];
   mySlots: ReturnType<typeof flattenMissionSlots>;
   swapTarget: { missionId: string; slotId: string; seatIndex: number; label: string } | null;
   swapMode: SwapMode;
@@ -1244,6 +1270,8 @@ function MissionPanel({
         onSwapCarmelRoom={onSwapCarmelRoom}
         dormRooms={dormRooms}
         peopleByName={peopleByName}
+        rosterNames={rosterNames}
+        dayMissionsForAbsence={dayMissionsForAbsence}
       />
     );
   }
@@ -1273,6 +1301,56 @@ function MissionPanel({
             onCancelSwap={onCancelSwap}
           />
         ))}
+    </div>
+  );
+}
+
+function HourlyAbsenceColumn({
+  views,
+  personName,
+}: {
+  views: ReturnType<typeof hourlyAbsenceViews>;
+  personName: string;
+}) {
+  return (
+    <div className="guard-timeline-absence-col">
+      <div className="guard-timeline-col-header">
+        <div>לא במשימה</div>
+        <div className="hint text-[10px] font-normal leading-snug mt-0.5">
+          לא משובצים + עתודה בלבד
+        </div>
+      </div>
+      <div className="guard-timeline-col-body">
+        {views.map((view) => (
+          <div
+            key={view.hourIndex}
+            className="guard-timeline-absence-hour"
+            style={{
+              top: `${cyclicToPx(view.cyclicStartMin)}px`,
+              height: `${TIMELINE_HEIGHT_PX / 24}px`,
+            }}
+            title={`${view.wallTimeLabel} · ${view.absentNames.length} מתוך ${view.rosterSize}`}
+          >
+            <div className="guard-timeline-absence-hour-label">{view.wallTimeLabel}</div>
+            <div className="guard-timeline-absence-names">
+              {view.absentNames.length > 0 ? (
+                view.absentNames.map((name) => (
+                  <span
+                    key={name}
+                    className={`guard-timeline-absence-chip ${
+                      name === personName ? "is-you" : ""
+                    }`}
+                  >
+                    {name}
+                  </span>
+                ))
+              ) : (
+                <span className="hint text-[10px]">—</span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1423,6 +1501,7 @@ function ReplacementPicker({
       type: "direct" | "swap";
       personName: string;
       label: string;
+      ruleViolation?: string;
       swapMissionId?: string;
       swapSlotId?: string;
       swapSeatIndex?: number;
@@ -1546,11 +1625,21 @@ function ReplacementPicker({
                         o.swapSlotId != null &&
                         o.swapSeatIndex != null
                       ) {
+                        if (o.ruleViolation) {
+                          const confirmed = window.confirm(
+                            `זה מפר את הכלל: ${o.ruleViolation}\n\nהאם בכל זאת תרצה להחליף?`,
+                          );
+                          if (!confirmed) {
+                            setSaving(false);
+                            return;
+                          }
+                        }
                         ok = await onApply({
                           type: "swap",
                           swapMissionId: o.swapMissionId,
                           swapSlotId: o.swapSlotId,
                           swapSeatIndex: o.swapSeatIndex,
+                          ...(o.ruleViolation ? { force: true } : {}),
                         });
                       }
                       setSaving(false);

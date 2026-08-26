@@ -165,6 +165,8 @@ export type ReplacementOption = {
   swapSlotId?: string;
   swapSeatIndex?: number;
   swapLabel?: string;
+  /** כשההחלפה לא עומדת בכללים — מוצגת ברשימה עם אישור לפני ביצוע */
+  ruleViolation?: string;
 };
 
 function cyclicOverlap(p1: number, d1: number, p2: number, d2: number): boolean {
@@ -2548,8 +2550,22 @@ export function findReplacements(input: {
           issues: input.issues,
           peopleByName,
         });
-        if (!check.ok) continue;
         seen.add(dedupeKey);
+
+        if (!check.ok) {
+          options.push({
+            type: "swap",
+            personName: swapPerson.name,
+            cost: 1e9,
+            label: `${swapPerson.name} ↔ ${input.removeName}: ${otherSlot.positionName} ${otherSlot.timeLabel} ⚠`,
+            ruleViolation: check.reason,
+            swapMissionId: otherMission.id,
+            swapSlotId: otherSlot.slotId,
+            swapSeatIndex: oi,
+            swapLabel: `${otherSlot.positionName} ${otherSlot.timeLabel}`,
+          });
+          continue;
+        }
 
         const perRemove = buildTrackerFromMissions(input.missions, input.rules);
         unplacePerson(

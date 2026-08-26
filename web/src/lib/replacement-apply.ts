@@ -19,6 +19,7 @@ export type ReplacementApplyOption =
       swapMissionId: string;
       swapSlotId: string;
       swapSeatIndex: number;
+      force?: boolean;
     };
 
 export { resolveMissionForSlot } from "@/lib/mission-utils";
@@ -91,6 +92,47 @@ export function manualSlotAssignmentWarnings(input: {
     issues: input.issues,
     peopleByName: input.peopleByName,
     replaceName: input.removeName,
+  });
+  return check.ok ? [] : [check.reason];
+}
+
+export function swapAssignmentWarnings(input: {
+  sameDayMissions: MissionDay[];
+  sourceMission: MissionDay;
+  slotId: string;
+  seatIndex: number;
+  removeName: string;
+  swapMissionId: string;
+  swapSlotId: string;
+  swapSeatIndex: number;
+  peopleByName: Record<string, Person>;
+  issues: Issue[];
+  rules: FairnessRules;
+}): string[] {
+  const srcSlot = slotById(input.sourceMission, input.slotId);
+  const targetMission =
+    resolveMissionForSlot(input.sameDayMissions, input.swapMissionId, input.swapSlotId) ??
+    input.sameDayMissions.find((m) => m.id === input.swapMissionId);
+  const dstSlot = targetMission ? slotById(targetMission, input.swapSlotId) : undefined;
+  const dstName = targetMission
+    ? seatArray(targetMission, input.swapSlotId)[input.swapSeatIndex]?.trim()
+    : "";
+  const swapPerson = dstName ? input.peopleByName[dstName] : undefined;
+  if (!srcSlot || !targetMission || !dstSlot || !swapPerson) return [];
+
+  const check = canSwapReplacementAssignments({
+    missions: input.sameDayMissions,
+    rules: input.rules,
+    missionId: input.sourceMission.id,
+    slot: srcSlot,
+    seatIndex: input.seatIndex,
+    removeName: input.removeName,
+    swapMissionId: targetMission.id,
+    swapSlot: dstSlot,
+    swapSeatIndex: input.swapSeatIndex,
+    swapPerson,
+    issues: input.issues,
+    peopleByName: input.peopleByName,
   });
   return check.ok ? [] : [check.reason];
 }
@@ -227,7 +269,9 @@ export async function applyReplacementAssignment(input: {
     issues: input.issues,
     peopleByName: input.peopleByName,
   });
-  if (!swapCheck.ok) throw new Error(swapCheck.reason);
+  const forceSwap = input.option.type === "swap" && input.option.force === true;
+  if (!swapCheck.ok && !forceSwap) throw new Error(swapCheck.reason);
+  const warnings = !swapCheck.ok && forceSwap ? [swapCheck.reason] : [];
 
   if (sourceMission.id === targetMission.id && input.slotId === input.option.swapSlotId) {
     const seats = seatArray(sourceMission, input.slotId);
@@ -241,7 +285,7 @@ export async function applyReplacementAssignment(input: {
       { ...updated, id: sourceMission.id },
       { validateAssignments: false },
     );
-    return { missions: [saved] };
+    return warnings.length ? { missions: [saved], warnings } : { missions: [saved] };
   }
 
   srcSeats[seatIndex] = dstName;
@@ -272,14 +316,16 @@ export async function applyReplacementAssignment(input: {
       { ...merged, id: sourceMission.id },
       { validateAssignments: false },
     );
-    return { missions: [saved] };
+    return warnings.length ? { missions: [saved], warnings } : { missions: [saved] };
   }
 
   const [{ mission: savedSrc }, { mission: savedDst }] = await Promise.all([
     saveMissionDay({ ...updatedSrc, id: sourceMission.id }, { validateAssignments: false }),
     saveMissionDay({ ...updatedDst, id: targetMission.id }, { validateAssignments: false }),
   ]);
-  return { missions: [savedSrc, savedDst] };
+  return warnings.length
+    ? { missions: [savedSrc, savedDst], warnings }
+    : { missions: [savedSrc, savedDst] };
 }
 
 export function sameDayMissionsFor(
@@ -315,6 +361,7 @@ export function normalizeReplacementApplyOption(
       swapMissionId: String(o.swapMissionId || ""),
       swapSlotId: String(o.swapSlotId || ""),
       swapSeatIndex: Number(o.swapSeatIndex),
+      ...(o.force === true || bodyForce === true ? { force: true as const } : {}),
     };
   }
   return null;

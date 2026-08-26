@@ -211,6 +211,34 @@ describe("findReplacements", () => {
     ).toBe(true);
   });
 
+  it("includes rule-breaking head-to-head swaps with violation reason", () => {
+    const mission = guardMission(
+      [
+        { id: "g1", start: "08:00", end: "12:00" },
+        { id: "g2", start: "12:00", end: "16:00" },
+        { id: "g3", start: "16:00", end: "20:00" },
+      ],
+      { g1: ["Alex"], g2: ["Bob"], g3: ["Alex"] },
+    );
+    const people = [person("Alex"), person("Bob")];
+
+    const options = findReplacements({
+      missions: [mission],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "Alex",
+      mode: "swap",
+    });
+
+    const violating = options.find((o) => o.swapSlotId === "g2");
+    expect(violating).toBeTruthy();
+    expect(violating?.ruleViolation).toBeTruthy();
+  });
+
   it("labels kitchen replacement options with kitchen burden not guard duty", () => {
     const positions = defaultKitchenDayPositions({ seatsPerShift: 2 });
     const slotId = positions[0].slots[0].id;

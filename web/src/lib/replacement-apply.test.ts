@@ -189,6 +189,58 @@ describe("applyReplacementAssignment", () => {
     expect(warnings.length).toBeGreaterThan(0);
   });
 
+  it("swaps two guard slots with force when rules are violated", async () => {
+    const mission = guardMission({ g1: ["Alex"], g2: ["Bob"], g3: ["Alex"] });
+    mission.positions[0].slots = [
+      { id: "g1", start_time: "08:00", end_time: "12:00", seat_count: 1 },
+      { id: "g2", start_time: "12:00", end_time: "16:00", seat_count: 1 },
+      { id: "g3", start_time: "16:00", end_time: "20:00", seat_count: 1 },
+    ];
+    const people = [person("Alex"), person("Bob")];
+    const peopleByName = Object.fromEntries(people.map((p) => [p.name, p]));
+
+    await expect(
+      applyReplacementAssignment({
+        sourceMission: mission,
+        sameDayMissions: [mission],
+        slotId: "g1",
+        seatIndex: 0,
+        removeName: "Alex",
+        option: {
+          type: "swap",
+          swapMissionId: "g1",
+          swapSlotId: "g2",
+          swapSeatIndex: 0,
+        },
+        peopleByName,
+        issues: [],
+        rules,
+      }),
+    ).rejects.toThrow();
+
+    const forced = await applyReplacementAssignment({
+      sourceMission: mission,
+      sameDayMissions: [mission],
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "Alex",
+      option: {
+        type: "swap",
+        swapMissionId: "g1",
+        swapSlotId: "g2",
+        swapSeatIndex: 0,
+        force: true,
+      },
+      peopleByName,
+      issues: [],
+      rules,
+    });
+    expect(forced.missions[0].assignments.g1).toEqual(["Bob"]);
+    expect(forced.missions[0].assignments.g2).toEqual(["Alex"]);
+    expect(forced.missions[0].assignments.g3).toEqual(["Alex"]);
+    expect(forced.warnings?.length).toBeGreaterThan(0);
+  });
+
   it("rejects stale remove_name", async () => {
     const mission = guardMission({ g1: ["Bob"], g2: [""] });
     const peopleByName = { Bob: person("Bob"), Carl: person("Carl") };

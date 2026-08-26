@@ -487,6 +487,65 @@ button:hover,
   border-inline-end: 1px solid var(--color-line);
 }
 
+.guard-timeline-absence-col {
+  flex: 0 0 9.5rem;
+  min-width: 9.5rem;
+  max-width: 11rem;
+  display: flex;
+  flex-direction: column;
+}
+
+.guard-timeline-absence-hour {
+  position: absolute;
+  inset-inline: 0;
+  box-sizing: border-box;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--color-line2);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.guard-timeline-absence-hour-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--color-ink3);
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.guard-timeline-absence-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.guard-timeline-absence-chip {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 3px;
+  padding: 0 3px;
+  font-size: 9px;
+  line-height: 1.35;
+  background: var(--color-bg);
+  color: var(--color-ink2);
+  border: 1px solid var(--color-line2);
+}
+
+.guard-timeline-absence-chip.is-you {
+  font-weight: 600;
+  color: var(--color-ink);
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
 .guard-timeline-tick {
   position: absolute;
   inset-inline-end: 0;
