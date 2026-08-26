@@ -1156,7 +1156,6 @@ function MissionPanel({
   onSwapCarmelRoom,
   dormRooms,
   peopleByName,
-  rosterNames = [],
   dayMissionsForAbsence = [],
 }: {
   mission: MissionDay;
