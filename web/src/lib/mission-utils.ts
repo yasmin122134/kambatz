@@ -25,7 +25,6 @@ import {
   resolveBaseWorkSlotInterval,
 } from "@/lib/base-work-template";
 import {
-  hamagshiyotWallClockInterval,
   isHamagshiyotPosition,
   isHamagshiyotPositionName,
   isHamagshiyotShiftSlot,
@@ -34,9 +33,8 @@ import { normalizeKitchenOutNamesByShift } from "@/lib/kitchen-out-lists";
 import {
   isPatrolPosition,
   isPatrolShiftSlot,
-  patrolWallClockInterval,
 } from "@/lib/patrol-day-template";
-import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -373,9 +371,21 @@ export function flattenMissionSlots(
             slot,
           )
         : isPatrolSlot
-          ? patrolWallClockInterval(mission.mission_date, slot.start_time, slot.end_time)
+          ? resolveCanonicalSlotInterval(mission, slot) ??
+            resolveSlotAbsoluteInterval(
+              mission.starts_at,
+              mission.ends_at,
+              slot.start_time,
+              slot.end_time,
+            )
           : isHamagshiyotSlot
-            ? hamagshiyotWallClockInterval(mission.mission_date, slot.start_time, slot.end_time)
+            ? resolveCanonicalSlotInterval(mission, slot) ??
+              resolveSlotAbsoluteInterval(
+                mission.starts_at,
+                mission.ends_at,
+                slot.start_time,
+                slot.end_time,
+              )
             : resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;
       const startAtMs = abs.startMs;

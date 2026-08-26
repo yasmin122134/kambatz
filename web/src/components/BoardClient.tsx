@@ -30,6 +30,7 @@ import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, is
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
 import { patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
+import { isHamagshiyotPositionName } from "@/lib/hamagshiyot-template";
 import { resolvePatrolAssigneeName } from "@/lib/scheduling-engine";
 import type { FlatSlot } from "@/lib/mission-utils";
 import {
@@ -1719,7 +1720,13 @@ function SlotCard({
     <ul className={variant === "timeline" ? "space-y-0.5" : "mt-2 space-y-1"}>
       {Array.from({ length: slot.seatCount }, (_, seatIndex) => {
         const name = slot.assignees[seatIndex] || "";
-        const isEmpty = !name;
+        const patrolResolvedName =
+          slot.positionKind === "patrol" && !name
+            ? resolvePatrolAssigneeName(mission, slot)
+            : null;
+        const displayName = name || patrolResolvedName || "";
+        const isDerivedPatrol = !name && !!patrolResolvedName;
+        const isEmpty = !displayName;
         const isMySeat = name === personName;
         const isLeader = Boolean(name && slotLeaderName === name);
 
@@ -1763,7 +1770,10 @@ function SlotCard({
                     seatIndex={seatIndex}
                     currentName={name}
                     isKitchenSlot={
-                      slot.missionType === "kitchen" && slot.positionKind === "kitchen"
+                      (slot.missionType === "kitchen" && slot.positionKind === "kitchen") ||
+                      (slot.missionType === "guards" &&
+                        slot.positionKind === "kitchen" &&
+                        isHamagshiyotPositionName(slot.positionName))
                     }
                     onApply={(option) =>
                       onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
@@ -1772,8 +1782,11 @@ function SlotCard({
                 )}
               </>
             ) : (
-              <span className={isMySeat ? "schedule-you font-semibold" : ""}>
-                {name || "— פנוי —"}
+              <span className={isMySeat || displayName === personName ? "schedule-you font-semibold" : ""}>
+                {displayName || "— פנוי —"}
+                {isDerivedPatrol && (
+                  <span className="text-ink3 text-[10px] mr-1">(מוזמן)</span>
+                )}
                 {isLeader && (
                   <span className="abas-leader-badge mr-1">★ אחראי/ת קבוצה</span>
                 )}
@@ -1815,7 +1828,7 @@ function SlotCard({
               {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
-          <PatrolAssigneeHint mission={mission} slot={slot} compact />
+          <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
           {assigneeList}
           {calendarEvent && (
             <div className="mt-1">
@@ -1845,7 +1858,7 @@ function SlotCard({
       {slot.slotLabel && (
         <div className="text-xs text-ink2">{slot.slotLabel}</div>
       )}
-      <PatrolAssigneeHint mission={mission} slot={slot} />
+      <PatrolAssigneeHint mission={mission} slot={slot} isAdmin={isAdmin} />
       {isBaseWork && slotLeaderName && (
         <div className="text-xs text-ink2 mt-0.5">
           אחראי/ת קבוצה:{" "}
@@ -1861,24 +1874,35 @@ function PatrolAssigneeHint({
   mission,
   slot,
   compact = false,
+  isAdmin = false,
 }: {
   mission: MissionDay;
   slot: FlatSlot;
   compact?: boolean;
+  isAdmin?: boolean;
 }) {
   if (slot.positionKind !== "patrol") return null;
   const role = patrolAssigneeRole(slot.startTime, slot.endTime);
   if (!role) return null;
+  const assigned = slot.assignees.find((n) => n?.trim());
   const name = resolvePatrolAssigneeName(mission, slot);
+  if (assigned?.trim()) return null;
   return (
     <div className={`${compact ? "text-[10px]" : "text-xs"} text-ink2 ${compact ? "mb-0.5" : "mt-0.5"}`}>
-      מזומן: <span className="font-medium">{patrolAssigneeRoleLabel(role)}</span>
+      מוזמן: <span className="font-medium">{patrolAssigneeRoleLabel(role)}</span>
       {name ? (
         <>
           {" "}
           — <span className="font-semibold text-ink">{name}</span>
         </>
       ) : null}
+      {isAdmin && (
+        <span className="block text-ink3 mt-0.5">
+          {role === "duty_officer"
+            ? "לשינוי: שיבצו כאן או החליפו קצין תורן"
+            : "לשינוי: הקלידו שם בשדה למעלה"}
+        </span>
+      )}
     </div>
   );
 }

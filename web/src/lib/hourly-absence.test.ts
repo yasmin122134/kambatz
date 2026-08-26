@@ -128,4 +128,33 @@ describe("hourlyAbsenceViews", () => {
     const atTen = views.find((v) => v.wallTimeLabel === "10:00");
     expect(atTen?.absentNames).toEqual(["Alex"]);
   });
+
+  it("counts hamagshiyot on evening guard day within mission cycle", () => {
+    const mission = guardMission(
+      [{ id: "g1", start: "20:00", end: "00:00" }],
+      { g1: ["Alex"] },
+    );
+    mission.starts_at = "2026-08-26T20:00:00+03:00";
+    mission.ends_at = "2026-08-27T20:00:00+03:00";
+    mission.positions.push({
+      id: "ham",
+      name: "חמגשיות",
+      kind: "kitchen",
+      same_room: false,
+      same_gender: false,
+      slots: [{ id: "h1", start_time: "07:00", end_time: "08:00", seat_count: 5 }],
+    });
+    mission.assignments.h1 = ["Bob", "Carl", "", "", ""];
+
+    const views = hourlyAbsenceViews({
+      missions: [mission],
+      rosterNames: ["Alex", "Bob", "Carl"],
+      anchorMission: mission,
+      boardStartMin: 20 * 60,
+    });
+    const morningHour = views.find((v) => v.wallTimeLabel === "07:00");
+    expect(morningHour?.absentNames).toEqual(["Alex"]);
+    expect(morningHour?.absentNames).not.toContain("Bob");
+    expect(morningHour?.absentNames).not.toContain("Carl");
+  });
 });
