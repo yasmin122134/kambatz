@@ -345,7 +345,10 @@ export function flattenMissionSlots(
     const sameRoom = pos.same_room ?? isStandbyKind(kind);
     const sameGender = pos.same_gender ?? isStandbyKind(kind);
     for (const slot of pos.slots || []) {
-      const assignees = (mission.assignments[slot.id] || []).filter(Boolean);
+      const rawAssignees = mission.assignments[slot.id] || [];
+      const assignees = Array.from({ length: slot.seat_count }, (_, i) =>
+        (rawAssignees[i] ?? "").trim(),
+      );
       const startMin = parseTimeMinutes(slot.start_time) ?? 0;
       const dur = slotDurationMinutes(slot.start_time, slot.end_time);
       const isKitchenSlot =

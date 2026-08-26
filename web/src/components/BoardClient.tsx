@@ -913,6 +913,60 @@ function durationToPx(durationMin: number): number {
   return Math.max((durationMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX, 32);
 }
 
+function usesTimelineCompactAssignees(slot: FlatSlot): boolean {
+  return (
+    slot.positionKind === "patrol" ||
+    isHamagshiyotPositionName(slot.positionName) ||
+    (slot.seatCount > 2 && slot.durationMinutes <= 120)
+  );
+}
+
+function slotAssigneeDisplayNames(mission: MissionDay, slot: FlatSlot): string[] {
+  const names: string[] = [];
+  for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+    const name = slot.assignees[seatIndex]?.trim() || "";
+    if (name) {
+      names.push(name);
+      continue;
+    }
+    if (seatIndex === 0 && slot.positionKind === "patrol") {
+      const resolved = resolvePatrolAssigneeName(mission, slot);
+      if (resolved) names.push(resolved);
+    }
+  }
+  return names;
+}
+
+function slotTimelineHeightPx(slot: FlatSlot, isAdmin: boolean): number {
+  const durationPx = durationToPx(slot.durationMinutes);
+  if (!usesTimelineCompactAssignees(slot)) return durationPx;
+  if (isAdmin) {
+    return Math.max(durationPx, 28 + slot.seatCount * 26 + 20);
+  }
+  return Math.max(durationPx, 56);
+}
+
+function formatTimelineAssigneeSummary(
+  mission: MissionDay,
+  slot: FlatSlot,
+): { text: string; title: string; isDerivedPatrol: boolean } {
+  const names = slotAssigneeDisplayNames(mission, slot);
+  const explicitCount = slot.assignees.filter((n) => n?.trim()).length;
+  const isDerivedPatrol =
+    slot.positionKind === "patrol" &&
+    explicitCount === 0 &&
+    names.length > 0;
+  if (names.length === 0) {
+    return { text: "— פנוי —", title: "אין שיבוץ", isDerivedPatrol: false };
+  }
+  const emptySeats = Math.max(0, slot.seatCount - explicitCount - (isDerivedPatrol ? 1 : 0));
+  const text =
+    names.join(", ") +
+    (emptySeats > 0 ? ` (+${emptySeats} פנויים)` : "") +
+    (isDerivedPatrol ? " (מוזמן)" : "");
+  return { text, title: names.join("\n"), isDerivedPatrol };
+}
+
 function CarmelARoomSwap({
   missionId,
   currentRoom,
@@ -1099,7 +1153,7 @@ function GuardTimeline({
                       className="guard-timeline-slot"
                       style={{
                         top: `${cyclicToPx(slot.cyclicStart)}px`,
-                        height: `${durationToPx(slot.durationMinutes)}px`,
+                        height: `${slotTimelineHeightPx(slot, isAdmin)}px`,
                       }}
                     >
                       <SlotCard
@@ -1741,7 +1795,7 @@ function SlotCard({
                     slot.positionKind === "officer_duty"
                       ? "קצין תורן…"
                       : slot.positionKind === "patrol"
-                        ? "מבצע…"
+                        ? patrolResolvedName || "מבצע…"
                         : "שם"
                   }
                   allowedNames={
@@ -1819,17 +1873,38 @@ function SlotCard({
   );
 
   if (variant === "timeline") {
+    const compactAssignees = usesTimelineCompactAssignees(slot);
+    const summary = compactAssignees ? formatTimelineAssigneeSummary(mission, slot) : null;
+
     return (
       <div className={`slot-card ${isMine ? "mine" : ""}`}>
-        <div className="slot-card-time">{slot.startTime}</div>
+        <div className="slot-card-time">{slot.timeLabel}</div>
         <div className="slot-card-body">
           {isGuardKind(slot.positionKind) && (
             <div className="text-[10px] text-ink3 mb-0.5" title={guardSlotBurdenTitle(slot, fairnessRules)}>
               {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
-          <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
-          {assigneeList}
+          {compactAssignees && !isAdmin && summary ? (
+            <div
+              className={`timeline-assignee-summary text-xs leading-snug ${
+                summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"
+              }`}
+              title={summary.title}
+            >
+              {summary.text}
+            </div>
+          ) : (
+            <>
+              {compactAssignees && isAdmin && summary && summary.text !== "— פנוי —" && (
+                <div className="text-[10px] text-ink2 mb-0.5" title={summary.title}>
+                  משובצים: {summary.text}
+                </div>
+              )}
+              <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
+              {assigneeList}
+            </>
+          )}
           {calendarEvent && (
             <div className="mt-1">
               <AddToCalendarLink event={calendarEvent} className="btn-sm" />

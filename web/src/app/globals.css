@@ -618,12 +618,20 @@ button:hover,
   min-height: 2rem;
 }
 
+.guard-timeline-slot:hover {
+  z-index: 6;
+}
+
 .guard-timeline-slot .slot-card {
   height: 100%;
   display: flex;
   flex-direction: column;
   padding: 0.35rem 0.45rem;
-  overflow: hidden;
+  overflow: auto;
+}
+
+.timeline-assignee-summary {
+  word-break: break-word;
 }
 
 .slot-card-time {
