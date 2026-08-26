@@ -19,15 +19,11 @@ export default async function BoardPage() {
   const admin = await isAdmin();
   const missions = await listMissionDays(!admin);
 
-  let initialPeople: Awaited<ReturnType<typeof fetchActivePeople>> = [];
-  let initialApprovedIssues: Awaited<ReturnType<typeof loadApprovedIssues>> = [];
-  if (admin) {
-    const supabase = await createClient();
-    [initialPeople, initialApprovedIssues] = await Promise.all([
-      fetchActivePeople(supabase),
-      loadApprovedIssues(),
-    ]);
-  }
+  const supabase = await createClient();
+  const [initialPeople, initialApprovedIssues] = await Promise.all([
+    fetchActivePeople(supabase),
+    admin ? loadApprovedIssues() : Promise.resolve([]),
+  ]);
 
   return (
     <AppShell title="רשימה מלאה">
