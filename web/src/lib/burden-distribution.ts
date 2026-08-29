@@ -37,11 +37,12 @@ function median(values: number[]): number {
 
 function autoBinWidth(min: number, max: number, count: number): number {
   const range = Math.max(max - min, 0.5);
-  const targetBins = Math.min(10, Math.max(4, Math.ceil(Math.sqrt(count))));
-  const raw = range / targetBins;
-  if (raw <= 1) return 0.5;
-  if (raw <= 2) return 1;
-  if (raw <= 5) return 2;
+  const maxBins = 8;
+  const raw = range / maxBins;
+  if (raw <= 1) return 1;
+  if (raw <= 2) return 2;
+  if (raw <= 4) return 4;
+  if (raw <= 5) return 5;
   return Math.ceil(raw / 5) * 5;
 }
 
