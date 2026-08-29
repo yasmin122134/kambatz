@@ -8,7 +8,8 @@ type Props = {
   highlightName?: string;
 };
 
-const CHART_HEIGHT = 160;
+const PLOT_HEIGHT = 132;
+const LABEL_HEIGHT = 28;
 
 export function BurdenDistributionChart({ roster, highlightName }: Props) {
   const summary = useMemo(
@@ -49,28 +50,41 @@ export function BurdenDistributionChart({ roster, highlightName }: Props) {
         role="img"
         aria-label={`התפלגות עומס: ממוצע ${summary.mean}, חציון ${summary.median}`}
       >
-        <div className="burden-distribution-bars" style={{ height: CHART_HEIGHT }}>
+        <div
+          className="burden-distribution-bars"
+          style={{ height: PLOT_HEIGHT + LABEL_HEIGHT }}
+        >
           {summary.bins.map((bin) => {
-            const heightPct =
-              summary.maxCount > 0
-                ? Math.round((bin.count / summary.maxCount) * 100)
+            const heightPx =
+              bin.count > 0 && summary.maxCount > 0
+                ? Math.max(
+                    8,
+                    Math.round((bin.count / summary.maxCount) * PLOT_HEIGHT),
+                  )
                 : 0;
             const title = bin.names.length
               ? `${bin.label}: ${bin.count} (${bin.names.join(", ")})`
               : `${bin.label}: ${bin.count}`;
             return (
               <div key={bin.label} className="burden-distribution-bar-col">
-                <div className="burden-distribution-bar-stack">
-                  <span className="burden-distribution-count mono">{bin.count || ""}</span>
-                  <div
-                    className={`burden-distribution-bar-fill${
-                      bin.includesHighlight ? " burden-distribution-bar-fill--you" : ""
-                    }`}
-                    style={{
-                      height: bin.count > 0 ? `max(${heightPct}%, 4px)` : "0",
-                    }}
-                    title={title}
-                  />
+                <div
+                  className="burden-distribution-bar-plot"
+                  style={{ height: PLOT_HEIGHT }}
+                >
+                  <span className="burden-distribution-count mono">
+                    {bin.count > 0 ? bin.count : ""}
+                  </span>
+                  <div className="burden-distribution-bar-track">
+                    <div
+                      className={`burden-distribution-bar-fill${
+                        bin.includesHighlight
+                          ? " burden-distribution-bar-fill--you"
+                          : ""
+                      }`}
+                      style={{ height: heightPx > 0 ? `${heightPx}px` : "0" }}
+                      title={title}
+                    />
+                  </div>
                 </div>
                 <span className="burden-distribution-label mono">{bin.label}</span>
               </div>
