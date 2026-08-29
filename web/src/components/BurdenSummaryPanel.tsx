@@ -1,4 +1,5 @@
 import { JUSTICE_POINTS_EXPLANATION } from "@/lib/justice-points";
+import { BurdenDistributionChart } from "@/components/BurdenDistributionChart";
 
 export type BurdenRosterRow = {
   personName: string;
@@ -79,6 +80,7 @@ export function BurdenSummaryPanel({
           מקס׳ סה״כ+היסט׳: <strong>{maxTotal.toFixed(1)}</strong>
         </span>
       </div>
+      <BurdenDistributionChart roster={roster} highlightName={highlightName} />
       <div className="burden-roster-scroll" tabIndex={0} aria-label="רשימת עומס — ניתן לגלול">
         <table className="schedule-table w-full text-sm">
           <thead>
