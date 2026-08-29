@@ -1,17 +1,28 @@
 ﻿import { fairnessRulesChanged } from "@/lib/fairness-stats";
 import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
-import { REST_PENALTY_TIERS, guardBandScoreForFullBlock } from "@/lib/guard-burden";
+import {
+  GUARD_BAND_TIME_RANGES,
+  GUARD_TIME_BAND_LABELS,
+  PATROL_GUARD_POINTS,
+  REST_PENALTY_TIERS,
+  getGuardBaseBurden,
+} from "@/lib/guard-burden";
 import { DEFAULT_HAMAGSHIYOT_SHIFTS } from "@/lib/hamagshiyot-template";
 import { DEFAULT_KITCHEN_SHIFTS } from "@/lib/kitchen-day-template";
-import { PATROL_GUARD_POINTS } from "@/lib/guard-burden";
-import type { FairnessHourlyRates, FairnessRules } from "@/lib/types";
+import {
+  type FairnessHourlyRates,
+  type FairnessRules,
+} from "@/lib/types";
 import {
   DEFAULT_FAIRNESS_RULES,
   FAIRNESS_BUCKET_HELP,
   FAIRNESS_BUCKET_LABELS,
-  PAIR_GUARD_HOURLY_DISCOUNT,
   type FairnessBucket,
 } from "@/lib/types";
+import {
+  pairGuardHourlyRate,
+  resolvePairGuardRateRatio,
+} from "@/lib/guard-burden";
 
 export const FAIRNESS_INTRO = {
   lead: "השיבוץ החכם מעדיף מי שנקודות הצדק שלו נמוכות יותר.",
@@ -66,7 +77,7 @@ export type EditableFairnessField =
 
 export const EDITABLE_FAIRNESS_FIELDS: EditableFairnessField[] = [
   { kind: "hourly", key: "guard", label: "שמירה — יום לבד" },
-  { kind: "pair", label: "שמירה — יום בזוג" },
+  { kind: "pair", label: "שמירה בזוג — יחס מסולו (0.75 = 75%)" },
   { kind: "hourly", key: "guard_night", label: "שמירה — לילה לבד" },
   { kind: "hourly", key: "observation", label: "תצפיתן" },
   { kind: "hourly", key: "base_work", label: "עב״ס" },
@@ -89,10 +100,12 @@ function perShift(value: number): string {
   return `${formatPointValue(value)} למשמרת`;
 }
 
+export function pairGuardDayRate(rules: FairnessRules): number {
+  return pairGuardHourlyRate(resolveHourlyRates(rules).guard, rules);
+}
+
 export function pairGuardNightRate(rules: FairnessRules): number {
-  const rates = resolveHourlyRates(rules);
-  const nightPremium = Math.max(0, rates.guard_night - rates.guard);
-  return Math.round((rules.pair + nightPremium) * 100) / 100;
+  return pairGuardHourlyRate(resolveHourlyRates(rules).guard_night, rules);
 }
 
 export function baseWorkShiftRows(rules: FairnessRules) {
@@ -126,9 +139,15 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
       title: "שמירות",
       rows: [
         { label: "יום — לבד", value: perHour(rates.guard) },
-        { label: "יום — בזוג (2+ מאיישים)", value: perHour(rules.pair) },
+        {
+          label: "יום — בזוג (2+ מאיישים)",
+          value: `${perHour(pairGuardDayRate(rules))} (${Math.round(resolvePairGuardRateRatio(rules) * 100)}% מסולו)`,
+        },
         { label: "לילה — לבד (22:00–06:00)", value: perHour(rates.guard_night) },
-        { label: "לילה — בזוג", value: perHour(pairGuardNightRate(rules)) },
+        {
+          label: "לילה — בזוג",
+          value: `${perHour(pairGuardNightRate(rules))} (${Math.round(resolvePairGuardRateRatio(rules) * 100)}% מסולו)`,
+        },
         { label: "תצפיתן", value: perHour(rates.observation) },
         {
           label: "סיור (פטרול)",
@@ -181,8 +200,8 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
           value: formatPointValue(rules.hist),
         },
         {
-          label: "הנחה לשעה — שמירה בזוג",
-          value: `−${formatPointValue(PAIR_GUARD_HOURLY_DISCOUNT)} לשעה מסולו`,
+          label: "שמירה בזוג (יחס מסולו)",
+          value: `${Math.round(resolvePairGuardRateRatio(rules) * 100)}%`,
         },
         {
           label: "שעות לילה (תעריף לילה)",
@@ -197,13 +216,30 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
   ];
 }
 
+function bandEndTime(endMin: number): string {
+  if (endMin >= 1440) return "00:00";
+  const h = Math.floor(endMin / 60);
+  const m = endMin % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+function bandStartTime(startMin: number): string {
+  const h = Math.floor(startMin / 60) % 24;
+  const m = startMin % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/** Four-hour band examples — derived from the same day/night hourly model used in scoring. */
 export function guardBandRows(rules: FairnessRules) {
-  const factor = rules.guard_hours_factor;
-  return rules.guard_bands.map((band, i) => ({
-    label: ["00:00–04:00", "04:00–08:00", "08:00–12:00", "12:00–16:00", "16:00–20:00", "20:00–00:00"][i],
-    solo: guardBandScoreForFullBlock(band.solo, factor),
-    pair: guardBandScoreForFullBlock(band.paired, factor),
-  }));
+  return GUARD_BAND_TIME_RANGES.map((band, i) => {
+    const startTime = bandStartTime(band.startMin);
+    const endTime = bandEndTime(band.endMin);
+    return {
+      label: GUARD_TIME_BAND_LABELS[i],
+      solo: getGuardBaseBurden(startTime, endTime, 1, rules),
+      pair: getGuardBaseBurden(startTime, endTime, 2, rules),
+    };
+  });
 }
 
 export function editableBucketLabel(bucket: FairnessBucket): string {
@@ -263,7 +299,9 @@ export function formatFairnessRulesDiff(
   }
 
   if (current.pair !== proposed.pair) {
-    parts.push(`שמירה — יום בזוג: ${current.pair}→${proposed.pair}`);
+    parts.push(
+      `שמירה בזוג (יחס מסולו): ${current.pair}→${proposed.pair}`,
+    );
   }
 
   for (const bucket of EDITABLE_FAIRNESS_BUCKETS) {

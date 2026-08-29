@@ -89,14 +89,14 @@ function flatSlot(
 }
 
 describe("guard base scoring", () => {
-  it("daytime 08–12 = 4 points solo, 3.6 paired (−0.1/h)", () => {
+  it("daytime 08–12 = 4 points solo, 3 paired (75% of solo)", () => {
     expect(getGuardBaseBurden("08:00", "12:00", 1)).toBe(4);
-    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(3.6);
+    expect(getGuardBaseBurden("08:00", "12:00", 2)).toBe(3);
   });
 
-  it("single daytime hour = 1 solo, 0.9 paired", () => {
+  it("single daytime hour = 1 solo, 0.75 paired", () => {
     expect(getGuardBaseBurden("08:00", "09:00", 1)).toBe(1);
-    expect(getGuardBaseBurden("08:00", "09:00", 2)).toBe(0.9);
+    expect(getGuardBaseBurden("08:00", "09:00", 2)).toBe(0.75);
   });
 
   it("night 00–04 = 5 points (1.25/h)", () => {
@@ -221,9 +221,9 @@ describe("reserve force scoring", () => {
 });
 
 describe("paired guard individual burden", () => {
-  it("each person gets paired score with hourly discount", () => {
+  it("each person gets paired score at 75% of solo", () => {
     const detail = calculateGuardAssignmentBurden(guardBlock("00:00", "04:00", 2), null);
-    expect(detail.baseBurden).toBe(4.6);
+    expect(detail.baseBurden).toBe(3.75);
     expect(detail.isSolo).toBe(false);
   });
 });

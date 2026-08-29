@@ -26,6 +26,7 @@ import {
   DEFAULT_FAIRNESS_RULES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
+  PAIR_GUARD_RATE_RATIO,
   PAIR_GUARD_HOURLY_DISCOUNT,
 } from "@/lib/types";
 
@@ -57,6 +58,19 @@ export function resolveGuardBands(rules?: FairnessRules): GuardBandRule[] {
 export function resolveGuardHoursFactor(rules?: FairnessRules): number {
   const factor = rules?.guard_hours_factor;
   return factor != null && factor >= 0 ? factor : DEFAULT_FAIRNESS_RULES.guard_hours_factor;
+}
+
+export function resolvePairGuardRateRatio(rules?: FairnessRules): number {
+  const ratio = rules?.pair;
+  if (ratio != null && ratio > 0 && ratio <= 1) return ratio;
+  return PAIR_GUARD_RATE_RATIO;
+}
+
+export function pairGuardHourlyRate(
+  soloRate: number,
+  rules?: FairnessRules,
+): number {
+  return roundPoints(soloRate * resolvePairGuardRateRatio(rules));
 }
 
 export function resolveRestPenalties(rules?: FairnessRules): number[] {
@@ -181,9 +195,8 @@ export function getGuardTimeBandScore(
 }
 
 /**
- * Time-of-day guard burden — proportional to shift length:
- * sum(band_points × overlap_hours ÷ 4), optionally × guard_hours_factor.
- * Cross-band shifts (e.g. 02:00–05:00) split by overlap with each 4h wall-clock band.
+ * Guard burden from hourly day/night rates (22:00–06:00 = night).
+ * Pair shifts (2+ seats) use resolvePairGuardRateRatio (default 75% of solo).
  */
 export function getGuardBaseBurden(
   startTime: string,
@@ -201,11 +214,6 @@ export function getGuardBaseBurden(
   }
 
   const isPair = seatCount > 1;
-  const dayRate = isPair
-    ? Math.max(0, rules?.pair ?? rates.guard - PAIR_GUARD_HOURLY_DISCOUNT)
-    : rates.guard;
-  const nightPremium = Math.max(0, rates.guard_night - rates.guard);
-  const nightRate = isPair ? dayRate + nightPremium : rates.guard_night;
   const startMin = parseTimeMinutes(startTime);
   if (startMin === null) return 0;
   const durationMin = slotDurationMinutes(startTime, endTime);
@@ -213,7 +221,11 @@ export function getGuardBaseBurden(
   const dayMin = Math.max(0, durationMin - nightMin);
   const dayHours = dayMin / 60;
   const nightHours = nightMin / 60;
-  return roundPoints(dayHours * dayRate + nightHours * nightRate);
+  const soloTotal = dayHours * rates.guard + nightHours * rates.guard_night;
+  if (isPair) {
+    return roundPoints(soloTotal * resolvePairGuardRateRatio(rules));
+  }
+  return roundPoints(soloTotal);
 }
 
 export function getGuardBaseBurdenForSlot(

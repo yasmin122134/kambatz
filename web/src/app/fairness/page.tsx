@@ -12,6 +12,7 @@ import {
   EDITABLE_FAIRNESS_FIELDS,
   FAIRNESS_INTRO,
   mergeProposedFairnessRules,
+  pairGuardDayRate,
   pairGuardNightRate,
 } from "@/lib/fairness-display";
 import { REST_PENALTY_TIERS } from "@/lib/guard-burden";
@@ -215,7 +216,8 @@ export default function FairnessPage() {
                           {currentFieldValue(rules, field)}
                           {field.kind === "pair" ? (
                             <span className="block text-[10px] text-ink3">
-                              לילה: {pairGuardNightRate(proposed).toFixed(2)}
+                              יום: {pairGuardDayRate(proposed).toFixed(2)} · לילה:{" "}
+                              {pairGuardNightRate(proposed).toFixed(2)}
                             </span>
                           ) : null}
                         </td>

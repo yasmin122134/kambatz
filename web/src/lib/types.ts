@@ -259,7 +259,10 @@ export type FairnessHourlyRates = {
   reserve_force: number;
 };
 
-/** הנחה לשעה לכל מאייש בשמירה בזוג (2+ מקומות באותה משמרת) */
+/** יחס נקודות שמירה בזוג (2+ מאיישים) מול שמירה סולו — 0.75 = 75% */
+export const PAIR_GUARD_RATE_RATIO = 0.75;
+
+/** @deprecated Use PAIR_GUARD_RATE_RATIO — kept for imports */
 export const PAIR_GUARD_HOURLY_DISCOUNT = 0.1;
 
 export const DEFAULT_FAIRNESS_HOURLY_RATES: FairnessHourlyRates = {
@@ -286,12 +289,12 @@ export type FairnessRules = Record<FairnessBucket, number> & {
 };
 
 export const DEFAULT_GUARD_BANDS: GuardBandRule[] = [
-  { solo: 10, paired: 8 }, // 00:00–04:00 — night / severe sleep disruption
-  { solo: 9, paired: 7 }, // 04:00–08:00 — early morning
-  { solo: 7, paired: 5 }, // 08:00–12:00 — comfortable daytime
-  { solo: 8, paired: 6 }, // 12:00–16:00 — peak heat
-  { solo: 7, paired: 5 }, // 16:00–20:00 — heat / evening
-  { solo: 8, paired: 6 }, // 20:00–00:00 — late hours
+  { solo: 10, paired: 7.5 },
+  { solo: 9, paired: 6.75 },
+  { solo: 7, paired: 5.25 },
+  { solo: 8, paired: 6 },
+  { solo: 7, paired: 5.25 },
+  { solo: 8, paired: 6 },
 ];
 
 export const DEFAULT_REST_PENALTIES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
@@ -311,7 +314,7 @@ export const DEFAULT_BASE_WORK_SHIFTS: BaseWorkShiftRule[] = [
 
 export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   solo: 1,
-  pair: 0.9,
+  pair: PAIR_GUARD_RATE_RATIO,
   standby: 0.15,
   standby_a: 0.5,
   standby_b: 0.3,
@@ -335,7 +338,7 @@ export interface FairnessRuleRequest {
 
 export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
   solo: "שמירה (לשעה)",
-  pair: "שמירה (לשעה)",
+  pair: "שמירה בזוג (יחס מסולו)",
   standby: "כוננות (לשעה)",
   standby_a: "כרמל א׳ — כוננות (לשעה)",
   standby_b: "כרמל ב׳ — כוננות (לשעה)",
@@ -345,7 +348,7 @@ export const FAIRNESS_BUCKET_LABELS: Record<FairnessBucket, string> = {
 
 export const FAIRNESS_BUCKET_HELP: Record<FairnessBucket, string> = {
   solo: "שעת שמירה רגילה",
-  pair: "שעת שמירה — −0.1 לשעה מסולו",
+  pair: "שמירה בזוג — 75% מנקודות שמירה סולו (לשעה)",
   standby: "כיתת כוננות (כללי)",
   standby_a: "כרמל א׳ — כוננות מלאה, משמעותית קשה יותר",
   standby_b: "כרמל ב׳ — כוננות",
@@ -399,7 +402,7 @@ export const SCHEDULER_FAIRNESS_EXPLANATION = [
   "נקודות שמירה — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, עונש מנוחה).",
   "נקודות תורנות — מימי מטבח (1 נק׳ למשמרת).",
   "נקודות צדק = נקודות שמירה + נקודות תורנות.",
-  "שמירה — 1 נק׳/שעה; לילה 1.25; תצפיתן 0.6; בזוג −0.1/שעה.",
+  "שמירה — 1 נק׳/שעה; לילה 1.25; בזוג 75% מסולו; תצפיתן 0.6.",
   "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2) — נספר בנקודות שמירה.",
   "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];

@@ -4,12 +4,13 @@ import { spreadWithOverrides } from "@/lib/fairness-spread";
 import { mulberry32 } from "@/lib/seeded-random";
 import { pickStochasticGuardCandidate } from "@/lib/stochastic-guard-pick";
 import {
+  blockFromFlatSlot,
   calculatePersonBurden,
   calculateProjectedCandidateBurden,
   calculateProjectedKitchenBurden,
   getGuardBaseBurdenForSlot,
   guardSlotDifficultyRank,
-  PATROL_GUARD_POINTS,
+  toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
   type PersonBurdenBreakdown,
 } from "@/lib/guard-burden";
@@ -718,35 +719,15 @@ export function pointsForSlot(
   rules: FairnessRules,
   options?: { missionType?: MissionType; scheduling?: MissionSchedulingRules },
 ): number {
-  if (slot.positionKind === "patrol") {
-    return PATROL_GUARD_POINTS;
-  }
-  if (isGuardKind(slot.positionKind)) {
+  const missionType = options?.missionType ?? slot.missionType;
+  if (isGuardKind(slot.positionKind) || slot.positionKind === "patrol") {
     return getGuardBaseBurdenForSlot(slot, seatCount, rules);
   }
-  if (
-    slot.positionKind === "kitchen" &&
-    options?.missionType === "guards" &&
-    isHamagshiyotPositionName(slot.positionName)
-  ) {
-    return Math.round(rules.kitchen * 100) / 100;
-  }
-  if (isReserveForceSlot(slot)) {
-    const hours = slotDurationHours(slot.startTime, slot.endTime);
-    const rate = resolveHourlyRates(rules).reserve_force;
-    return Math.round(hours * rate * 100) / 100;
-  }
-  const bucket = bucketForSlot(slot, seatCount, rules);
-  const weight = rules[bucket as keyof FairnessRules] as number;
-  const kitchenPerShift =
-    slot.positionKind === "kitchen" &&
-    (options?.scheduling?.kitchen?.points_per_shift !== false ||
-      options?.missionType === "kitchen");
-  if (kitchenPerShift) {
-    return Math.round(weight * 100) / 100;
-  }
-  const hours = slotDurationHours(slot.startTime, slot.endTime);
-  return Math.round(hours * weight * 100) / 100;
+  return toranutPointsForMissionBlock(
+    blockFromFlatSlot(slot, missionType, seatCount),
+    rules,
+    options?.scheduling,
+  );
 }
 
 export function workScore(

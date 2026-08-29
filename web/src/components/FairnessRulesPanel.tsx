@@ -82,8 +82,9 @@ export function FairnessRulesPanel({
       <div className="border-t border-line pt-4 space-y-2">
         <h4 className="font-display text-base">טבלת פסי שמירה (לפי שעון)</h4>
         <p className="text-xs text-ink2">
-          נקודות בסיס לשמירה של 4 שעות מלאות בכל פס — מוכפלות לפי אורך המשמרת.
-          מקדם שעות: {rules.guard_hours_factor}.
+          דוגמאות לשמירה של 4 שעות מלאות בכל פס — מחושבות מאותם תעריפי יום/לילה
+          שמופיעים למעלה (22:00–06:00 = לילה). משמרות קצרות או חוצות פסים מחושבות
+          לפי שעות בפועל.
         </p>
         <div className="schedule-table-wrap overflow-x-auto">
           <table className="schedule-table w-full text-sm">

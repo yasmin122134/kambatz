@@ -10,6 +10,7 @@ import {
   DEFAULT_FAIRNESS_HOURLY_RATES,
   DEFAULT_GUARD_BANDS,
   DEFAULT_REST_PENALTIES,
+  PAIR_GUARD_RATE_RATIO,
   type FairnessBucket,
   type FairnessHourlyRates,
   type FairnessRules,
@@ -82,6 +83,8 @@ export function normalizeFairnessRulesFromRaw(raw: unknown): FairnessRules {
     const v = parseNonNegativeNumber(src[key]);
     if (v !== null) out[key] = v;
   }
+  // Legacy: pair was an absolute hourly rate (~0.9); now a ratio (0.75).
+  if (out.pair > 0.8) out.pair = PAIR_GUARD_RATE_RATIO;
   return out;
 }
 
