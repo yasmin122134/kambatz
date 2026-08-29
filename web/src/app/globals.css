@@ -319,6 +319,14 @@ button:hover,
   color: var(--color-ink3);
 }
 
+.burden-roster-row--you {
+  background: var(--color-accent-bg);
+}
+
+.burden-roster-row--you td:first-child {
+  font-weight: 700;
+}
+
 .burden-roster-bar {
   display: flex;
   align-items: center;
@@ -466,6 +474,56 @@ button:hover,
 
 .day-tab-date {
   font-weight: 600;
+}
+
+.platoon-fairness-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.platoon-fairness-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.15rem 0.75rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-line2);
+  border-radius: var(--radius-md);
+  background: var(--color-bone2);
+}
+
+.platoon-fairness-row.is-you {
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+.platoon-fairness-name {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+.platoon-fairness-points {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.platoon-fairness-main {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-accent);
+  line-height: 1.1;
+}
+
+.platoon-fairness-breakdown {
+  grid-column: 1 / -1;
 }
 
 .guard-shift-roster {

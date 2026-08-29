@@ -36,6 +36,7 @@ export function AppShell({ children, title }: Props) {
     { href: "/", label: "דף הבית" },
     { href: "/board", label: "רשימה מלאה" },
     { href: "/fairness", label: "טבלת צדק" },
+    { href: "/pluga", label: "פלוגה" },
     ...(onRoster !== false
       ? [
           { href: "/profile", label: "פרופיל" },

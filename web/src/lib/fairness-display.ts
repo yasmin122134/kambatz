@@ -2,11 +2,14 @@
 import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
 import { REST_PENALTY_TIERS, guardBandScoreForFullBlock } from "@/lib/guard-burden";
 import { DEFAULT_HAMAGSHIYOT_SHIFTS } from "@/lib/hamagshiyot-template";
+import { DEFAULT_KITCHEN_SHIFTS } from "@/lib/kitchen-day-template";
+import { PATROL_GUARD_POINTS } from "@/lib/guard-burden";
 import type { FairnessHourlyRates, FairnessRules } from "@/lib/types";
 import {
   DEFAULT_FAIRNESS_RULES,
   FAIRNESS_BUCKET_HELP,
   FAIRNESS_BUCKET_LABELS,
+  PAIR_GUARD_HOURLY_DISCOUNT,
   type FairnessBucket,
 } from "@/lib/types";
 
@@ -127,7 +130,10 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
         { label: "לילה — לבד (22:00–06:00)", value: perHour(rates.guard_night) },
         { label: "לילה — בזוג", value: perHour(pairGuardNightRate(rules)) },
         { label: "תצפיתן", value: perHour(rates.observation) },
-        { label: "סיור", value: "1 לסיור" },
+        {
+          label: "סיור (פטרול)",
+          value: `${formatPointValue(PATROL_GUARD_POINTS)} לסיור`,
+        },
       ],
     },
     {
@@ -154,11 +160,38 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
       id: "kitchen",
       title: "תורנות",
       rows: [
-        { label: "מטבch — לשעה", value: perHour(rates.kitchen) },
+        { label: "יום מטבch — למשמרת", value: perShift(rules.kitchen) },
+        ...DEFAULT_KITCHEN_SHIFTS.map((shift) => ({
+          label: `מטבch ${shift.start}–${shift.end}${shift.label ? ` (${shift.label})` : ""}`,
+          value: perShift(rules.kitchen),
+        })),
+        { label: "מטבch — לפי שעות (אם לא למשמרת)", value: perHour(rates.kitchen) },
         ...hamagsh.map((row) => ({
           label: `חמגשיות ${row.timeLabel}`,
           value: perShift(row.points),
         })),
+      ],
+    },
+    {
+      id: "meta",
+      title: "פרמטרים כלליים",
+      rows: [
+        {
+          label: "משקל ניקוד קודם (hist)",
+          value: formatPointValue(rules.hist),
+        },
+        {
+          label: "הנחה לשעה — שמירה בזוג",
+          value: `−${formatPointValue(PAIR_GUARD_HOURLY_DISCOUNT)} לשעה מסולו`,
+        },
+        {
+          label: "שעות לילה (תעריף לילה)",
+          value: "22:00–06:00",
+        },
+        {
+          label: "נקודות צדק",
+          value: "נקודות שמירה + נקודות תורנות",
+        },
       ],
     },
   ];

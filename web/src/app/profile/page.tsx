@@ -15,6 +15,7 @@ import {
   type ProfileRequest,
   type PersonFairnessStats,
 } from "@/lib/types";
+import { JUSTICE_POINTS_EXPLANATION, justicePoints, formatJusticePoints } from "@/lib/justice-points";
 import { createClient } from "@/lib/supabase/client";
 
 function fairnessHistoryLabel(h: PersonFairnessStats["history"][0]): string {
@@ -211,27 +212,33 @@ export default function ProfilePage() {
           <div className="rounded-2xl border border-line2 bg-bone2/50 p-4 space-y-3">
             <div className="bar spread flex-wrap gap-2">
               <p className="font-display text-sm">נקודות צדק</p>
-              <Link href="/fairness" className="text-xs text-brick hover:underline">
-                טבלת צדק
-              </Link>
+              <div className="flex flex-wrap gap-3 text-xs">
+                <Link href="/pluga" className="text-brick hover:underline">
+                  הפלוגה
+                </Link>
+                <Link href="/fairness" className="text-brick hover:underline">
+                  טבלת צדק
+                </Link>
+              </div>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-sm">
+            <p className="text-xs text-ink3">{JUSTICE_POINTS_EXPLANATION}</p>
+            <div className="text-center py-2">
+              <p className="hint text-xs mb-1">סה״כ נקודות צדק (שמירה + תורנות)</p>
+              <p className="font-display text-3xl text-accent">
+                {formatJusticePoints(justicePoints(fairness.burden, fairness.periodPoints))}
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-center text-sm border-t border-line2 pt-2">
               <div>
-                <p className="hint text-xs">נקודות שמירה</p>
+                <p className="hint text-xs">מתוכם — שמירה</p>
                 <p className="font-display text-lg">
                   {fairness.burden?.guardPoints?.toFixed(1) ?? "—"}
                 </p>
               </div>
               <div>
-                <p className="hint text-xs">נקודות תורנות</p>
+                <p className="hint text-xs">מתוכם — תורנות</p>
                 <p className="font-display text-lg">
                   {fairness.burden?.toranutPoints?.toFixed(1) ?? "—"}
-                </p>
-              </div>
-              <div>
-                <p className="hint text-xs">נקודות צדק</p>
-                <p className="font-display text-lg text-accent">
-                  {fairness.periodPoints}
                 </p>
               </div>
             </div>

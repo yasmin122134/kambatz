@@ -7,15 +7,14 @@ import {
   BurdenSummaryPanel,
   type BurdenRosterRow,
 } from "@/components/BurdenSummaryPanel";
+import { FairnessRulesPanel } from "@/components/FairnessRulesPanel";
 import {
   EDITABLE_FAIRNESS_FIELDS,
   FAIRNESS_INTRO,
-  fairnessScoringSections,
   mergeProposedFairnessRules,
   pairGuardNightRate,
-  REST_PENALTY_NOTE,
 } from "@/lib/fairness-display";
-import { REST_PENALTY_TIERS, restPenaltyTiersFromRules } from "@/lib/guard-burden";
+import { REST_PENALTY_TIERS } from "@/lib/guard-burden";
 import {
   DEFAULT_FAIRNESS_RULES,
   type FairnessHourlyRates,
@@ -137,9 +136,6 @@ export default function FairnessPage() {
     );
   }
 
-  const scoringSections = fairnessScoringSections(rules);
-  const restTiers = restPenaltyTiersFromRules(rules);
-
   return (
     <AppShell title="טבלת צדק">
       <main className="mx-auto max-w-3xl px-5 py-8 space-y-6">
@@ -184,63 +180,7 @@ export default function FairnessPage() {
           </div>
         )}
 
-        <div className="card space-y-6">
-          <h3 className="font-display text-lg">תעריפי נקודות</h3>
-          <div className="schedule-table-wrap overflow-x-auto">
-            <table className="schedule-table w-full text-sm">
-              <thead>
-                <tr>
-                  <th className="w-[28%]">קטגוריה</th>
-                  <th>משימה</th>
-                  <th className="w-[22%]">נקודות</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scoringSections.map((section) =>
-                  section.rows.map((row, index) => (
-                    <tr key={`${section.id}-${row.label}`}>
-                      {index === 0 ? (
-                        <td
-                          className="font-medium align-top bg-paper2/40"
-                          rowSpan={section.rows.length}
-                        >
-                          {section.title}
-                        </td>
-                      ) : null}
-                      <td>{row.label}</td>
-                      <td className="mono font-bold text-accent whitespace-nowrap">
-                        {row.value}
-                      </td>
-                    </tr>
-                  )),
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="border-t border-line pt-4 space-y-2">
-            <h4 className="font-display text-base">עונש מנוחה</h4>
-            <p className="text-xs text-ink2">{REST_PENALTY_NOTE}</p>
-            <div className="schedule-table-wrap overflow-x-auto">
-              <table className="schedule-table w-full text-sm">
-                <thead>
-                  <tr>
-                    <th>פער מנוחה</th>
-                    <th className="w-[22%]">עונש</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {restTiers.map((tier) => (
-                    <tr key={tier.restHoursLabel}>
-                      <td>{tier.restHoursLabel}</td>
-                      <td className="mono font-bold text-accent">+{tier.penalty}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <FairnessRulesPanel rules={rules} showIntro={false} />
 
         {loggedIn ? (
           <form onSubmit={submit} className="card space-y-5">

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { AddToCalendarLink } from "@/components/AddToCalendarLink";
 import { CalendarAutoSync } from "@/components/CalendarAutoSync";
+import { HomeBurdenSection } from "@/components/HomeBurdenSection";
 import { HomeGuest } from "@/components/HomeGuest";
 import { HomeUnknownUser } from "@/components/HomeUnknownUser";
 import {
@@ -45,7 +46,7 @@ export default async function HomePage() {
 
   return (
     <AppShell>
-      <main className="mx-auto max-w-lg px-5 py-8 flex-1">
+      <main className="mx-auto max-w-3xl px-5 py-8 flex-1 space-y-6">
         {!user ? (
           <HomeGuest />
         ) : !session ? (
@@ -55,7 +56,7 @@ export default async function HomePage() {
             viewerAllowed={emailReady}
           />
         ) : (
-          <section className="card">
+          <section className="card max-w-lg mx-auto w-full">
             <h2 className="font-display text-2xl mb-1">
               שלום, {session.person.name}
             </h2>
@@ -99,6 +100,14 @@ export default async function HomePage() {
             {calendarPreview && <CalendarAutoSync preview={calendarPreview} />}
           </section>
         )}
+
+        <HomeBurdenSection personName={session?.person.name} />
+
+        <p className="text-center text-sm text-ink2">
+          <Link href="/fairness" className="text-brick hover:underline">
+            טבלת צדק מלאה — כל התעריפים והכללים
+          </Link>
+        </p>
       </main>
     </AppShell>
   );

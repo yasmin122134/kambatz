@@ -1,3 +1,5 @@
+import { JUSTICE_POINTS_EXPLANATION } from "@/lib/justice-points";
+
 export type BurdenRosterRow = {
   personName: string;
   totalBurden: number;
@@ -20,6 +22,7 @@ type Props = {
   title?: string;
   emptyMessage?: string;
   assignedLabel?: string;
+  highlightName?: string;
 };
 
 export function BurdenSummaryPanel({
@@ -28,6 +31,7 @@ export function BurdenSummaryPanel({
   title = "עומס שיבוץ — יום נבחר",
   emptyMessage = "אין נתוני שיבוץ.",
   assignedLabel = "משובצים ביום",
+  highlightName,
 }: Props) {
   const assignedCount = roster.filter((r) => r.totalBurden > 0).length;
   const maxTotal = roster.reduce((m, r) => Math.max(m, r.totalWithHistory), 0);
@@ -59,15 +63,8 @@ export function BurdenSummaryPanel({
           רענון
         </button>
       </div>
-      <p className="text-xs text-ink3 mb-2">
-        <strong>נקודות שמירה</strong> — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, עונש מנוחה).
-        {" "}
-        <strong>נקודות תורנות</strong> — מימי מטבח (1 נק׳ למשמרת).
-        {" "}
-        <strong>נקודות צדק</strong> = שמירה + תורנות.
-        {" "}
-        ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).
-      </p>
+      <p className="text-xs text-ink3 mb-2">{JUSTICE_POINTS_EXPLANATION}</p>
+      <p className="text-xs text-ink3 mb-2">ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).</p>
       <div className="burden-roster-summary">
         <span>
           <strong>{roster.length}</strong> צוערים פעילים
@@ -103,13 +100,20 @@ export function BurdenSummaryPanel({
                   ? Math.round((row.totalWithHistory / maxTotal) * 100)
                   : 0;
               const idle = row.totalBurden <= 0;
+              const mine = highlightName === row.personName;
               return (
                 <tr
                   key={row.personName}
-                  className={idle ? "burden-roster-row--idle" : undefined}
+                  className={
+                    mine
+                      ? "burden-roster-row--you"
+                      : idle
+                        ? "burden-roster-row--idle"
+                        : undefined
+                  }
                 >
                   <td>{row.personName}</td>
-                  <td className="mono">{row.totalBurden.toFixed(1)}</td>
+                  <td className="mono font-medium">{row.fairnessPoints.toFixed(1)}</td>
                   <td className="mono font-medium">{row.totalWithHistory.toFixed(1)}</td>
                   <td>
                     <div className="burden-roster-bar" title={`${barPct}% מהמקסימום`}>
