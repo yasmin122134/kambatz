@@ -13,7 +13,7 @@ function mission(date: string): MissionDay {
     status: "published",
     positions: [],
     assignments: {},
-  } as MissionDay;
+  } as unknown as MissionDay;
 }
 
 describe("countDistinctMissionDates", () => {
