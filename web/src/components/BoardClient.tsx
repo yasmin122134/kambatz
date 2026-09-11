@@ -1714,7 +1714,7 @@ function ReplacementPicker({
             </button>
           </div>
           {isKitchenSlot && mode !== "manual" && (
-            <p className="hint text-xs mb-2">במטבch מותרות משמרות רצופות — מנוחה יומית לא חוסמת.</p>
+            <p className="hint text-xs mb-2">במטבח מותרות משמרות רצופות — מנוחה יומית לא חוסמת.</p>
           )}
           {mode === "manual" ? (
             <div className="space-y-2">
@@ -2163,5 +2163,5 @@ function guardSlotBurdenTitle(
 ): string {
   const solo = slot.seatCount <= 1;
   const base = getGuardBaseBurden(slot.startTime, slot.endTime, slot.seatCount, rules);
-  return `${slot.timeLabel} — ${solo ? "סולו" : "זוג"}\nעומס בסיס: ${base}\n(עונש מנוחה מחושב לפי משימות קודמות/הבאות)`;
+  return `${slot.timeLabel} — ${solo ? "סולו" : "זוג"}\nעומס בסיס: ${base}\n(בונוס חוסר מנוחה מחושב לפי משימות קודמות/הבאות)`;
 }

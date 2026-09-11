@@ -1,6 +1,6 @@
 import type { PersonBurdenBreakdown } from "@/lib/guard-burden";
 
-/** נקודות צדק = שמירה + תורנות (מטבch/חמגשיות) */
+/** נקודות צדק = שמירה + תורנות (מטבח/חמגשיות) */
 export function justicePoints(
   burden: Pick<PersonBurdenBreakdown, "fairnessPoints" | "totalBurden"> | undefined,
   periodPoints?: number,
@@ -15,4 +15,4 @@ export function formatJusticePoints(value: number): string {
 }
 
 export const JUSTICE_POINTS_EXPLANATION =
-  "נקודות צדק = נקודות שמירה (שמירות, עב״ס, כוננות, עונש מנוחה) + נקודות תורנות (מטבch וחמגשיות).";
+  "נקודות צדק = נקודות שמירה (שמירות, עב״ס, כוננות, בונוס חוסר מנוחה) + נקודות תורנות (מטבח וחמגשיות).";

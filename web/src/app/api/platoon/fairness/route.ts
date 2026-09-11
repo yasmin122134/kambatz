@@ -7,6 +7,7 @@ import { getAuthSession } from "@/lib/session";
 import { isAdmin } from "@/lib/auth";
 
 export type PlatoonFairnessRow = {
+  personId: string;
   personName: string;
   squad: number | null;
   justicePoints: number;
@@ -30,7 +31,7 @@ export async function GET() {
       listMissionDays(!admin),
       supabase
         .from("people")
-        .select("name, prior_score, squad")
+        .select("id, name, prior_score, squad")
         .eq("active", true)
         .order("name"),
     ]);
@@ -38,6 +39,7 @@ export async function GET() {
     if (peopleRes.error) throw new Error(peopleRes.error.message);
 
     const people = (peopleRes.data || []).map((p) => ({
+      id: String(p.id),
       name: String(p.name),
       prior_score: Number(p.prior_score) || 0,
       squad:
@@ -57,6 +59,7 @@ export async function GET() {
     const roster: PlatoonFairnessRow[] = people.map((p) => {
       const burden = burdenByName.get(p.name);
       return {
+        personId: p.id,
         personName: p.name,
         squad: p.squad,
         justicePoints: burden?.fairnessPoints ?? burden?.totalBurden ?? 0,

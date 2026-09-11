@@ -43,7 +43,7 @@ export type FlatSlot = {
   positionKind: MissionPositionKind;
   sameRoom: boolean;
   sameGender: boolean;
-  /** סוג יום המשימה — לחפיפות מותרות (כרמל + מטבch/עב״ס) */
+  /** סוג יום המשימה — לחפיפות מותרות (כרמל + מטבח/עב״ס) */
   missionType: MissionType;
   startTime: string;
   endTime: string;
@@ -154,7 +154,7 @@ export function isReserveForceBlock(
   return isReserveForceSlot(block);
 }
 
-/** תורנות מטבch (משימת kitchen) — לא צורכת מנוחת יומית; מותרות משמרות רצופות */
+/** תורנות מטבח (משימת kitchen) — לא צורכת מנוחת יומית; מותרות משמרות רצופות */
 export function isKitchenMissionSlot(
   slot: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },
 ): boolean {

@@ -25,13 +25,13 @@ import {
 export const FAIRNESS_INTRO = {
   lead: "השיבוץ החכם מעדיף מי שנקודות הצדק שלו נמוכות יותר.",
   categories:
-    "נקודות צדק = נקודות שמירה (שמירות, עב״ס, כוננות, עונש מנוחה) + נקודות תורנות (מטבch).",
+    "נקודות צדק = נקודות שמירה (שמירות, עב״ס, כוננות, בונוס חוסר מנוחה) + נקודות תורנות (מטבח).",
   formula: (hist: number) =>
     `ציון שיבוץ = נקודות צדק + (ניקוד קודם − ממוצע) × ${hist}`,
 } as const;
 
 export const REST_PENALTY_NOTE =
-  "עונש על פער מנוחה קצר בין שמירות (לא בין מטבch/עב״ס). מדד צדק — לא אילוץ קשיח.";
+  "בונוס על חוסר מנוחה בין שמירות (לא בין מטבח/עב״ס). מדד צדק — לא אילוץ קשיח.";
 
 export const HOURLY_RATE_ROWS: {
   key: keyof FairnessHourlyRates;
@@ -43,7 +43,7 @@ export const HOURLY_RATE_ROWS: {
   { key: "base_work", label: "עב״ס" },
   { key: "standby_a", label: "כוננות כרמל א׳" },
   { key: "standby_b", label: "כוננות כרמל ב׳" },
-  { key: "kitchen", label: "מטבch" },
+  { key: "kitchen", label: "מטבח" },
   { key: "reserve_force", label: "כוח עתודה" },
 ];
 
@@ -81,7 +81,7 @@ export const EDITABLE_FAIRNESS_FIELDS: EditableFairnessField[] = [
   { kind: "hourly", key: "base_work", label: "עב״ס" },
   { kind: "hourly", key: "standby_a", label: "כוננות כרמל א׳" },
   { kind: "hourly", key: "standby_b", label: "כוננות כרמל ב׳" },
-  { kind: "hourly", key: "kitchen", label: "מטבch" },
+  { kind: "hourly", key: "kitchen", label: "מטבח" },
   { kind: "hourly", key: "reserve_force", label: "כוח עתודה" },
   { kind: "hist", label: "משקל ניקוד קודם (hist)" },
 ];
@@ -168,7 +168,7 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
       id: "kitchen",
       title: "תורנות",
       rows: [
-        { label: "מטבch", value: perHour(rates.kitchen) },
+        { label: "מטבח", value: perHour(rates.kitchen) },
         { label: "חמגשיות", value: perHour(rates.kitchen) },
       ],
     },
@@ -299,7 +299,7 @@ export function formatFairnessRulesDiff(
   proposed.rest_penalties.forEach((penalty, i) => {
     if (penalty !== current.rest_penalties[i]) {
       parts.push(
-        `עונש מנוחה ${REST_PENALTY_TIERS[i].restHoursLabel}: ${current.rest_penalties[i]}→${penalty}`,
+        `בונוס חוסר מנוחה ${REST_PENALTY_TIERS[i].restHoursLabel}: ${current.rest_penalties[i]}→${penalty}`,
       );
     }
   });

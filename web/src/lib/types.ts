@@ -253,7 +253,7 @@ export type FairnessHourlyRates = {
   standby_a: number;
   /** שעת כוננות כרמel ב׳ */
   standby_b: number;
-  /** שעת מטבch */
+  /** שעת מטבח */
   kitchen: number;
   /** שעת כוח עתודה */
   reserve_force: number;
@@ -367,6 +367,10 @@ export type PersonMissionHistoryItem = {
   hours: number;
   bucket: FairnessBucket;
   points: number;
+  slotId?: string;
+  seatIndex?: number;
+  /** Admin manually set points for this row */
+  pointsManual?: boolean;
   /** Guard burden model — base time-of-day score */
   burdenBase?: number;
   /** Guard burden model — rest penalty before this shift */
@@ -399,10 +403,10 @@ export type PersonFairnessStats = {
 };
 
 export const SCHEDULER_FAIRNESS_EXPLANATION = [
-  "נקודות שמירה — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, עונש מנוחה).",
+  "נקודות שמירה — מימי שמירות + עב״ס (שמירות, כוננות, עבודות בסיס, בונוס חוסר מנוחה).",
   "נקודות תורנות — מימי מטבח (1 נק׳ למשמרת).",
   "נקודות צדק = נקודות שמירה + נקודות תורנות.",
   "שמירה — 1 נק׳/שעה; לילה 1.25; בזוג 75% מסולו; תצפיתן 0.6.",
-  "עונש מנוחה קצרה בין משימות (למשל 8–10 שעות = +2) — נספר בנקודות שמירה.",
+  "בונוס חוסר מנוחה קצרה בין משימות (למשל 8–10 שעות = +2) — נספר בנקודות שמירה.",
   "בכל שיבוץ נבחר מי שעומס הנקודות שלו הכי נמוך (כולל ניקוד קודם).",
 ];

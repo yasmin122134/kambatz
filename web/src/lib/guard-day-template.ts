@@ -741,7 +741,7 @@ export const GUARD_FAIRNESS_REFERENCE = [
   { bucket: "standby_a", label: "כרמל א׳", default: 0.45, examples: "3 צוערים, יום מלא, מטבח במקביל" },
   { bucket: "standby_b", label: "כרמל ב׳", default: 0.15, examples: "3 צוערים, עב״ס/רס״ר + מטבח במקביל" },
   { bucket: "duty", label: "עב״ס / עתודה", default: 0.1, examples: "עב״ס 0.75/שעה · עתודה 0.3/שעה" },
-  { bucket: "kitchen", label: "מטבch", default: 0.1, examples: "35 למשמרת" },
+  { bucket: "kitchen", label: "מטבח", default: 0.1, examples: "35 למשמרת" },
 ] as const;
 
 /** @deprecated Unused — unified grid removed. */

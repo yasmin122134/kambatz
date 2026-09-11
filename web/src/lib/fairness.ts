@@ -226,4 +226,9 @@ export async function resolveFairnessRequest(
   return updated;
 }
 
-export { syncPublishedFairnessPoints, deleteFairnessPointsForMission } from "@/lib/fairness-persistence";
+export {
+  syncPublishedFairnessPoints,
+  deleteFairnessPointsForMission,
+  setManualFairnessPoints,
+  clearManualFairnessPoints,
+} from "@/lib/fairness-persistence";

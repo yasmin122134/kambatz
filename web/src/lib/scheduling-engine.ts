@@ -1998,7 +1998,7 @@ export function assignKitchenShift(input: {
     }
   }
 
-  // מילוי אחרון: אם חסרים מקומות — מאפשרים גם מי שברשימת «בחוץ» (רק חסימות/פטור מטבch)
+  // מילוי אחרון: אם חסרים מקומות — מאפשרים גם מי שברשימת «בחוץ» (רק חסימות/פטור מטבח)
   if (assigned.length < targetTotal) {
     pickFromPool(sortedPeople, targetTotal - assigned.length, { ignoreOut: true });
   }

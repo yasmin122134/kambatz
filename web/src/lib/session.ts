@@ -129,6 +129,14 @@ export function buildPeopleAdminPatch(
     patch.is_admin = body.is_officer;
   }
 
+  if (body.prior_score !== undefined && body.prior_score !== null) {
+    const prior = Number(body.prior_score);
+    if (Number.isNaN(prior)) {
+      return { ok: false, status: 400, error: "ניקוד קודם לא תקין" };
+    }
+    patch.prior_score = Math.round(prior * 100) / 100;
+  }
+
   if (Object.keys(patch).length === 0) {
     return { ok: false, status: 400, error: "אין שדות לעדכון" };
   }

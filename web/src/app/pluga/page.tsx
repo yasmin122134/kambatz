@@ -73,11 +73,10 @@ export default function PlatoonPage() {
             <MissionDayScopeNote count={missionDayCount} className="mb-1" />
           ) : null}
           <p className="hint text-xs">
-            לפרטים אישיים —{" "}
+            לחצו על שם לפרופיל מלא (שמירות, תורנויות, נקודות).{" "}
             <Link href="/profile" className="text-brick hover:underline">
               הפרופיל שלי
             </Link>
-            .
           </p>
         </div>
 
@@ -106,7 +105,12 @@ export default function PlatoonPage() {
                       className={`platoon-fairness-row ${mine ? "is-you" : ""}`}
                     >
                       <div className="platoon-fairness-name">
-                        {row.personName}
+                        <Link
+                          href={`/people/${row.personId}`}
+                          className="hover:text-brick hover:underline"
+                        >
+                          {row.personName}
+                        </Link>
                         {mine && (
                           <span className="text-[10px] text-accent mr-1">(את/ה)</span>
                         )}
@@ -122,7 +126,7 @@ export default function PlatoonPage() {
                           שמירה {row.guardPoints.toFixed(1)}
                         </span>
                         <span aria-hidden> · </span>
-                        <span title="מטבch וחמגשיות">
+                        <span title="מטבח וחמגשיות">
                           תורנות {row.toranutPoints.toFixed(1)}
                         </span>
                       </div>

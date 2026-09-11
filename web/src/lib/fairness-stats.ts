@@ -279,6 +279,7 @@ export type StoredFairnessPointRow = {
   burden_base: number | null;
   burden_rest: number | null;
   burden_is_solo: boolean | null;
+  manual_override?: boolean;
   computed_at?: string;
 };
 

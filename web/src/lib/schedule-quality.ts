@@ -206,7 +206,7 @@ export function lexBetter(a: ScheduleLexScore, b: ScheduleLexScore): boolean {
 export function formatScheduleQualitySummary(metrics: ScheduleQualityMetrics): string[] {
   const lines = [
     `כיסוי: ${metrics.filledSeats} / ${metrics.requiredSeats} משבצות`,
-    `מנוחה: פחות מ-4 שעות: ${metrics.restViolations.severe}, 4–6 שעות: ${Math.max(0, metrics.restViolations.significant - metrics.restViolations.severe)}, סה״כ עונש מנוחה: ${metrics.totalRestPenalty}`,
+    `מנוחה: פחות מ-4 שעות: ${metrics.restViolations.severe}, 4–6 שעות: ${Math.max(0, metrics.restViolations.significant - metrics.restViolations.severe)}, סה״כ בונוס חוסר מנוחה: ${metrics.totalRestPenalty}`,
     `הוגנות: עומס מקס׳ ${metrics.maxBurden}, מינ׳ ${metrics.minBurden}, פער ${metrics.burdenSpread}, MAD ${metrics.burdenMad}`,
   ];
   if (metrics.guardCountSpread > 0) {

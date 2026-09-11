@@ -109,14 +109,14 @@ export function FairnessRulesPanel({
       </div>
 
       <div className="border-t border-line pt-4 space-y-2">
-        <h4 className="font-display text-base">עונש מנוחה</h4>
+        <h4 className="font-display text-base">בונוס חוסר מנוחה</h4>
         <p className="text-xs text-ink2">{REST_PENALTY_NOTE}</p>
         <div className="schedule-table-wrap overflow-x-auto">
           <table className="schedule-table w-full text-sm">
             <thead>
               <tr>
                 <th>פער מנוחה בין משימות</th>
-                <th className="w-[22%]">עונש (+נק׳)</th>
+                <th className="w-[22%]">בונוס (+נק׳)</th>
               </tr>
             </thead>
             <tbody>

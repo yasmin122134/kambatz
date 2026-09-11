@@ -232,7 +232,7 @@ export default function FairnessPage() {
             </div>
 
             <div>
-              <h3 className="font-display text-base mb-3">הצעת שינוי — עונש מנוחה</h3>
+              <h3 className="font-display text-base mb-3">הצעת שינוי — בונוס חוסר מנוחה</h3>
               <div className="schedule-table-wrap overflow-x-auto">
                 <table className="schedule-table w-full text-sm">
                   <thead>

@@ -23,7 +23,7 @@ function fairnessHistoryLabel(h: PersonFairnessStats["history"][0]): string {
   if (h.burdenBase != null) {
     const kind = h.burdenIsSolo ? "סולו" : "זוג";
     const rest =
-      h.burdenRest && h.burdenRest > 0 ? ` +${h.burdenRest} מנוחה` : "";
+      h.burdenRest && h.burdenRest > 0 ? ` +${h.burdenRest} חוסר מנוחה` : "";
     return `טבלת שעות · ${kind}${rest}`;
   }
   return FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "");
