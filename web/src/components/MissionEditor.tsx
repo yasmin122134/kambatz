@@ -37,6 +37,7 @@ import {
 import { syncBaseWorkSeatCounts } from "@/lib/base-work-template";
 import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-utils";
 import { KitchenOutListsEditor } from "@/components/KitchenOutListsEditor";
+import { MissionFairnessPanel } from "@/components/MissionFairnessPanel";
 
 function uid() {
   return crypto.randomUUID();
@@ -118,6 +119,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   );
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [linkingBaseWork, setLinkingBaseWork] = useState(false);
+  const [fairnessRefreshKey, setFairnessRefreshKey] = useState(0);
 
   function applyStandardTemplate(
     type: MissionType,
@@ -347,6 +349,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         ? "נשמר — מבנה המשמרות עודכן; שיבוצים שלא תואמים נוקו"
         : "נשמר",
     );
+    setFairnessRefreshKey((k) => k + 1);
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
     }
@@ -395,6 +398,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
     await load();
+    setFairnessRefreshKey((k) => k + 1);
     const status = data.status as string | undefined;
     const assignedSeats = data.assignedSeats ?? data.filled;
     const requiredSeats = data.requiredSeats;
@@ -1043,6 +1047,13 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           );
         })}
       </div>
+
+      {missionId ? (
+        <MissionFairnessPanel
+          missionId={missionId}
+          refreshKey={fairnessRefreshKey}
+        />
+      ) : null}
 
       {err && <p className="msg-err">{err}</p>}
       {msg && <p className="msg-ok">{msg}</p>}

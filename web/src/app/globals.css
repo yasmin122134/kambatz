@@ -371,6 +371,10 @@ button:hover,
   .burden-compare-charts {
     grid-template-columns: 1fr 1fr;
   }
+
+  .burden-compare-charts--triple {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
 
 .burden-compare-chart-block {
