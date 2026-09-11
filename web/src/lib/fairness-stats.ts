@@ -47,7 +47,9 @@ function normalizeGuardBands(raw: unknown): GuardBandRule[] {
 }
 
 function normalizeRestPenalties(raw: unknown): number[] {
-  if (!Array.isArray(raw)) return [...DEFAULT_REST_PENALTIES];
+  if (!Array.isArray(raw) || raw.length !== DEFAULT_REST_PENALTIES.length) {
+    return [...DEFAULT_REST_PENALTIES];
+  }
   return DEFAULT_REST_PENALTIES.map((defaults, i) => {
     const v = parseNonNegativeNumber(raw[i]);
     return v ?? defaults;

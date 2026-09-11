@@ -245,7 +245,12 @@ export function getGuardBaseBurdenForSlot(
   );
 }
 
-/** Rest penalty from hours of rest between assignments (fairness metric, not hard constraint). */
+/** Guard/patrol shifts only — rest penalty is measured between these, not kitchen/עב״ס. */
+export function isGuardRestAnchor(block: BurdenTimelineBlock): boolean {
+  return block.positionKind === "guard" || block.positionKind === "patrol";
+}
+
+/** Rest penalty from hours of rest between guard shifts (fairness metric, not hard constraint). */
 export function getRestPenalty(restHours: number, rules?: FairnessRules): number {
   const penalties = resolveRestPenalties(rules);
   if (restHours >= 12) return penalties[0];
@@ -253,23 +258,17 @@ export function getRestPenalty(restHours: number, rules?: FairnessRules): number
   if (restHours >= 8) return penalties[2];
   if (restHours >= 6) return penalties[3];
   if (restHours >= 4) return penalties[4];
-  if (restHours >= 3) return penalties[5];
-  if (restHours >= 2) return penalties[6];
-  if (restHours >= 1) return penalties[7];
-  return penalties[8];
+  return penalties[5];
 }
 
 /** Tiers shown on the fairness page — mirrors getRestPenalty(). */
 export const REST_PENALTY_TIERS = [
   { restHoursLabel: "12 שעות ומעלה", penalty: 0, index: 0 },
-  { restHoursLabel: "10–12 שעות", penalty: 1, index: 1 },
-  { restHoursLabel: "8–10 שעות", penalty: 2, index: 2 },
-  { restHoursLabel: "6–8 שעות", penalty: 3, index: 3 },
-  { restHoursLabel: "4–6 שעות", penalty: 4, index: 4 },
-  { restHoursLabel: "3–4 שעות", penalty: 5, index: 5 },
-  { restHoursLabel: "2–3 שעות", penalty: 6, index: 6 },
-  { restHoursLabel: "1–2 שעות", penalty: 7, index: 7 },
-  { restHoursLabel: "0–1 שעות", penalty: 8, index: 8 },
+  { restHoursLabel: "10–12 שעות", penalty: 0.5, index: 1 },
+  { restHoursLabel: "8–10 שעות (לא כולל 10)", penalty: 0.7, index: 2 },
+  { restHoursLabel: "6–8 שעות", penalty: 1, index: 3 },
+  { restHoursLabel: "4–6 שעות (לא כולל 6)", penalty: 2, index: 4 },
+  { restHoursLabel: "0–4 שעות", penalty: 5, index: 5 },
 ] as const;
 
 export function restPenaltyTiersFromRules(rules: FairnessRules) {
@@ -325,32 +324,18 @@ function isKitchenMissionBlock(block: BurdenTimelineBlock): boolean {
   return block.missionType === "kitchen";
 }
 
-function kitchenUsesPointsPerShift(
-  block: BurdenTimelineBlock,
-  scheduling?: MissionSchedulingRules,
-): boolean {
-  if (block.missionType === "kitchen") return true;
-  return scheduling?.kitchen?.points_per_shift !== false;
-}
-
 function toranutPointsForBlock(
   block: BurdenTimelineBlock,
   rules: FairnessRules,
-  scheduling?: MissionSchedulingRules,
+  _scheduling?: MissionSchedulingRules,
 ): number {
   if (block.positionKind === "patrol") return 0;
-  if (isHamagshiyotBlock(block)) {
-    return roundPoints(rules.kitchen);
-  }
 
   const rates = resolveHourlyRates(rules);
   const hours = slotDurationHours(block.startTime, block.endTime);
   if (hours <= 0) return 0;
 
-  if (isKitchenBlock(block)) {
-    if (kitchenUsesPointsPerShift(block, scheduling)) {
-      return roundPoints(rules.kitchen);
-    }
+  if (isHamagshiyotBlock(block) || isKitchenBlock(block)) {
     return roundPoints(hours * rates.kitchen);
   }
   if (isReserveForceBlock(block)) {
@@ -418,13 +403,29 @@ function findPreviousRelevant(
   return findPreviousRelevantBlock(sorted, target);
 }
 
+export function findPreviousGuardBlock(
+  sorted: BurdenTimelineBlock[],
+  target: BurdenTimelineBlock,
+): BurdenTimelineBlock | null {
+  const targetStart = absoluteStart(target);
+  let prev: BurdenTimelineBlock | null = null;
+  for (const block of sorted) {
+    if (!isGuardRestAnchor(block)) continue;
+    const end = absoluteEnd(block);
+    if (end <= targetStart && block !== target) {
+      if (!prev || absoluteEnd(prev) <= end) prev = block;
+    }
+  }
+  return prev;
+}
+
 /** Rest penalty attributed to a guard when placed after `prev` (gap counted once). */
 export function restPenaltyBeforeGuard(
   guard: BurdenTimelineBlock,
   prev: BurdenTimelineBlock | null,
   rules?: FairnessRules,
 ): { penalty: number; restHours: number | null } {
-  if (!prev) return { penalty: 0, restHours: null };
+  if (!prev || !isGuardRestAnchor(prev)) return { penalty: 0, restHours: null };
   const restHours = getRestHoursBetween(prev, guard);
   return { penalty: getRestPenalty(restHours, rules), restHours };
 }
@@ -464,14 +465,15 @@ export function projectedRestPenaltiesForCandidate(
   existingBlocks: BurdenTimelineBlock[],
   rules?: FairnessRules,
 ): number {
-  const relevant = sortBlocksChronologically(existingBlocks.filter(isRestRelevantBlock));
-  const prev = findPreviousRelevant(relevant, candidateGuard);
+  const guards = sortBlocksChronologically(
+    existingBlocks.filter(isGuardRestAnchor),
+  );
+  const prev = findPreviousGuardBlock(guards, candidateGuard);
   const before = restPenaltyBeforeGuard(candidateGuard, prev, rules).penalty;
 
-  const candidateStart = absoluteStart(candidateGuard);
   const candidateEnd = absoluteEnd(candidateGuard);
   let next: BurdenTimelineBlock | null = null;
-  for (const block of relevant) {
+  for (const block of guards) {
     const start = absoluteStart(block);
     if (start >= candidateEnd) {
       if (!next || start < absoluteStart(next)) next = block;
@@ -493,7 +495,7 @@ export function calculatePersonBurden(
   scheduling?: MissionSchedulingRules,
 ): PersonBurdenBreakdown {
   const sorted = sortBlocksChronologically(blocks);
-  const relevant = sorted.filter(isRestRelevantBlock);
+  const guardBlocks = sorted.filter(isGuardRestAnchor);
 
   let guardBaseBurden = 0;
   let restPenalties = 0;
@@ -505,7 +507,7 @@ export function calculatePersonBurden(
   for (const block of sorted) {
     if (isGuardKind(block.positionKind) || block.positionKind === "patrol") {
       guardAssignmentCount += 1;
-      const prev = findPreviousRelevant(relevant, block);
+      const prev = findPreviousGuardBlock(guardBlocks, block);
       const detail = calculateGuardAssignmentBurden(block, prev, rules);
       guardBaseBurden += detail.baseBurden;
       restPenalties += detail.restPenaltyBefore;

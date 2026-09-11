@@ -2,6 +2,7 @@ import {
   calculatePersonBurden,
   getRestHoursBetween,
   getRestPenalty,
+  isGuardRestAnchor,
   sortBlocksChronologically,
   type BurdenTimelineBlock,
 } from "@/lib/guard-burden";
@@ -99,13 +100,13 @@ export function restViolationsForBlocks(blocks: BurdenTimelineBlock[]): {
   totalPenalty: number;
 } {
   const sorted = sortBlocksChronologically(blocks);
-  const relevant = sorted.filter(isRestRelevantBlock);
+  const guards = sorted.filter(isGuardRestAnchor);
   let violations: RestViolationCounts = { severe: 0, significant: 0, underEightHours: 0 };
   let totalPenalty = 0;
 
-  for (let i = 1; i < relevant.length; i++) {
-    const prev = relevant[i - 1];
-    const next = relevant[i];
+  for (let i = 1; i < guards.length; i++) {
+    const prev = guards[i - 1];
+    const next = guards[i];
     const restHours = getRestHoursBetween(prev, next);
     violations = mergeRestViolationCounts(violations, countRestGapViolations(restHours));
     totalPenalty += getRestPenalty(restHours);

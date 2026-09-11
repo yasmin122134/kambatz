@@ -7,8 +7,6 @@ import {
   REST_PENALTY_TIERS,
   getGuardBaseBurden,
 } from "@/lib/guard-burden";
-import { DEFAULT_HAMAGSHIYOT_SHIFTS } from "@/lib/hamagshiyot-template";
-import { DEFAULT_KITCHEN_SHIFTS } from "@/lib/kitchen-day-template";
 import {
   type FairnessHourlyRates,
   type FairnessRules,
@@ -33,7 +31,7 @@ export const FAIRNESS_INTRO = {
 } as const;
 
 export const REST_PENALTY_NOTE =
-  "עונש על פער מנוחה קצר בין משימות ש«צורכות מנוחה». מדד צדק — לא אילוץ קשיח.";
+  "עונש על פער מנוחה קצר בין שמירות (לא בין מטבch/עב״ס). מדד צדק — לא אילוץ קשיח.";
 
 export const HOURLY_RATE_ROWS: {
   key: keyof FairnessHourlyRates;
@@ -120,18 +118,9 @@ export function baseWorkShiftRows(rules: FairnessRules) {
   }));
 }
 
-export function hamagshiyotShiftRows(rules: FairnessRules) {
-  const points = rules.kitchen;
-  return DEFAULT_HAMAGSHIYOT_SHIFTS.map((shift) => ({
-    timeLabel: `${shift.start}–${shift.end}`,
-    points,
-  }));
-}
-
 export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSection[] {
   const rates = resolveHourlyRates(rules);
   const abas = baseWorkShiftRows(rules);
-  const hamagsh = hamagshiyotShiftRows(rules);
 
   return [
     {
@@ -179,16 +168,8 @@ export function fairnessScoringSections(rules: FairnessRules): FairnessScoringSe
       id: "kitchen",
       title: "תורנות",
       rows: [
-        { label: "יום מטבch — למשמרת", value: perShift(rules.kitchen) },
-        ...DEFAULT_KITCHEN_SHIFTS.map((shift) => ({
-          label: `מטבch ${shift.start}–${shift.end}${shift.label ? ` (${shift.label})` : ""}`,
-          value: perShift(rules.kitchen),
-        })),
-        { label: "מטבch — לפי שעות (אם לא למשמרת)", value: perHour(rates.kitchen) },
-        ...hamagsh.map((row) => ({
-          label: `חמגשיות ${row.timeLabel}`,
-          value: perShift(row.points),
-        })),
+        { label: "מטבch", value: perHour(rates.kitchen) },
+        { label: "חמגשיות", value: perHour(rates.kitchen) },
       ],
     },
     {

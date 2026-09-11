@@ -181,7 +181,7 @@ describe("patrol and hamagshiyot guard day positions", () => {
     expect(breakdown.guardPoints).toBe(1);
   });
 
-  it("awards one toranut point per hamagshiyot shift", () => {
+  it("awards hourly toranut points for hamagshiyot shift", () => {
     const breakdown = calculatePersonBurden(
       [
         {
@@ -200,9 +200,9 @@ describe("patrol and hamagshiyot guard day positions", () => {
       ],
       rules,
     );
-    expect(breakdown.toranutPoints).toBe(1);
+    expect(breakdown.toranutPoints).toBe(0.1);
     expect(breakdown.guardPoints).toBe(0);
-    expect(breakdown.fairnessPoints).toBe(1);
+    expect(breakdown.fairnessPoints).toBe(0.1);
     expect(pointsForSlot(
       {
         slotId: "h1",
@@ -228,7 +228,7 @@ describe("patrol and hamagshiyot guard day positions", () => {
       5,
       rules,
       { missionType: "guards" },
-    )).toBe(1);
+    )).toBe(0.1);
   });
 
   it("blocks guard assignment overlapping an existing patrol", () => {

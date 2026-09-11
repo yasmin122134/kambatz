@@ -127,21 +127,16 @@ describe("guard base scoring", () => {
 describe("rest penalty boundaries", () => {
   it.each([
     [12, 0],
-    [11.9, 1],
-    [10, 1],
-    [9.9, 2],
-    [8, 2],
-    [7.9, 3],
-    [6, 3],
-    [5.9, 4],
-    [4, 4],
+    [11.9, 0.5],
+    [10, 0.5],
+    [9.9, 0.7],
+    [8, 0.7],
+    [7.9, 1],
+    [6, 1],
+    [5.9, 2],
+    [4, 2],
     [3.9, 5],
-    [3, 5],
-    [2.9, 6],
-    [2, 6],
-    [1.9, 7],
-    [1, 7],
-    [0.5, 8],
+    [0.5, 5],
   ] as const)("rest %sh → +%i", (hours, penalty) => {
     expect(getRestPenalty(hours)).toBe(penalty);
   });
@@ -167,8 +162,8 @@ describe("kitchen vs guard day point categories", () => {
     };
     const guard = guardBlock("20:00", "00:00", 1);
     const breakdown = calculatePersonBurden([kitchen, guard], rules, scheduling);
-    expect(breakdown.kitchenPoints).toBe(1);
-    expect(breakdown.toranutPoints).toBe(1);
+    expect(breakdown.kitchenPoints).toBe(0.4);
+    expect(breakdown.toranutPoints).toBe(0.4);
     expect(breakdown.guardPoints).toBeGreaterThan(0);
     expect(breakdown.dutyPoints).toBe(breakdown.guardPoints);
     expect(breakdown.fairnessPoints).toBe(
@@ -184,6 +179,18 @@ describe("no double-counting rest penalties", () => {
     const breakdown = calculatePersonBurden([a, b], rules);
     expect(breakdown.restPenalties).toBe(getRestPenalty(8));
     expect(breakdown.guardBaseBurden).toBe(5 + 4);
+  });
+
+  it("ignores kitchen between guards when measuring rest gap", () => {
+    const early = guardBlock("00:00", "04:00", 1, "a");
+    const kitchen: BurdenTimelineBlock = {
+      ...guardBlock("08:00", "12:00", 1),
+      missionType: "kitchen",
+      positionKind: "kitchen",
+    };
+    const late = guardBlock("12:00", "16:00", 1, "b");
+    const breakdown = calculatePersonBurden([early, kitchen, late], rules, scheduling);
+    expect(breakdown.restPenalties).toBe(getRestPenalty(8));
   });
 });
 
@@ -456,7 +463,7 @@ describe("hard constraints still gate eligibility", () => {
 });
 
 describe("projected burden with cross-mission rest", () => {
-  it("earlier kitchen affects rest penalty for later guard", () => {
+  it("kitchen before guard does not add rest penalty", () => {
     const kitchen: BurdenTimelineBlock = {
       ...guardBlock("08:00", "12:00", 1),
       missionType: "kitchen",
@@ -477,8 +484,8 @@ describe("projected burden with cross-mission rest", () => {
       rules,
       scheduling,
     );
-    expect(breakdown.restPenalties).toBeGreaterThan(0);
-    expect(breakdown.dutyPoints).toBeGreaterThan(baseOnly);
+    expect(breakdown.restPenalties).toBe(0);
+    expect(breakdown.dutyPoints).toBe(baseOnly);
     expect(projected).toBe(breakdown.dutyPoints);
   });
 });

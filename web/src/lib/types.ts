@@ -272,7 +272,7 @@ export const DEFAULT_FAIRNESS_HOURLY_RATES: FairnessHourlyRates = {
   base_work: 0.75,
   standby_a: 0.5,
   standby_b: 0.3,
-  kitchen: 1,
+  kitchen: 0.1,
   reserve_force: 0.3,
 };
 
@@ -282,7 +282,7 @@ export type FairnessRules = Record<FairnessBucket, number> & {
   guard_hours_factor: number;
   /** Six 4-hour wall-clock bands — legacy, kept for DB compat */
   guard_bands: GuardBandRule[];
-  /** Rest-penalty tiers: ≥16h, ≥12h, …, under 4h (mirrors getRestPenalty). */
+  /** Rest-penalty tiers between guard shifts (mirrors getRestPenalty). */
   rest_penalties: number[];
   /** נקודות לשעה — מודל חישוב ראשי */
   hourly_rates: FairnessHourlyRates;
@@ -297,7 +297,7 @@ export const DEFAULT_GUARD_BANDS: GuardBandRule[] = [
   { solo: 8, paired: 6 },
 ];
 
-export const DEFAULT_REST_PENALTIES = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
+export const DEFAULT_REST_PENALTIES = [0, 0.5, 0.7, 1, 2, 5] as const;
 
 export type BaseWorkShiftRule = {
   start: string;
@@ -319,7 +319,7 @@ export const DEFAULT_FAIRNESS_RULES: FairnessRules = {
   standby_a: 0.5,
   standby_b: 0.3,
   duty: 0.75,
-  kitchen: 1,
+  kitchen: 0.1,
   hist: 0.7,
   guard_hours_factor: 1,
   guard_bands: DEFAULT_GUARD_BANDS.map((b) => ({ ...b })),
