@@ -70,6 +70,20 @@ export async function listMissionDaysForContext(options?: {
   return all.filter((m) => isPublishedMission(m) || include.has(m.id));
 }
 
+/** Board view: published missions plus one focused draft (and its linked day, if any). */
+export async function listMissionDaysForBoardFocus(
+  focusMissionId?: string,
+): Promise<MissionDay[]> {
+  if (!focusMissionId?.trim()) return listVisibleMissionDays();
+
+  const includeDraftIds = [focusMissionId.trim()];
+  const focus = await getMissionDay(focusMissionId);
+  const linkedId = focus?.scheduling_rules?.linked_mission_id;
+  if (linkedId) includeDraftIds.push(linkedId);
+
+  return listMissionDaysForContext({ includeDraftIds });
+}
+
 export async function listMissionDays(publishedOnly = false): Promise<MissionDay[]> {
   const supabase = await createClient();
   let query = supabase

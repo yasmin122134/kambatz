@@ -9,6 +9,7 @@ import {
   emptyAssignments,
   filterPublishedMissionDays,
   listMissionDays,
+  listMissionDaysForBoardFocus,
   normalizeSchedulingRules,
   saveMissionDay,
 } from "@/lib/missions";
@@ -16,10 +17,14 @@ import type { MissionType } from "@/lib/types";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const includeDrafts =
-    (await isAdmin()) && searchParams.get("includeDrafts") === "1";
+  const admin = await isAdmin();
+  const includeDrafts = admin && searchParams.get("includeDrafts") === "1";
+  const focusMissionId = admin ? searchParams.get("missionId")?.trim() : undefined;
 
   try {
+    if (focusMissionId) {
+      return NextResponse.json(await listMissionDaysForBoardFocus(focusMissionId));
+    }
     const all = await listMissionDays(false);
     if (includeDrafts) {
       return NextResponse.json(all);

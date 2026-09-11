@@ -3,21 +3,28 @@ import { AppShell } from "@/components/AppShell";
 import { BoardClient } from "@/components/BoardClient";
 import { isAdmin } from "@/lib/auth";
 import { loadApprovedIssues } from "@/lib/issues";
-import { listVisibleMissionDays } from "@/lib/missions";
+import { listMissionDaysForBoardFocus } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function BoardPage() {
+type BoardPageProps = {
+  searchParams: Promise<{ date?: string; mission?: string }>;
+};
+
+export default async function BoardPage({ searchParams }: BoardPageProps) {
   const authSession = await getAuthSession();
   if (!authSession) {
     redirect("/login?next=/board");
   }
 
+  const sp = await searchParams;
   const admin = await isAdmin();
-  const missions = await listVisibleMissionDays();
+  const focusMissionId = admin ? sp.mission?.trim() : undefined;
+  const initialDate = sp.date?.slice(0, 10);
+  const missions = await listMissionDaysForBoardFocus(focusMissionId);
 
   const supabase = await createClient();
   const [initialPeople, initialApprovedIssues] = await Promise.all([
@@ -32,6 +39,8 @@ export default async function BoardPage() {
         canAssign={authSession.person !== null}
         viewerEmail={authSession.person ? undefined : authSession.user.email}
         initialMissions={missions}
+        initialDate={initialDate}
+        focusMissionId={focusMissionId}
         isAdmin={admin}
         initialPeople={initialPeople}
         initialApprovedIssues={initialApprovedIssues}

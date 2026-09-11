@@ -52,10 +52,28 @@ type Props = {
   canAssign?: boolean;
   viewerEmail?: string;
   initialMissions: MissionDay[];
+  initialDate?: string;
+  focusMissionId?: string;
   isAdmin: boolean;
   initialPeople?: Person[];
   initialApprovedIssues?: Issue[];
 };
+
+function resolveInitialDate(
+  missions: MissionDay[],
+  initialDate?: string,
+  focusMissionId?: string,
+): string {
+  const dates = [...new Set(missions.map((m) => m.mission_date))].sort();
+  if (initialDate && dates.includes(initialDate)) return initialDate;
+  if (focusMissionId) {
+    const focus = missions.find((m) => m.id === focusMissionId);
+    if (focus?.mission_date && dates.includes(focus.mission_date)) {
+      return focus.mission_date;
+    }
+  }
+  return dates[0] || "";
+}
 
 type SwapMode = "take" | "swap" | null;
 
@@ -79,6 +97,8 @@ export function BoardClient({
   canAssign = true,
   viewerEmail,
   initialMissions,
+  initialDate,
+  focusMissionId,
   isAdmin,
   initialPeople = [],
   initialApprovedIssues = [],
@@ -88,8 +108,8 @@ export function BoardClient({
     () => [...new Set(missions.map((m) => m.mission_date))].sort(),
     [missions],
   );
-  const [activeDate, setActiveDate] = useState(
-    initialMissions[0]?.mission_date || "",
+  const [activeDate, setActiveDate] = useState(() =>
+    resolveInitialDate(initialMissions, initialDate, focusMissionId),
   );
   const [isAdminUser, setIsAdminUser] = useState(isAdmin);
   const [showConstraints, setShowConstraints] = useState(false);
@@ -157,6 +177,10 @@ export function BoardClient({
     null;
   const baseWorkMissionId = baseMission?.id ?? guardsMission?.id;
   const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
+  const draftMissionsOnDay = useMemo(
+    () => dayMissions.filter((m) => m.status === "draft"),
+    [dayMissions],
+  );
 
   const rosterWarnings = useMemo(() => {
     if (!isAdminUser || !dayMissions.length) return [];
@@ -175,17 +199,22 @@ export function BoardClient({
   }, [dayMissions, personName]);
 
   const loadMissions = useCallback(async () => {
-    const url = "/api/missions";
+    const url =
+      focusMissionId && isAdminUser
+        ? `/api/missions?missionId=${encodeURIComponent(focusMissionId)}`
+        : "/api/missions";
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();
       setMissions(data);
       const nextDates = [...new Set(data.map((m: MissionDay) => m.mission_date))].sort();
-      if (activeDate && !nextDates.includes(activeDate) && nextDates[0]) {
-        setActiveDate(String(nextDates[0]));
+      if (activeDate && !nextDates.includes(activeDate)) {
+        const fallback = resolveInitialDate(data, initialDate, focusMissionId);
+        if (fallback) setActiveDate(fallback);
+        else if (nextDates[0]) setActiveDate(String(nextDates[0]));
       }
     }
-  }, [activeDate, isAdminUser]);
+  }, [activeDate, focusMissionId, initialDate, isAdminUser]);
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;
@@ -561,6 +590,24 @@ export function BoardClient({
 
       {msg && (
         <p className={`mb-3 ${msg.includes("שובצו") ? "msg-ok" : "msg-err"}`}>{msg}</p>
+      )}
+
+      {isAdminUser && draftMissionsOnDay.length > 0 && (
+        <div
+          className="mb-4 rounded border px-3 py-2 text-sm"
+          style={{ borderColor: "var(--color-line2)", background: "var(--color-accent-bg)" }}
+        >
+          <b>טיוטה</b>
+          <span className="hint mr-2">
+            {" "}
+            — {draftMissionsOnDay.map((m) => m.title).join(" · ")} לא גלויים למשתמשים הרגילים.
+          </span>
+          {focusMissionId && (
+            <Link href={`/admin/missions/${focusMissionId}`} className="text-brick hover:underline">
+              עריכה בעורך
+            </Link>
+          )}
+        </div>
       )}
 
       {!canAssign && (

@@ -114,7 +114,10 @@ export default function AdminMissionsPage() {
                   <Link href={`/admin/missions/${m.id}`} className="btn-sm">
                     ערוך
                   </Link>
-                  <Link href={`/board`} className="btn-sm">
+                  <Link
+                    href={`/board?date=${m.mission_date}&mission=${m.id}`}
+                    className="btn-sm"
+                  >
                     לוח
                   </Link>
                   <button type="button" className="btn-sm" onClick={() => remove(m.id)}>

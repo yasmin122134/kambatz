@@ -1085,9 +1085,18 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         <Link href="/admin/missions" className="btn">
           חזרה לרשימה
         </Link>
-        <Link href="/board" className="btn">
-          צפייה בלוח
-        </Link>
+        {missionId && missionDate ? (
+          <Link
+            href={`/board?date=${missionDate}&mission=${missionId}`}
+            className="btn"
+          >
+            צפייה בלוח
+          </Link>
+        ) : (
+          <Link href="/board" className="btn">
+            צפייה בלוח
+          </Link>
+        )}
       </div>
     </form>
   );
