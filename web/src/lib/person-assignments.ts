@@ -19,6 +19,8 @@ export type PersonAssignmentRow = {
   startTime: string;
   endTime: string;
   sortKey: number;
+  calendarDayOffset: number;
+  startAtMs: number;
 };
 
 export type AvailableAssignmentSlot = {
@@ -52,6 +54,8 @@ function rowFromSlot(
     startTime: slot.startTime,
     endTime: slot.endTime,
     sortKey: slot.sortKey,
+    calendarDayOffset: slot.calendarDayOffset,
+    startAtMs: slot.startAtMs,
   };
 }
 
@@ -73,8 +77,8 @@ export function collectPersonAssignmentRows(
   }
   rows.sort(
     (a, b) =>
+      a.startAtMs - b.startAtMs ||
       b.missionDate.localeCompare(a.missionDate) ||
-      a.sortKey - b.sortKey ||
       a.seatIndex - b.seatIndex,
   );
   return rows;

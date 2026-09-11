@@ -175,7 +175,7 @@ export function BoardClient({
   }, [dayMissions, personName]);
 
   const loadMissions = useCallback(async () => {
-    const url = isAdminUser ? "/api/missions" : "/api/missions?published=1";
+    const url = "/api/missions";
     const res = await fetch(url);
     if (res.ok) {
       const data = await res.json();

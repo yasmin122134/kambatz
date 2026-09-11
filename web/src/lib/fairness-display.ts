@@ -10,6 +10,7 @@ import {
   pairGuardHourlyRate,
   resolvePairGuardRateRatio,
   restPenaltyIntervalForBonus,
+  restPenaltyTierForHours,
 } from "@/lib/guard-burden";
 import { isObservationPost, parseTimeMinutes, slotDurationMinutes } from "@/lib/mission-utils";
 import {
@@ -318,6 +319,8 @@ export type AssignmentPointsExplainInput = Pick<
   | "burdenBase"
   | "burdenRest"
   | "burdenIsSolo"
+  | "restHoursBefore"
+  | "previousGuardLabel"
 >;
 
 function parseTimeLabelRange(timeLabel: string): { start: string; end: string } | null {
@@ -380,12 +383,20 @@ export function explainAssignmentPoints(
       lines.push(`בסיס: ${explainRegularGuardBase(item.timeLabel, item.burdenBase, isSolo, rules)}`);
     }
     if (item.burdenRest && item.burdenRest > 0) {
-      const interval = restPenaltyIntervalForBonus(item.burdenRest, rules);
-      lines.push(
-        interval
-          ? `+${item.burdenRest} חוסר מנוחה (${interval} שעות מנוחה)`
-          : `+${item.burdenRest} חוסר מנוחה לפני המשמרת`,
-      );
+      const interval =
+        item.restHoursBefore != null
+          ? restPenaltyTierForHours(item.restHoursBefore).restHoursInterval
+          : restPenaltyIntervalForBonus(item.burdenRest, rules);
+      const gap =
+        item.restHoursBefore != null
+          ? `${item.restHoursBefore.toFixed(1)} שעות מנוחה (${interval})`
+          : interval
+            ? `${interval} שעות מנוחה`
+            : "חוסר מנוחה";
+      const after = item.previousGuardLabel
+        ? ` — אחרי ${item.previousGuardLabel}`
+        : "";
+      lines.push(`+${item.burdenRest} ${gap}${after}`);
     }
     return lines;
   }

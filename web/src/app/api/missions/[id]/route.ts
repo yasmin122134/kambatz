@@ -10,7 +10,7 @@ import { getFairnessRules } from "@/lib/fairness";
 import {
   deleteMissionDay,
   getMissionDay,
-  listMissionDays,
+  listMissionDaysForContext,
   normalizeSchedulingRules,
   saveMissionDay,
   syncAssignmentSeats,
@@ -227,7 +227,7 @@ export async function PATCH(request: Request, { params }: Params) {
   const peopleByName = await peopleByNameMap();
   const issues = await loadApprovedIssues();
   const [allMissions, rules] = await Promise.all([
-    listMissionDays(false),
+    listMissionDaysForContext({ includeDraftIds: [id] }),
     getFairnessRules(),
   ]);
   const sameDay = sameDayMissionsFor(mission, allMissions);

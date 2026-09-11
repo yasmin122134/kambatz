@@ -24,7 +24,12 @@ import {
   snapshotMissionStructure,
   validateMissionStructureForAssignment,
 } from "@/lib/mission-slot-structure";
-import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
+import {
+  getMissionDay,
+  listMissionDaysForContext,
+  listVisibleMissionDays,
+  saveMissionDay,
+} from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { loadApprovedIssues } from "@/lib/issues";
 import type { Issue, MissionDay, Person } from "@/lib/types";
@@ -324,22 +329,23 @@ export async function autoAssignMission(
   const mission = await getMissionDay(missionId);
   if (!mission) throw new Error("יום משימה לא נמצא");
 
-  const [people, issues, rules, allMissions] = await Promise.all([
+  const [people, issues, rules, publishedMissions, contextMissions] = await Promise.all([
     loadPeople(),
     loadApprovedIssues(),
     getFairnessRules(),
-    listMissionDays(false),
+    listVisibleMissionDays(),
+    listMissionDaysForContext({ includeDraftIds: [missionId] }),
   ]);
 
   if (!people.length) throw new Error("אין צוערים פעילים במאגר");
 
   const scopeMissions = includeSameDay
-    ? sameDayMissionScope(mission, allMissions)
-    : linkedGuardDayAssignScope(mission, allMissions);
+    ? sameDayMissionScope(mission, contextMissions)
+    : linkedGuardDayAssignScope(mission, contextMissions);
 
   const dayResult = await smartAssignScope({
     scopeMissions,
-    allMissions,
+    allMissions: publishedMissions,
     people,
     issues,
     rules,
@@ -358,7 +364,7 @@ export async function autoAssignDate(
   options: { keepExisting?: boolean } = {},
 ): Promise<SmartAssignDayResult> {
   const keepExisting = options.keepExisting !== false;
-  const allMissions = await listMissionDays(false);
+  const allMissions = await listVisibleMissionDays();
   const scopeMissions = allMissions.filter(
     (m) => m.mission_date === missionDate.slice(0, 10),
   );

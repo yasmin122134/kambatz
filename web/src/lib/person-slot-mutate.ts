@@ -1,6 +1,10 @@
 import { getFairnessRules } from "@/lib/fairness";
 import { loadApprovedIssues } from "@/lib/issues";
-import { getMissionDay, listMissionDays, saveMissionDay } from "@/lib/missions";
+import {
+  getMissionDay,
+  listMissionDaysForContext,
+  saveMissionDay,
+} from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import {
   applyManualSlotAssignment,
@@ -18,6 +22,9 @@ export async function removePersonFromMissionSlot(input: {
 }): Promise<{ warnings: string[] }> {
   const mission = await getMissionDay(input.missionId);
   if (!mission) throw new Error("משימה לא נמצאה");
+  if (mission.status !== "published") {
+    throw new Error("שיבוץ מפרופיל צוער — רק במשימות מפורסמות. לערוך טיוטה: עמוד ניהול המשימה.");
+  }
 
   const seats = [...(mission.assignments[input.slotId] || [])];
   const current = seats[input.seatIndex]?.trim() || "";
@@ -51,6 +58,9 @@ export async function assignPersonToMissionSlot(input: {
     getFairnessRules(),
   ]);
   if (!mission) throw new Error("משימה לא נמצאה");
+  if (mission.status !== "published") {
+    throw new Error("שיבוץ מפרופיל צוער — רק במשימות מפורסמות. לערוך טיוטה: עמוד ניהול המשימה.");
+  }
 
   const slot = flattenMissionSlots(mission).find((s) => s.slotId === input.slotId);
   if (!slot) throw new Error("משמרת לא נמצאה");
@@ -63,7 +73,9 @@ export async function assignPersonToMissionSlot(input: {
   while (seats.length <= input.seatIndex) seats.push("");
   const currentName = seats[input.seatIndex]?.trim() || "";
 
-  const allMissions = await listMissionDays(false);
+  const allMissions = await listMissionDaysForContext({
+    includeDraftIds: [mission.id],
+  });
   const sameDay = sameDayMissionsFor(mission, allMissions);
 
   const warnings = manualSlotAssignmentWarnings({

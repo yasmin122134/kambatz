@@ -17,7 +17,7 @@ export default function AdminMissionsPage() {
   const [creatingBundle, setCreatingBundle] = useState(false);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/missions");
+    const res = await fetch("/api/missions?includeDrafts=1");
     if (res.ok) setMissions(await res.json());
     setLoading(false);
   }, []);

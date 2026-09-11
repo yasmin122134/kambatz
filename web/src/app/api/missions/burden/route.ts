@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { isAdmin } from "@/lib/auth";
 import { computeRosterFairnessFromStorage, getFairnessRules } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
 
@@ -12,7 +11,6 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "לא מחובר" }, { status: 401 });
   }
 
-  const admin = await isAdmin();
   const { searchParams } = new URL(req.url);
   const missionDate = searchParams.get("mission_date");
 
@@ -20,7 +18,7 @@ export async function GET(req: Request) {
     const supabase = await createClient();
     const [rules, missions, peopleRes] = await Promise.all([
       getFairnessRules(),
-      listMissionDays(false),
+      listVisibleMissionDays(),
       supabase
         .from("people")
         .select("name, prior_score")
@@ -30,9 +28,7 @@ export async function GET(req: Request) {
 
     if (peopleRes.error) throw new Error(peopleRes.error.message);
 
-    const visible = admin
-      ? missions
-      : missions.filter((m) => m.status === "published");
+    const visible = missions;
     const people = (peopleRes.data || []).map((p) => ({
       name: String(p.name),
       prior_score: Number(p.prior_score) || 0,

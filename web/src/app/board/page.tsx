@@ -3,7 +3,7 @@ import { AppShell } from "@/components/AppShell";
 import { BoardClient } from "@/components/BoardClient";
 import { isAdmin } from "@/lib/auth";
 import { loadApprovedIssues } from "@/lib/issues";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import { fetchActivePeople } from "@/lib/people";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
@@ -17,7 +17,7 @@ export default async function BoardPage() {
   }
 
   const admin = await isAdmin();
-  const missions = await listMissionDays(!admin);
+  const missions = await listVisibleMissionDays();
 
   const supabase = await createClient();
   const [initialPeople, initialApprovedIssues] = await Promise.all([

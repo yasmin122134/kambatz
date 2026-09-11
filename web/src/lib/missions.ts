@@ -46,6 +46,30 @@ function rowFromDb(row: Record<string, unknown>): MissionDay {
   };
 }
 
+export function isPublishedMission(mission: Pick<MissionDay, "status">): boolean {
+  return mission.status === "published";
+}
+
+export function filterPublishedMissionDays(missions: MissionDay[]): MissionDay[] {
+  return missions.filter(isPublishedMission);
+}
+
+/** Published missions only — board, fairness, profiles, calendar, etc. */
+export async function listVisibleMissionDays(): Promise<MissionDay[]> {
+  return listMissionDays(true);
+}
+
+/**
+ * Published missions plus specific draft(s) open in admin editor (overlap / same-day checks).
+ */
+export async function listMissionDaysForContext(options?: {
+  includeDraftIds?: string[];
+}): Promise<MissionDay[]> {
+  const include = new Set(options?.includeDraftIds?.filter(Boolean) ?? []);
+  const all = await listMissionDays(false);
+  return all.filter((m) => isPublishedMission(m) || include.has(m.id));
+}
+
 export async function listMissionDays(publishedOnly = false): Promise<MissionDay[]> {
   const supabase = await createClient();
   let query = supabase

@@ -30,6 +30,9 @@ type AssignmentRow = PersonAssignmentRow & {
   burdenBase?: number;
   burdenRest?: number;
   burdenIsSolo?: boolean;
+  restHoursBefore?: number | null;
+  previousGuardLabel?: string;
+  calendarDayOffset?: number;
 };
 
 type PersonDetailResponse = {
@@ -271,8 +274,16 @@ export default function PersonDetailPage() {
                 <tr key={key} className="border-b border-line2/60 align-top">
                   <td className="py-2 pl-2 mono text-xs whitespace-nowrap">
                     {row.missionDate.slice(0, 10)}
+                    {(row.calendarDayOffset ?? 0) > 0 && (
+                      <span className="block text-[10px] text-ink3">+{row.calendarDayOffset} יום</span>
+                    )}
                   </td>
-                  <td className="py-2 pl-2 mono text-xs whitespace-nowrap">{row.timeLabel}</td>
+                  <td className="py-2 pl-2 mono text-xs whitespace-nowrap">
+                    {row.timeLabel}
+                    {(row.calendarDayOffset ?? 0) > 0 && (
+                      <span className="block text-[10px] text-amber-800">למחרת</span>
+                    )}
+                  </td>
                   <td className="py-2 pl-2">
                     <div>{row.positionName}</div>
                     <Link
@@ -329,6 +340,8 @@ export default function PersonDetailPage() {
                       burdenBase: row.burdenBase,
                       burdenRest: row.burdenRest,
                       burdenIsSolo: row.burdenIsSolo,
+                      restHoursBefore: row.restHoursBefore,
+                      previousGuardLabel: row.previousGuardLabel,
                     }).map((line) => (
                       <span key={line} className="block text-[10px] text-ink3 leading-snug mt-0.5">
                         {line}
@@ -506,7 +519,10 @@ export default function PersonDetailPage() {
 
         <section className="card space-y-3">
           <h3 className="font-display text-base">שמירות ומשימות שמירה</h3>
-          <p className="hint text-xs">ימי שמירות — לפי שעה ועמדה.</p>
+          <p className="hint text-xs">
+            ימי שמירות — לפי שעה ועמדה. משמרת «למחרת» היא בוקר של יום+1 באותו יום משימה;
+            עונש מנוחה נספר מהשמירה שמסתיימת לפניה (מפורט בטור הנקודות).
+          </p>
           {renderAssignmentTable(guards, "אין שמירות מפורסמות.")}
         </section>
 

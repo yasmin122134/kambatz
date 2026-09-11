@@ -6,13 +6,13 @@ import {
   statsFromStoredHistory,
   type StoredFairnessPointRow,
 } from "@/lib/fairness-stats";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import type { PersonMissionHistoryItem } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
 import type { FairnessRules } from "@/lib/types";
 
 /** Bump when guard/fairness row computation logic changes (forces DB resync). */
-export const FAIRNESS_COMPUTE_VERSION = 2;
+export const FAIRNESS_COMPUTE_VERSION = 3;
 
 async function loadFairnessRules(): Promise<FairnessRules> {
   const supabase = await createClient();
@@ -155,7 +155,7 @@ async function latestFairnessComputedAt(): Promise<number | null> {
 export async function needsFairnessResync(): Promise<boolean> {
   const supabase = await createClient();
   const [missions, lastComputed, rulesRes, rulesRecord] = await Promise.all([
-    listMissionDays(true),
+    listVisibleMissionDays(),
     latestFairnessComputedAt(),
     supabase.from("fairness_rules").select("updated_at").eq("id", 1).maybeSingle(),
     loadRawFairnessRulesRecord(),
@@ -237,6 +237,36 @@ export async function hasStoredFairnessPoints(): Promise<boolean> {
   return (count || 0) > 0;
 }
 
+export function applyManualFairnessOverrides(
+  personName: string,
+  history: PersonMissionHistoryItem[],
+  manualRows: StoredFairnessPointRow[],
+): PersonMissionHistoryItem[] {
+  const manualByKey = new Map(
+    manualRows.map((row) => [manualOverrideKey(row), row]),
+  );
+  return history.map((item) => {
+    const slotId = item.slotId ?? item.id.split(":")[1] ?? item.missionId;
+    const key = `${item.missionId}:${slotId}:${personName}`;
+    const manual = manualByKey.get(key);
+    if (!manual) return item;
+    return {
+      ...item,
+      points: Number(manual.points) || 0,
+      pointsManual: true,
+    };
+  });
+}
+
+/** Manual point overrides — safe when table/column missing. */
+export async function loadManualFairnessOverridesForSync(): Promise<StoredFairnessPointRow[]> {
+  try {
+    return await loadManualFairnessOverrides();
+  } catch {
+    return [];
+  }
+}
+
 async function loadManualFairnessOverrides(): Promise<StoredFairnessPointRow[]> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -262,7 +292,7 @@ export async function syncPublishedFairnessPoints(): Promise<void> {
   const supabase = await createClient();
   const [rules, missions, manualRows] = await Promise.all([
     loadFairnessRules(),
-    listMissionDays(true),
+    listVisibleMissionDays(),
     loadManualFairnessOverrides(),
   ]);
 

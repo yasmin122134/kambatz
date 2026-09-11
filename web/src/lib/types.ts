@@ -376,6 +376,12 @@ export type PersonMissionHistoryItem = {
   /** Guard burden model — rest penalty before this shift */
   burdenRest?: number;
   burdenIsSolo?: boolean;
+  /** Hours of rest before this guard (for interval display) */
+  restHoursBefore?: number | null;
+  /** Previous guard/patrol shift that rest penalty is measured from */
+  previousGuardLabel?: string;
+  /** Days after mission_date when this slot starts (0 = same calendar day) */
+  calendarDayOffset?: number;
 };
 
 export type PersonFairnessStats = {

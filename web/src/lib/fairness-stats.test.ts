@@ -220,6 +220,42 @@ describe("fairness-stats", () => {
     expect(stats.periodPoints).toBe(live.totalBurden);
   });
 
+  it("observation morning after same-day evening guard uses visible previous shift", () => {
+    const mission = guardMission({});
+    const slots = flattenMissionSlots(mission);
+    const obs = slots.find(
+      (s) => s.positionName.includes("תצפיתן") && s.timeLabel === "06:00–09:00",
+    );
+    const pat = slots.find(
+      (s) => s.positionName.includes("פטל") && s.timeLabel === "17:00–21:00",
+    );
+    expect(obs).toBeDefined();
+    expect(pat).toBeDefined();
+    if (!obs || !pat) return;
+
+    const stats = buildPersonFairnessStatsFromMissions(
+      "Noam",
+      [
+        {
+          ...mission,
+          assignments: {
+            [obs.slotId]: ["Noam"],
+            [pat.slotId]: ["Noam"],
+          },
+        },
+      ],
+      DEFAULT_FAIRNESS_RULES,
+    );
+
+    const obsRow = stats.history.find((h) => h.slotId === obs.slotId);
+    expect(obsRow?.burdenBase).toBe(1.8);
+    expect(obsRow?.burdenRest).toBe(0.7);
+    expect(obsRow?.points).toBe(2.5);
+    expect(obsRow?.previousGuardLabel).toContain("פטל");
+    expect(obsRow?.previousGuardLabel).toContain("17:00–21:00");
+    expect(obsRow?.restHoursBefore).toBeCloseTo(9, 1);
+  });
+
   it("collectPersonBlocks respects reserve force not eating rest", () => {
     const mission = guardMission({});
     const slots = flattenMissionSlots(mission);

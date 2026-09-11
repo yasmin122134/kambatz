@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { computeRosterFairnessFromStorage, getFairnessRules } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
 
@@ -26,7 +26,7 @@ export async function GET() {
     const supabase = await createClient();
     const [rules, missions, peopleRes] = await Promise.all([
       getFairnessRules(),
-      listMissionDays(true),
+      listVisibleMissionDays(),
       supabase
         .from("people")
         .select("id, name, prior_score, squad")

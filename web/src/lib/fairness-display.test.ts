@@ -37,7 +37,7 @@ describe("guardBandRows", () => {
       burdenIsSolo: true,
     });
     expect(lines).toContain("בסיס: 3 שע׳ × 0.6 (תצפיתן) = 1.8");
-    expect(lines).toContain("+2 חוסר מנוחה ([4, 6) שעות מנוחה)");
+    expect(lines.some((line) => line.includes("+2") && line.includes("[4, 6)"))).toBe(true);
   });
 
   it("shows hourly-derived values (not legacy band scores)", () => {

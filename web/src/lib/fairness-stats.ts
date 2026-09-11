@@ -1,6 +1,9 @@
 import {
   blockFromFlatSlot,
   calculatePersonBurden,
+  findPreviousGuardBlock,
+  isGuardRestAnchor,
+  sortBlocksChronologically,
   toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
   type GuardAssignmentBurdenDetail,
@@ -228,7 +231,16 @@ export function buildPersonFairnessHistory(
   const guardDetailBySlot = new Map(
     breakdown.guardDetails.map((d) => [d.slotId || "", d]),
   );
+  const sortedBlocks = sortBlocksChronologically(blocks);
+  const guardAnchors = sortedBlocks.filter(isGuardRestAnchor);
   const history: PersonMissionHistoryItem[] = [];
+
+  function previousGuardLabelFor(block: BurdenTimelineBlock): string | undefined {
+    const prev = findPreviousGuardBlock(guardAnchors, block);
+    if (!prev) return undefined;
+    const name = prev.positionName?.trim() || "שמירה";
+    return `${name} ${prev.startTime}–${prev.endTime}`;
+  }
 
   for (const mission of missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
@@ -243,6 +255,7 @@ export function buildPersonFairnessHistory(
 
       if (isGuardKind(slot.positionKind) || slot.positionKind === "patrol") {
         const detail = guardDetailBySlot.get(slot.slotId);
+        const block = blockFromFlatSlot(slot, slot.missionType);
         history.push({
           id: `${mission.id}:${slot.slotId}:${personName}`,
           missionId: mission.id,
@@ -258,6 +271,9 @@ export function buildPersonFairnessHistory(
           burdenBase: detail?.baseBurden,
           burdenRest: detail?.restPenaltyBefore,
           burdenIsSolo: detail?.isSolo,
+          restHoursBefore: detail?.restHoursBefore,
+          previousGuardLabel: previousGuardLabelFor(block),
+          calendarDayOffset: slot.calendarDayOffset,
         });
         continue;
       }

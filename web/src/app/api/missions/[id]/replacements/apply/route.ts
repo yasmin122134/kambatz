@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { getFairnessRules } from "@/lib/fairness";
-import { getMissionDay, listMissionDays } from "@/lib/missions";
+import { getMissionDay, listMissionDaysForContext } from "@/lib/missions";
 import { loadApprovedIssues } from "@/lib/issues";
 import { fetchActivePeople } from "@/lib/people";
 import {
@@ -45,7 +45,7 @@ export async function POST(request: Request, { params }: Params) {
 
     const supabase = await createClient();
     const [allMissions, people, issues, rules] = await Promise.all([
-      listMissionDays(false),
+      listMissionDaysForContext({ includeDraftIds: [id] }),
       fetchActivePeople(supabase),
       loadApprovedIssues(),
       getFairnessRules(),

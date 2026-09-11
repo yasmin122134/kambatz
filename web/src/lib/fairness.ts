@@ -11,13 +11,12 @@ import {
   statsFromStoredHistory,
 } from "@/lib/fairness-stats";
 import {
+  applyManualFairnessOverrides,
   ensurePublishedFairnessSynced,
-  hasStoredFairnessPoints,
-  listStoredFairnessGroupedByPerson,
-  listStoredFairnessPointsForPerson,
+  loadManualFairnessOverridesForSync,
   syncPublishedFairnessPoints,
 } from "@/lib/fairness-persistence";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import type {
   FairnessRules,
   FairnessRuleRequest,
@@ -84,20 +83,29 @@ export function computeRosterBurdenSummary(
   });
 }
 
-/** Roster fairness from persisted assignment points (same source as person profile). */
+/** Roster fairness — live compute from published missions (manual overrides preserved). */
 export async function computeRosterFairnessFromStorage(
   people: { name: string; prior_score?: number }[],
   rules: FairnessRules,
   options?: { missionDate?: string | null },
 ): Promise<RosterBurdenEntry[]> {
   await ensurePublishedFairnessSynced();
-  const grouped = await listStoredFairnessGroupedByPerson();
+  const [missions, manualRows] = await Promise.all([
+    listVisibleMissionDays(),
+    loadManualFairnessOverridesForSync(),
+  ]);
   const meanPrior =
     people.reduce((s, p) => s + (p.prior_score || 0), 0) / (people.length || 1);
   const dateKey = options?.missionDate?.slice(0, 10) ?? null;
 
   return people.map((p) => {
-    let history = grouped.get(p.name) || [];
+    const live = buildPersonFairnessStatsFromMissions(
+      p.name,
+      missions,
+      rules,
+      p.prior_score || 0,
+    );
+    let history = applyManualFairnessOverrides(p.name, live.history, manualRows);
     if (dateKey) {
       history = history.filter((h) => h.missionDate.slice(0, 10) === dateKey);
     }
@@ -151,14 +159,18 @@ export async function getPersonFairnessStats(
 ): Promise<PersonFairnessStats> {
   const rules = await getFairnessRules();
   await ensurePublishedFairnessSynced();
-
-  if (await hasStoredFairnessPoints()) {
-    const storedHistory = await listStoredFairnessPointsForPerson(personName);
-    return statsFromStoredHistory(storedHistory, rules, priorScore);
-  }
-
-  const missions = await listMissionDays(true);
-  return buildPersonFairnessStatsFromMissions(personName, missions, rules, priorScore);
+  const [missions, manualRows] = await Promise.all([
+    listVisibleMissionDays(),
+    loadManualFairnessOverridesForSync(),
+  ]);
+  const live = buildPersonFairnessStatsFromMissions(
+    personName,
+    missions,
+    rules,
+    priorScore,
+  );
+  const history = applyManualFairnessOverrides(personName, live.history, manualRows);
+  return statsFromStoredHistory(history, rules, priorScore);
 }
 
 export async function listFairnessRequests(
@@ -245,7 +257,9 @@ export async function resolveFairnessRequest(
 }
 
 export {
+  applyManualFairnessOverrides,
   ensurePublishedFairnessSynced,
+  loadManualFairnessOverridesForSync,
   needsFairnessResync,
   syncPublishedFairnessPoints,
   deleteFairnessPointsForMission,

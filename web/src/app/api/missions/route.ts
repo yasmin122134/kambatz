@@ -7,6 +7,7 @@ import {
 } from "@/lib/mission-templates";
 import {
   emptyAssignments,
+  filterPublishedMissionDays,
   listMissionDays,
   normalizeSchedulingRules,
   saveMissionDay,
@@ -15,15 +16,15 @@ import type { MissionType } from "@/lib/types";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
-  const publishedOnly = searchParams.get("published") === "1";
-  const admin = await isAdmin();
+  const includeDrafts =
+    (await isAdmin()) && searchParams.get("includeDrafts") === "1";
 
   try {
     const all = await listMissionDays(false);
-    if (admin && !publishedOnly) {
+    if (includeDrafts) {
       return NextResponse.json(all);
     }
-    return NextResponse.json(all.filter((m) => m.status === "published"));
+    return NextResponse.json(filterPublishedMissionDays(all));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "שגיאה";
     if (msg.includes("mission_days")) return NextResponse.json([]);

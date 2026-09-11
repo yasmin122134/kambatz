@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { getPersonFairnessStats } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
-import { listMissionDays } from "@/lib/missions";
+import { listVisibleMissionDays } from "@/lib/missions";
 import { getPersonById } from "@/lib/people";
 import {
   collectPersonAssignmentRows,
@@ -33,7 +33,7 @@ export async function GET(_request: Request, { params }: Params) {
 
   const admin = await isAdmin();
   try {
-    const missions = await listMissionDays(!admin);
+    const missions = await listVisibleMissionDays();
     const [fairness, assignments, availableSlots] = await Promise.all([
       getPersonFairnessStats(person.name, person.prior_score || 0),
       Promise.resolve(collectPersonAssignmentRows(person.name, missions)),
@@ -60,6 +60,9 @@ export async function GET(_request: Request, { params }: Params) {
         burdenBase: history?.burdenBase,
         burdenRest: history?.burdenRest,
         burdenIsSolo: history?.burdenIsSolo,
+        restHoursBefore: history?.restHoursBefore,
+        previousGuardLabel: history?.previousGuardLabel,
+        calendarDayOffset: history?.calendarDayOffset,
       };
     });
 
