@@ -374,7 +374,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (!missionId) return;
     if (
       !confirm(
-        "ליצור שיבוץ חכם לפי מבנה המשמרות הנוכחי? השיבוץ ייבנה מחדש לפי חלונות השמירה.",
+        "ליצור שיבוץ חכם לפי מבנה המשמרות הנוכחי? השיבוץ ייבנה מחדש. משבצות נעולות יישארו.",
       )
     ) {
       return;

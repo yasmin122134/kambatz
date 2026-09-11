@@ -215,7 +215,7 @@ export async function saveMissionDay(
       .eq("id", payload.id)
       .select("*")
       .single();
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(formatMissionSaveError(error.message));
     const saved = rowFromDb(data);
     await afterMissionSave(saved);
     return { mission: saved };
@@ -226,7 +226,7 @@ export async function saveMissionDay(
     .insert(row)
     .select("*")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(formatMissionSaveError(error.message));
   const saved = rowFromDb(data);
   await afterMissionSave(saved);
   return { mission: saved };
@@ -256,3 +256,10 @@ export async function deleteMissionDay(id: string) {
 }
 
 export { newPosition as createDefaultPosition };
+
+function formatMissionSaveError(message: string): string {
+  if (message.includes("locked_seats")) {
+    return "חסרה עמודת נעילות שיבוץ — הריצו supabase/migration_locked_seats.sql";
+  }
+  return message;
+}

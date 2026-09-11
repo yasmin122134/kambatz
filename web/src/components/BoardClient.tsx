@@ -696,7 +696,15 @@ export function BoardClient({
       </div>
 
       {msg && (
-        <p className={`mb-3 ${msg.includes("שובצו") ? "msg-ok" : "msg-err"}`}>{msg}</p>
+        <p className={`mb-3 ${
+          msg.includes("שובצו") ||
+          msg.includes("הושלם") ||
+          msg.includes("ננעלו") ||
+          msg.includes("שוחררו") ||
+          msg.includes("נשמר")
+            ? "msg-ok"
+            : "msg-err"
+        }`}>{msg}</p>
       )}
 
       {isAdminUser && draftMissionsOnDay.length > 0 && (
@@ -2044,9 +2052,13 @@ function SlotCard({
         const isEmpty = !displayName;
         const isMySeat = name === personName;
         const isLeader = Boolean(name && slotLeaderName === name);
+        const seatLocked = isSeatLocked(mission, slot.slotId, seatIndex);
 
         return (
-          <li key={seatIndex} className="flex flex-wrap items-center gap-1 text-sm">
+          <li
+            key={seatIndex}
+            className={`flex flex-wrap items-center gap-1 text-sm ${seatLocked ? "slot-seat-locked" : ""}`}
+          >
             {isAdmin ? (
               <>
                 <NameCombobox
@@ -2068,6 +2080,20 @@ function SlotCard({
                   }
                   className="flex-1 min-w-[100px]"
                 />
+                {name && onToggleLock && (
+                  <button
+                    type="button"
+                    className={`btn-sm seat-lock-btn ${seatLocked ? "on" : ""}`}
+                    title={
+                      seatLocked
+                        ? "נעול — לא יוחלף בשיבוץ מחדש. לחצו כדי לשחרר"
+                        : "פתוח — יוחלף בשיבוץ מחדש. לחצו כדי לנעול"
+                    }
+                    onClick={() => onToggleLock(missionId, slot.slotId, seatIndex, !seatLocked)}
+                  >
+                    {seatLocked ? "🔒" : "🔓"}
+                  </button>
+                )}
                 {name && isBaseWork && onSetBaseWorkLeader && !isLeader && (
                   <button
                     type="button"
@@ -2105,9 +2131,12 @@ function SlotCard({
                 {isLeader && (
                   <span className="abas-leader-badge mr-1">★ אחראי/ת קבוצה</span>
                 )}
+                {seatLocked && (
+                  <span className="mr-1" title="נעול — לא יוחלף בשיבוץ מחדש">🔒</span>
+                )}
               </span>
             )}
-            {!isAdmin && canAssign && (isEmpty || isMySeat) && (
+            {!isAdmin && canAssign && !seatLocked && (isEmpty || isMySeat) && (
               <SwapButtons
                 slotId={slot.slotId}
                 seatIndex={seatIndex}
