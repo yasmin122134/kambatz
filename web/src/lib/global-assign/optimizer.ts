@@ -27,6 +27,7 @@ import {
 import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
 import { DUTY_OFFICER_NAMES, personIsDutyOfficer } from "@/lib/officers";
+import { shouldKeepSeatOnAssign, isSeatLocked } from "@/lib/assignment-lock";
 import { mulberry32, hashStringsToSeed } from "@/lib/seeded-random";
 import {
   pickStochasticGuardCandidate,
@@ -109,7 +110,10 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
       const seats = assignments[slot.slotId] || [];
       const emptyIndices = seats
         .map((name, i) => ({ name, i }))
-        .filter(({ name }) => !name || (!keepExisting && name))
+        .filter(
+          ({ name, i }) =>
+            !shouldKeepSeatOnAssign(mission, slot.slotId, i, name, keepExisting),
+        )
         .map(({ i }) => i);
 
       if (!emptyIndices.length) continue;
@@ -127,7 +131,9 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
         slot.positionKind === "kitchen";
 
       if (slotIsKitchen) {
-        const fixedNames = keepExisting ? seats.filter(Boolean) : [];
+        const fixedNames = seats.filter((name, i) =>
+          shouldKeepSeatOnAssign(mission, slot.slotId, i, name, keepExisting),
+        );
         units.push({
           kind: "kitchen",
           id: `${mission.id}:${slot.slotId}:kitchen`,
@@ -143,7 +149,9 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
       const slotIsBaseWork = slot.missionType === "base_work";
 
       if (slotIsBaseWork) {
-        const fixedNames = keepExisting ? seats.filter(Boolean) : [];
+        const fixedNames = seats.filter((name, i) =>
+          shouldKeepSeatOnAssign(mission, slot.slotId, i, name, keepExisting),
+        );
         units.push({
           kind: "basework",
           id: `${mission.id}:${slot.slotId}:basework`,
@@ -157,7 +165,9 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
       }
 
       if (isStandbyKind(slot.positionKind) && slot.sameRoom) {
-        const fixedNames = keepExisting ? seats.filter(Boolean) : [];
+        const fixedNames = seats.filter((name, i) =>
+          shouldKeepSeatOnAssign(mission, slot.slotId, i, name, keepExisting),
+        );
         units.push({
           kind: "carmel",
           id: `${mission.id}:${slot.slotId}:carmel`,
@@ -214,9 +224,9 @@ function seedExistingAssignments(
     const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
     for (const slot of flattenMissionSlots(mission)) {
       const seats = assignments[slot.slotId] || [];
-      for (const name of seats) {
-        if (!name) continue;
-        if (!keepExisting) continue;
+      for (let i = 0; i < seats.length; i++) {
+        const name = seats[i];
+        if (!shouldKeepSeatOnAssign(mission, slot.slotId, i, name, keepExisting)) continue;
         placePerson(
           name,
           slot,
@@ -252,8 +262,20 @@ function initAssignments(
 ): Map<string, Record<string, string[]>> {
   const map = new Map<string, Record<string, string[]>>();
   for (const mission of missions) {
-    const source = keepExisting ? mission.assignments : {};
-    map.set(mission.id, syncAssignmentSeats(mission.positions, { ...source }));
+    if (keepExisting) {
+      map.set(mission.id, syncAssignmentSeats(mission.positions, { ...mission.assignments }));
+      continue;
+    }
+    const cleared = syncAssignmentSeats(mission.positions, {});
+    const original = syncAssignmentSeats(mission.positions, { ...mission.assignments });
+    for (const [slotId, seats] of Object.entries(original)) {
+      for (let i = 0; i < seats.length; i++) {
+        if (shouldKeepSeatOnAssign(mission, slotId, i, seats[i], false)) {
+          cleared[slotId][i] = seats[i];
+        }
+      }
+    }
+    map.set(mission.id, cleared);
   }
   return map;
 }
@@ -1088,15 +1110,18 @@ function seedOfficerDutyInState(
       const row = [...(assignments[slot.slotId] || [])];
       for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
         const existing = row[seatIndex];
-        if (existing && keepExisting) {
-          if (personIsDutyOfficer(peopleByName[existing])) {
-            usedOfficers.add(existing);
+        const locked = isSeatLocked(mission, slot.slotId, seatIndex);
+        if (existing && (keepExisting || locked)) {
+          if (locked || personIsDutyOfficer(peopleByName[existing])) {
+            if (personIsDutyOfficer(peopleByName[existing])) {
+              usedOfficers.add(existing);
+            }
             continue;
           }
           unplacePerson(existing, slot, mission.id, state.tracker, rules, scheduling);
           row[seatIndex] = "";
         }
-        if (existing && !keepExisting) {
+        if (existing && !keepExisting && !locked) {
           unplacePerson(existing, slot, mission.id, state.tracker, rules, scheduling);
           row[seatIndex] = "";
         }
@@ -1161,7 +1186,7 @@ function seedPatrolInState(
       const row = [...(assignments[slot.slotId] || [])];
       for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
         const existing = row[seatIndex];
-        if (existing && keepExisting) {
+        if (existing && (keepExisting || isSeatLocked(mission, slot.slotId, seatIndex))) {
           state.assignedUnitIds.add(`${mission.id}:${slot.slotId}:${seatIndex}`);
           continue;
         }
@@ -1567,13 +1592,15 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       units.filter((u) => {
         const seats =
           missions.find((m) => m.id === u.mission.id)?.assignments[u.slot.slotId] || [];
+        const kept = (i: number) =>
+          shouldKeepSeatOnAssign(u.mission, u.slot.slotId, i, seats[i], keepExisting);
         if (u.kind === "carmel" || u.kind === "basework" || u.kind === "kitchen") {
-          return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
+          return u.seatIndices.every(kept);
         }
         if (u.kind === "guard_pair") {
-          return u.seatIndices.every((i) => keepExisting && Boolean(seats[i]));
+          return u.seatIndices.every(kept);
         }
-        return keepExisting && Boolean(seats[u.seatIndex]);
+        return kept(u.seatIndex);
       }).map((u) => u.id),
     ),
   };

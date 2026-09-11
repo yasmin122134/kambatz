@@ -17,6 +17,7 @@ import {
   buildTrackerFromMissions,
 } from "@/lib/scheduling-engine";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
+import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
 import {
   applyAssignmentsOnly,
   assertMissionStructureUnchanged,
@@ -74,11 +75,14 @@ function sameDayMissionScope(mission: MissionDay, allMissions: MissionDay[]): Mi
 }
 
 function countSkippedSeats(mission: MissionDay, keepExisting: boolean): number {
-  if (!keepExisting) return 0;
   let skipped = 0;
   const assignments = syncAssignmentSeats(mission.positions, { ...mission.assignments });
-  for (const seats of Object.values(assignments)) {
-    skipped += seats.filter(Boolean).length;
+  for (const [slotId, seats] of Object.entries(assignments)) {
+    for (let i = 0; i < seats.length; i++) {
+      if (shouldKeepSeatOnAssign(mission, slotId, i, seats[i], keepExisting)) {
+        skipped += 1;
+      }
+    }
   }
   return skipped;
 }
@@ -227,7 +231,17 @@ async function smartAssignScope(input: {
       if (roundFilled === 0 && guardStripped === 0) break;
     }
 
+    currentAssignments = restoreLockedAssignments(mission, currentAssignments);
     output.assignmentsByMission.set(mission.id, currentAssignments);
+  }
+
+  for (const mission of input.scopeMissions) {
+    const assignments = output.assignmentsByMission.get(mission.id);
+    if (!assignments) continue;
+    output.assignmentsByMission.set(
+      mission.id,
+      restoreLockedAssignments(mission, assignments),
+    );
   }
 
   let postFilled = 0;

@@ -33,6 +33,14 @@ import {
   reconcileAssignmentsOnStructureChange,
   resolveMissionForSlot,
 } from "@/lib/mission-utils";
+import {
+  emptyLockedSeats,
+  isSeatLocked,
+  lockFilledSeats,
+  reconcileLockedSeatsOnStructureChange,
+  syncLockedSeats,
+  withSeatLock,
+} from "@/lib/assignment-lock";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
 import type { Person } from "@/lib/types";
@@ -156,6 +164,16 @@ export async function PUT(request: Request, { params }: Params) {
         )
       : syncAssignmentSeats(positions, rawAssignments);
 
+  const rawLocks = body.locked_seats ?? existing.locked_seats;
+  const locked_seats =
+    regenerateStructure && mission_type === "guards"
+      ? reconcileLockedSeatsOnStructureChange(
+          existing.positions,
+          positions,
+          rawLocks,
+        )
+      : syncLockedSeats(positions, rawLocks);
+
   try {
     const { mission: saved } = await saveMissionDay({
       id,
@@ -167,6 +185,7 @@ export async function PUT(request: Request, { params }: Params) {
       status: body.status ?? existing.status,
       positions,
       assignments,
+      locked_seats,
       scheduling_rules,
       notes: body.notes ?? existing.notes,
     });
@@ -212,7 +231,7 @@ export async function PATCH(request: Request, { params }: Params) {
   }
 
   const body = await request.json();
-  const { action, slot_id, seat_index, target_slot_id, target_seat_index, name, target_room } =
+  const { action, slot_id, seat_index, target_slot_id, target_seat_index, name, target_room, locked } =
     body;
 
   const admin = await isAdmin();
@@ -238,6 +257,9 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (action === "take") {
     const slot = slotById(hostMission, slot_id);
+    if (isSeatLocked(hostMission, slot_id, seat_index)) {
+      return NextResponse.json({ error: "המשבצת נעולה" }, { status: 400 });
+    }
     const err = assertCanAssign(authSession.person ?? undefined, slot, personName, issues);
     if (err) {
       return NextResponse.json({ error: err }, { status: 400 });
@@ -266,6 +288,12 @@ export async function PATCH(request: Request, { params }: Params) {
     }
     if (!dstName || !srcName) {
       return NextResponse.json({ error: "אין עם מי להחליף" }, { status: 400 });
+    }
+    if (
+      isSeatLocked(hostMission, slot_id, seat_index) ||
+      isSeatLocked(swapHostMission, target_slot_id, target_seat_index)
+    ) {
+      return NextResponse.json({ error: "לא ניתן להחליף משבצת נעולה" }, { status: 400 });
     }
     const swapPerson = peopleByName[dstName];
     if (!srcSlot || !dstSlot || !swapPerson) {
@@ -378,6 +406,27 @@ export async function PATCH(request: Request, { params }: Params) {
       }
     }
     updated = withBaseWorkSlotLeader(hostMission, slot_id, leaderName || null);
+  } else if (action === "set_seat_lock" && admin) {
+    const slot = slotById(hostMission, slot_id);
+    if (!slot) {
+      return NextResponse.json({ error: "משמרת לא נמצאה" }, { status: 400 });
+    }
+    const wantLock = Boolean(locked);
+    const currentName = (hostMission.assignments[slot_id] || [])[seat_index]?.trim() || "";
+    if (wantLock && !currentName) {
+      return NextResponse.json({ error: "אפשר לנעול רק משבצת משובצת" }, { status: 400 });
+    }
+    updated = withSeatLock(hostMission, slot_id, seat_index, wantLock);
+  } else if (action === "lock_all" && admin) {
+    updated = {
+      ...hostMission,
+      locked_seats: lockFilledSeats(hostMission.positions, hostMission.assignments),
+    };
+  } else if (action === "unlock_all" && admin) {
+    updated = {
+      ...hostMission,
+      locked_seats: emptyLockedSeats(hostMission.positions),
+    };
   } else if (action === "swap_carmel_a_room" && admin) {
     if (hostMission.mission_type !== "guards") {
       return NextResponse.json({ error: "החלפת חדר כרמל א׳ זמינה רק ביום שמירות" }, { status: 400 });

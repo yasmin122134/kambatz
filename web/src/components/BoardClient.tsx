@@ -7,6 +7,7 @@ import {
   type BurdenRosterRow,
 } from "@/components/BurdenSummaryPanel";
 import { BurdenDayPeriodPanel } from "@/components/BurdenDayPeriodPanel";
+import { MissionFairnessPanel } from "@/components/MissionFairnessPanel";
 import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
@@ -27,6 +28,7 @@ import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
+import { emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
 import { patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
@@ -130,7 +132,9 @@ export function BoardClient({
   const [swapMode, setSwapMode] = useState<SwapMode>(null);
   const [msg, setMsg] = useState("");
   const [autoAssigning, setAutoAssigning] = useState(false);
+  const [locksBusy, setLocksBusy] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
+  const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
   const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
   const [periodBurdenRoster, setPeriodBurdenRoster] = useState<BurdenRosterRow[]>([]);
   const [dayMissionDayCount, setDayMissionDayCount] = useState<number | undefined>();
@@ -269,7 +273,11 @@ export function BoardClient({
 
   const loadBurden = useCallback(async () => {
     if (!activeDate) return;
-    const res = await fetch(`/api/missions/burden?mission_date=${activeDate}`);
+    const params = new URLSearchParams({ mission_date: activeDate });
+    if (focusMissionId && isAdminUser) {
+      params.set("missionId", focusMissionId);
+    }
+    const res = await fetch(`/api/missions/burden?${params}`);
     if (res.ok) {
       const data = await res.json();
       setBurdenRoster(data.roster || []);
@@ -277,11 +285,15 @@ export function BoardClient({
       setDayMissionDayCount(data.missionDayCount);
       setPeriodMissionDayCount(data.periodMissionDayCount);
     }
-  }, [activeDate]);
+  }, [activeDate, focusMissionId, isAdminUser]);
 
   useEffect(() => {
-    if (showBurden) loadBurden();
-  }, [showBurden, loadBurden]);
+    if (showBurden && !focusMissionId) loadBurden();
+  }, [showBurden, loadBurden, focusMissionId]);
+
+  function bumpBurdenRefresh() {
+    setBurdenRefreshKey((key) => key + 1);
+  }
 
   async function patchAssignment(
     missionId: string,
@@ -299,9 +311,38 @@ export function BoardClient({
           const seats = [...(mission.assignments[slotId] || [])];
           if (Number.isNaN(seatIndex) || seatIndex < 0) return mission;
           seats[seatIndex] = nextName;
-          return {
+          const next = {
             ...mission,
             assignments: { ...mission.assignments, [slotId]: seats },
+          };
+          return nextName ? next : withSeatLock(next, slotId, seatIndex, false);
+        }),
+      );
+    }
+
+    if (body.action === "set_seat_lock" && typeof body.slot_id === "string") {
+      const slotId = body.slot_id;
+      const seatIndex = Number(body.seat_index);
+      const locked = Boolean(body.locked);
+      setMissions((prev) =>
+        prev.map((mission) => {
+          if (mission.id !== missionId) return mission;
+          if (Number.isNaN(seatIndex) || seatIndex < 0) return mission;
+          return withSeatLock(mission, slotId, seatIndex, locked);
+        }),
+      );
+    }
+
+    if (body.action === "lock_all" || body.action === "unlock_all") {
+      setMissions((prev) =>
+        prev.map((mission) => {
+          if (mission.id !== missionId) return mission;
+          return {
+            ...mission,
+            locked_seats:
+              body.action === "lock_all"
+                ? lockFilledSeats(mission.positions, mission.assignments)
+                : emptyLockedSeats(mission.positions),
           };
         }),
       );
@@ -319,6 +360,7 @@ export function BoardClient({
       return null;
     }
     await loadMissions();
+    bumpBurdenRefresh();
     if (Array.isArray(data.warnings) && data.warnings.length) {
       setMsg(`נשמר · אזהרה: ${data.warnings.join(" · ")}`);
       return (data.mission ?? data) as MissionDay;
@@ -378,6 +420,7 @@ export function BoardClient({
       return false;
     }
     await loadMissions();
+    bumpBurdenRefresh();
     if (Array.isArray(data.warnings) && data.warnings.length) {
       setMsg(`ההחלפה נשמרה · אזהרה: ${data.warnings.join(" · ")}`);
     } else {
@@ -435,6 +478,7 @@ export function BoardClient({
       return;
     }
     await loadMissions();
+    bumpBurdenRefresh();
     setMsg(`כרמל א׳ הוחלף לחדר ${targetRoom} — השמירות סונכרנו`);
   }
 
@@ -456,13 +500,57 @@ export function BoardClient({
     loadAdminData();
   }
 
+  async function setSeatLock(
+    missionId: string,
+    slotId: string,
+    seatIndex: number,
+    locked: boolean,
+  ) {
+    await patchAssignment(missionId, {
+      action: "set_seat_lock",
+      slot_id: slotId,
+      seat_index: seatIndex,
+      locked,
+    });
+  }
+
+  async function setDayLocks(locked: boolean) {
+    const ids = [...new Set(dayMissions.map((m) => m.id))];
+    if (!ids.length) return;
+    const confirmed = locked
+      ? confirm("לנעול את כל המשבצות המשובצות ביום זה? שיבוץ מחדש לא יחליף אותן.")
+      : confirm("לשחרר את כל הנעילות ביום זה?");
+    if (!confirmed) return;
+    setLocksBusy(true);
+    setMsg("");
+    try {
+      for (const missionId of ids) {
+        const res = await fetch(`/api/missions/${missionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: locked ? "lock_all" : "unlock_all" }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setMsg(data.error || "שגיאה בעדכון נעילות");
+          await loadMissions();
+          return;
+        }
+      }
+      await loadMissions();
+      setMsg(locked ? "כל המשבצות המשובצות ננעלו" : "כל הנעילות שוחררו");
+    } finally {
+      setLocksBusy(false);
+    }
+  }
+
   async function runAutoAssign(keepExisting: boolean) {
     if (!activeDate) return;
     const confirmed = keepExisting
       ? confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")
       : confirm(
-          "לשבץ מחדש את כל היום מאפס?\n\n" +
-            "כל השיבוצים הקיימים יימחקו ויחולקו מחדש לפי האלגוריתם המעודכן (כולל איזון עומס נפרד למטבח ולשמירה+עב״ס).",
+          "לשבץ מחדש את כל היום?\n\n" +
+            "משבצות נעולות יישארו. כל השאר יימחקו ויחולקו מחדש לפי האלגוריתם.",
         );
     if (!confirmed) return;
 
@@ -480,6 +568,7 @@ export function BoardClient({
       return;
     }
     await loadMissions();
+    bumpBurdenRefresh();
     const status = data.status as string | undefined;
     const assignedSeats = data.assignedSeats ?? (data.results || []).reduce(
       (sum: number, r: { filled: number; skipped?: number }) => sum + r.filled + (r.skipped ?? 0),
@@ -566,9 +655,27 @@ export function BoardClient({
                 className="btn-sm"
                 disabled={autoAssigning || !activeDate}
                 onClick={() => runAutoAssign(false)}
-                title="מוחק שיבוצים קיימים ומחלק מחדש את כל היום"
+                title="מוחק שיבוצים לא נעולים ומחלק מחדש את כל היום"
               >
                 {autoAssigning ? "משבץ…" : "שיבוץ מחדש"}
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={locksBusy || autoAssigning || !activeDate}
+                onClick={() => setDayLocks(true)}
+                title="נועל את כל המשבצות המשובצות ביום זה"
+              >
+                {locksBusy ? "מעדכן…" : "נעל הכל"}
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={locksBusy || autoAssigning || !activeDate}
+                onClick={() => setDayLocks(false)}
+                title="משחרר את כל הנעילות ביום זה"
+              >
+                {locksBusy ? "מעדכן…" : "שחרר הכל"}
               </button>
               <button
                 type="button"
@@ -649,7 +756,14 @@ export function BoardClient({
         />
       )}
 
-      {showBurden && (
+      {showBurden && focusMissionId && isAdminUser ? (
+        <MissionFairnessPanel
+          missionId={focusMissionId}
+          refreshKey={burdenRefreshKey}
+          title="עומס שיבוץ"
+        />
+      ) : null}
+      {showBurden && !(focusMissionId && isAdminUser) ? (
         <BurdenDayPeriodPanel
           dayRoster={burdenRoster}
           periodRoster={periodBurdenRoster.length ? periodBurdenRoster : burdenRoster}
@@ -659,7 +773,7 @@ export function BoardClient({
           dayMissionDayCount={dayMissionDayCount}
           periodMissionDayCount={periodMissionDayCount}
         />
-      )}
+      ) : null}
 
       <div className="day-tabs mb-6">
         {dates.map((d, i) => (
@@ -710,6 +824,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
+              onToggleLock={setSeatLock}
               onApplyReplacement={applyReplacement}
               onSwapCarmelRoom={handleSwapCarmelARoom}
               dormRooms={dormRooms}
@@ -757,6 +872,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
+              onToggleLock={setSeatLock}
               onSetBaseWorkLeader={setBaseWorkLeader}
               onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
@@ -801,6 +917,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
+              onToggleLock={setSeatLock}
               onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
@@ -1105,6 +1222,7 @@ function GuardTimeline({
   onTake,
   onSwap,
   onAdminSet,
+  onToggleLock,
   onApplyReplacement,
   onCancelSwap,
   onSwapCarmelRoom,
@@ -1129,6 +1247,7 @@ function GuardTimeline({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onToggleLock?: (missionId: string, slotId: string, seatIndex: number, locked: boolean) => void;
   onApplyReplacement: (
     missionId: string,
     slotId: string,
@@ -1235,6 +1354,7 @@ function GuardTimeline({
                         onTake={onTake}
                         onSwap={onSwap}
                         onAdminSet={onAdminSet}
+                        onToggleLock={onToggleLock}
                         onApplyReplacement={onApplyReplacement}
                         onCancelSwap={onCancelSwap}
                       />
@@ -1266,6 +1386,7 @@ function MissionPanel({
   onTake,
   onSwap,
   onAdminSet,
+  onToggleLock,
   onSetBaseWorkLeader,
   onApplyReplacement,
   onCancelSwap,
@@ -1290,6 +1411,7 @@ function MissionPanel({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onToggleLock?: (missionId: string, slotId: string, seatIndex: number, locked: boolean) => void;
   onSetBaseWorkLeader?: (missionId: string, slotId: string, leaderName: string) => void;
   onApplyReplacement: (
     missionId: string,
@@ -1352,6 +1474,7 @@ function MissionPanel({
               onTake={onTake}
               onSwap={onSwap}
               onAdminSet={onAdminSet}
+                        onToggleLock={onToggleLock}
               onApplyReplacement={onApplyReplacement}
               onCancelSwap={onCancelSwap}
             />
@@ -1864,6 +1987,7 @@ function SlotCard({
   onTake,
   onSwap,
   onAdminSet,
+  onToggleLock,
   onSetBaseWorkLeader,
   onApplyReplacement,
   onCancelSwap,
@@ -1885,6 +2009,7 @@ function SlotCard({
   onTake: (slotId: string, seatIndex: number) => void;
   onSwap: (slotId: string, seatIndex: number) => void;
   onAdminSet: (missionId: string, slotId: string, seatIndex: number, name: string) => void;
+  onToggleLock?: (missionId: string, slotId: string, seatIndex: number, locked: boolean) => void;
   onSetBaseWorkLeader?: (missionId: string, slotId: string, leaderName: string) => void;
   onApplyReplacement: (
     missionId: string,

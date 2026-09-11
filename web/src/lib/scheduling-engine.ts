@@ -43,6 +43,7 @@ import {
 } from "@/lib/kitchen-out-lists";
 import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
+import { isSeatLocked } from "@/lib/assignment-lock";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
   intervalsConflictWithGap,
@@ -565,6 +566,18 @@ export function stripGuardSpacingViolations(input: {
     for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
       const name = seats[seatIndex];
       if (!name) continue;
+      if (isSeatLocked(input.mission, slot.slotId, seatIndex)) {
+        placePerson(
+          name,
+          slot,
+          input.mission.id,
+          tracker,
+          input.rules,
+          input.scheduling,
+          slot.seatCount,
+        );
+        continue;
+      }
       if (!guardOk(name, slot, tracker, ratio)) {
         seats[seatIndex] = "";
         removed += 1;
@@ -1216,6 +1229,7 @@ export function repairGuardAssignmentGaps(input: {
           for (let donorIdx = 0; donorIdx < donorSlot.seatCount; donorIdx++) {
             const donorName = donorSeats[donorIdx];
             if (!donorName) continue;
+            if (isSeatLocked(input.mission, donorSlot.slotId, donorIdx)) continue;
             const donorPerson = peopleByName[donorName];
             if (!donorPerson) continue;
 

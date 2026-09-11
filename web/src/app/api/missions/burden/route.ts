@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { isAdmin } from "@/lib/auth";
 import { computeRosterFairnessFromStorage, getFairnessRules } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
-import { listVisibleMissionDays } from "@/lib/missions";
+import {
+  listMissionDaysForBoardFocus,
+  listVisibleMissionDays,
+} from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
 
@@ -13,12 +17,16 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const missionDate = searchParams.get("mission_date");
+  const admin = await isAdmin();
+  const focusMissionId = admin ? searchParams.get("missionId")?.trim() : undefined;
 
   try {
     const supabase = await createClient();
     const [rules, missions, peopleRes] = await Promise.all([
       getFairnessRules(),
-      listVisibleMissionDays(),
+      focusMissionId
+        ? listMissionDaysForBoardFocus(focusMissionId)
+        : listVisibleMissionDays(),
       supabase
         .from("people")
         .select("name, prior_score")
@@ -42,13 +50,16 @@ export async function GET(req: Request) {
     const roster = (
       await computeRosterFairnessFromStorage(people, rules, {
         missionDate: dateKey,
+        missions: visible,
       })
     ).sort((a, b) => b.totalWithHistory - a.totalWithHistory);
 
     const periodRoster = dateKey
-      ? (await computeRosterFairnessFromStorage(people, rules)).sort(
-          (a, b) => b.totalWithHistory - a.totalWithHistory,
-        )
+      ? (
+          await computeRosterFairnessFromStorage(people, rules, {
+            missions: visible,
+          })
+        ).sort((a, b) => b.totalWithHistory - a.totalWithHistory)
       : undefined;
 
     const missionDayCount = countDistinctMissionDates(dayMissions);

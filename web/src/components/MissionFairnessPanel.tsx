@@ -11,6 +11,7 @@ type Props = {
   missionId: string;
   /** Refetch after auto-assign / save */
   refreshKey?: number;
+  title?: string;
 };
 
 function sortRows(
@@ -65,7 +66,11 @@ function SortButton({
   );
 }
 
-export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
+export function MissionFairnessPanel({
+  missionId,
+  refreshKey = 0,
+  title = "ניקוד צדק לשיבוץ",
+}: Props) {
   const [data, setData] = useState<MissionEditorFairnessResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -128,7 +133,7 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
   if (loading && !data) {
     return (
       <section className="card space-y-2">
-        <h4 className="font-display text-base">ניקוד צדק לשיבוץ</h4>
+        <h4 className="font-display text-base">{title}</h4>
         <p className="hint text-sm">טוען…</p>
       </section>
     );
@@ -137,7 +142,7 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
   if (error) {
     return (
       <section className="card space-y-2">
-        <h4 className="font-display text-base">ניקוד צדק לשיבוץ</h4>
+        <h4 className="font-display text-base">{title}</h4>
         <p className="msg-err text-sm">{error}</p>
         <button type="button" className="btn-sm" onClick={load}>
           נסו שוב
@@ -151,32 +156,32 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
   return (
     <section className="card space-y-4">
       <div className="bar spread flex-wrap gap-2">
-        <h4 className="font-display text-base">ניקוד צדק לשיבוץ</h4>
+        <h4 className="font-display text-base">{title}</h4>
         <button type="button" className="btn-sm" onClick={load} disabled={loading}>
           {loading ? "מרענן…" : "רענון"}
         </button>
       </div>
 
       <p className="text-xs text-ink3 leading-relaxed">
-        <strong>היסטוריית שמירות</strong> — נקודות שמירה מימים מפורסמים אחרים (
+        <strong>היסטוריה</strong> — נקודות שמירה מימים מפורסמים אחרים (
         {missionDayScopeLabel(data.historyMissionDayCount)}).{" "}
-        <strong>יום נוכחי</strong> — נקודות צדק רק ב־{data.missionDate} (
+        <strong>היום</strong> — נקודות צדק רק ב־{data.missionDate} (
         {missionDayScopeLabel(data.currentMissionDayCount)}).{" "}
-        <strong>אחרי איזון</strong> — סה״כ תקופה + התאמת ניקוד קודם (ממוצע{" "}
+        <strong>מצטבר</strong> — היום + היסטוריה + התאמת ניקוד קודם (ממוצע{" "}
         {data.meanPrior}).
       </p>
 
       <div className="burden-compare-charts burden-compare-charts--triple">
         <div className="burden-compare-chart-block">
-          <h5 className="burden-compare-chart-title">היסטוריית שמירות</h5>
+          <h5 className="burden-compare-chart-title">היסטוריה</h5>
           <BurdenDistributionChart roster={historyChartRoster} compact />
         </div>
         <div className="burden-compare-chart-block">
-          <h5 className="burden-compare-chart-title">יום נוכחי</h5>
+          <h5 className="burden-compare-chart-title">היום</h5>
           <BurdenDistributionChart roster={currentChartRoster} compact />
         </div>
         <div className="burden-compare-chart-block">
-          <h5 className="burden-compare-chart-title">אחרי איזון</h5>
+          <h5 className="burden-compare-chart-title">מצטבר</h5>
           <BurdenDistributionChart roster={balancedChartRoster} compact />
         </div>
       </div>
@@ -195,7 +200,7 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
               </th>
               <th>
                 <SortButton
-                  label="היסטוריית שמירות"
+                  label="היסטוריה"
                   active={sortKey === "history"}
                   asc={sortAsc}
                   onClick={() => toggleSort("history")}
@@ -203,7 +208,7 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
               </th>
               <th>
                 <SortButton
-                  label="יום נוכחי"
+                  label="היום"
                   active={sortKey === "current"}
                   asc={sortAsc}
                   onClick={() => toggleSort("current")}
@@ -211,7 +216,7 @@ export function MissionFairnessPanel({ missionId, refreshKey = 0 }: Props) {
               </th>
               <th>
                 <SortButton
-                  label="אחרי איזון"
+                  label="מצטבר"
                   active={sortKey === "balanced"}
                   asc={sortAsc}
                   onClick={() => toggleSort("balanced")}

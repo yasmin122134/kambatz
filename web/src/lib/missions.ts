@@ -7,6 +7,7 @@ import {
   syncPublishedFairnessPoints,
 } from "@/lib/fairness-persistence";
 import type { MissionDay, Person } from "@/lib/types";
+import { syncLockedSeatsWithAssignments } from "@/lib/assignment-lock";
 import {
   emptyAssignments,
   newPosition,
@@ -29,6 +30,8 @@ export {
 export type { FlatSlot, UpcomingMissionItem } from "@/lib/mission-utils";
 
 function rowFromDb(row: Record<string, unknown>): MissionDay {
+  const positions = (row.positions as MissionDay["positions"]) || [];
+  const assignments = (row.assignments as Record<string, string[]>) || {};
   return {
     id: String(row.id),
     title: String(row.title),
@@ -37,8 +40,13 @@ function rowFromDb(row: Record<string, unknown>): MissionDay {
     starts_at: String(row.starts_at),
     ends_at: String(row.ends_at),
     status: row.status as MissionDay["status"],
-    positions: (row.positions as MissionDay["positions"]) || [],
-    assignments: (row.assignments as Record<string, string[]>) || {},
+    positions,
+    assignments,
+    locked_seats: syncLockedSeatsWithAssignments(
+      positions,
+      assignments,
+      (row.locked_seats as Record<string, boolean[]>) || {},
+    ),
     scheduling_rules: normalizeSchedulingRules(row.scheduling_rules),
     notes: row.notes ? String(row.notes) : null,
     created_at: String(row.created_at),
@@ -140,6 +148,11 @@ export async function saveMissionDay(
   const supabase = await createClient();
   const positions = payload.positions || [];
   const assignments = syncAssignmentSeats(positions, payload.assignments || {});
+  const locked_seats = syncLockedSeatsWithAssignments(
+    positions,
+    assignments,
+    payload.locked_seats,
+  );
   const withLeaders = ensureBaseWorkLeaders({
     id: payload.id || "draft",
     title: payload.title,
@@ -150,6 +163,7 @@ export async function saveMissionDay(
     status: payload.status,
     positions,
     assignments,
+    locked_seats,
     scheduling_rules: normalizeSchedulingRules(
       payload.scheduling_rules ?? DEFAULT_MISSION_SCHEDULING_RULES,
     ),
@@ -188,6 +202,7 @@ export async function saveMissionDay(
     status: payload.status,
     positions,
     assignments: withLeaders.assignments,
+    locked_seats: withLeaders.locked_seats ?? locked_seats,
     scheduling_rules,
     notes: payload.notes || null,
     updated_at: new Date().toISOString(),

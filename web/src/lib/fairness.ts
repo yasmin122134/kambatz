@@ -83,17 +83,18 @@ export function computeRosterBurdenSummary(
   });
 }
 
-/** Roster fairness — live compute from published missions (manual overrides preserved). */
+/** Roster fairness — live compute from missions (manual overrides preserved). */
 export async function computeRosterFairnessFromStorage(
   people: { name: string; prior_score?: number }[],
   rules: FairnessRules,
-  options?: { missionDate?: string | null },
+  options?: { missionDate?: string | null; missions?: MissionDay[] },
 ): Promise<RosterBurdenEntry[]> {
   await ensurePublishedFairnessSynced();
-  const [missions, manualRows] = await Promise.all([
+  const [defaultMissions, manualRows] = await Promise.all([
     listVisibleMissionDays(),
     loadManualFairnessOverridesForSync(),
   ]);
+  const missions = options?.missions ?? defaultMissions;
   const meanPrior =
     people.reduce((s, p) => s + (p.prior_score || 0), 0) / (people.length || 1);
   const dateKey = options?.missionDate?.slice(0, 10) ?? null;

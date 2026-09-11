@@ -198,6 +198,8 @@ export interface MissionDay {
   status: MissionStatus;
   positions: MissionPosition[];
   assignments: Record<string, string[]>;
+  /** slotId → per-seat lock; locked names survive שיבוץ מחדש */
+  locked_seats?: Record<string, boolean[]>;
   scheduling_rules: MissionSchedulingRules;
   notes: string | null;
   created_at: string;
