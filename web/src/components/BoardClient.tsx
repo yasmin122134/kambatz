@@ -1474,7 +1474,7 @@ function MissionPanel({
               onTake={onTake}
               onSwap={onSwap}
               onAdminSet={onAdminSet}
-                        onToggleLock={onToggleLock}
+              onToggleLock={onToggleLock}
               onApplyReplacement={onApplyReplacement}
               onCancelSwap={onCancelSwap}
             />
@@ -1514,6 +1514,7 @@ function MissionPanel({
           onTake={onTake}
           onSwap={onSwap}
           onAdminSet={onAdminSet}
+          onToggleLock={onToggleLock}
           onApplyReplacement={onApplyReplacement}
           onCancelSwap={onCancelSwap}
           onSwapCarmelRoom={onSwapCarmelRoom}
@@ -1546,6 +1547,7 @@ function MissionPanel({
             onTake={onTake}
             onSwap={onSwap}
             onAdminSet={onAdminSet}
+            onToggleLock={onToggleLock}
             onSetBaseWorkLeader={onSetBaseWorkLeader}
             onApplyReplacement={onApplyReplacement}
             onCancelSwap={onCancelSwap}
