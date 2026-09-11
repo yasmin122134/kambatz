@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { computeRosterBurdenSummary, getFairnessRules } from "@/lib/fairness";
+import { countDistinctMissionDates } from "@/lib/mission-scope";
 import { listMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
@@ -73,7 +74,10 @@ export async function GET() {
       return a.personName.localeCompare(b.personName, "he");
     });
 
-    return NextResponse.json({ roster });
+    return NextResponse.json({
+      roster,
+      missionDayCount: countDistinctMissionDates(missions),
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

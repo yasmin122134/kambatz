@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { computeRosterBurdenSummary, getFairnessRules } from "@/lib/fairness";
+import { countDistinctMissionDates } from "@/lib/mission-scope";
 import { listMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
@@ -32,24 +33,34 @@ export async function GET(req: Request) {
     const visible = admin
       ? missions
       : missions.filter((m) => m.status === "published");
-    const filtered = missionDate
-      ? visible.filter((m) => m.mission_date === missionDate.slice(0, 10))
+    const people = (peopleRes.data || []).map((p) => ({
+      name: String(p.name),
+      prior_score: Number(p.prior_score) || 0,
+    }));
+
+    const dateKey = missionDate?.slice(0, 10) ?? null;
+    const dayMissions = dateKey
+      ? visible.filter((m) => m.mission_date === dateKey)
       : visible;
 
-    const roster = computeRosterBurdenSummary(
-      (peopleRes.data || []).map((p) => ({
-        name: String(p.name),
-        prior_score: Number(p.prior_score) || 0,
-      })),
-      filtered,
-      rules,
-    );
-
+    const roster = computeRosterBurdenSummary(people, dayMissions, rules);
     roster.sort((a, b) => b.totalWithHistory - a.totalWithHistory);
 
+    const periodRoster = dateKey
+      ? computeRosterBurdenSummary(people, visible, rules).sort(
+          (a, b) => b.totalWithHistory - a.totalWithHistory,
+        )
+      : undefined;
+
+    const missionDayCount = countDistinctMissionDates(dayMissions);
+    const periodMissionDayCount = countDistinctMissionDates(visible);
+
     return NextResponse.json({
-      missionDate: missionDate?.slice(0, 10) || null,
+      missionDate: dateKey,
+      missionDayCount,
+      periodMissionDayCount,
       roster,
+      periodRoster,
     });
   } catch (e) {
     return NextResponse.json(

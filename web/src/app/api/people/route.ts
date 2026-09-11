@@ -9,9 +9,9 @@ import {
   probePeopleAdmin,
   probePeopleOfficer,
 } from "@/lib/people";
-import { pickPersonalFlags } from "@/lib/session";
+import { buildPeopleAdminPatch } from "@/lib/session";
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const admin = await isAdmin();
   const withFlags = await probePeopleFlags(supabase);
@@ -26,11 +26,16 @@ export async function GET() {
   if (withAdmin) select += ",is_admin";
   if (withOfficer) select += ",is_officer";
 
-  const { data, error } = await supabase
-    .from("people")
-    .select(select)
-    .eq("active", true)
-    .order("name");
+  const includeInactive =
+    admin &&
+    new URL(request.url).searchParams.get("include_inactive") === "1";
+
+  let query = supabase.from("people").select(select).order("name");
+  if (!includeInactive) {
+    query = query.eq("active", true);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -51,6 +56,31 @@ export async function POST(request: Request) {
   }
 
   const supabase = await createClient();
+  const { data: existing } = await supabase
+    .from("people")
+    .select("id,active")
+    .eq("name", name)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.active !== false) {
+      return NextResponse.json({ error: "השם כבר במחזור" }, { status: 409 });
+    }
+    const reactivate: Record<string, unknown> = { active: true };
+    if (body.room) reactivate.room = body.room;
+    if (body.gender) reactivate.gender = body.gender;
+    const { data, error } = await supabase
+      .from("people")
+      .update(reactivate)
+      .eq("id", existing.id)
+      .select()
+      .single();
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    return NextResponse.json(data);
+  }
+
   const { data, error } = await supabase
     .from("people")
     .insert({ name, room: body.room || null, gender: body.gender || null })
@@ -74,45 +104,36 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "חסר מזהה צוער" }, { status: 400 });
   }
 
-  const flags = pickPersonalFlags(body);
-
   const supabase = await createClient();
   const withFlags = await probePeopleFlags(supabase);
-  if (!withFlags) {
-    return NextResponse.json(
-      {
-        error:
-          "עמודות הפטורים חסרות — הריצו supabase/migration_scheduling_exemptions.sql",
-      },
-      { status: 500 },
-    );
+  const withOfficer = await probePeopleOfficer(supabase);
+  const result = buildPeopleAdminPatch(body, { withFlags, withOfficer });
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
   }
 
-  const withOfficer = await probePeopleOfficer(supabase);
-  const patch: Record<string, unknown> = { ...flags };
-  if (withOfficer && typeof body.is_officer === "boolean") {
-    patch.is_officer = body.is_officer;
-    patch.is_admin = body.is_officer;
-  }
+  const selectCols = withFlags
+    ? `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}${withOfficer ? ",is_officer,is_admin" : ""}`
+    : `${PEOPLE_BASE_SELECT}${withOfficer ? ",is_officer,is_admin" : ""}`;
 
   const { data, error } = await supabase
     .from("people")
-    .update(patch)
+    .update(result.patch)
     .eq("id", id)
-    .select(
-      `${PEOPLE_BASE_SELECT},${PEOPLE_FLAG_SELECT}${withOfficer ? ",is_officer,is_admin" : ""}`,
-    )
+    .select(selectCols)
     .single();
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  await supabase
-    .from("profile_requests")
-    .update({ status: "rejected" })
-    .eq("person_id", id)
-    .eq("status", "pending");
+  if (result.flagsChanged || result.patch.active === false) {
+    await supabase
+      .from("profile_requests")
+      .update({ status: "rejected" })
+      .eq("person_id", id)
+      .eq("status", "pending");
+  }
 
   return NextResponse.json(data);
 }

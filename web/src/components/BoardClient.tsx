@@ -4,9 +4,9 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AddToCalendarLink } from "@/components/AddToCalendarLink";
 import {
-  BurdenSummaryPanel,
   type BurdenRosterRow,
 } from "@/components/BurdenSummaryPanel";
+import { BurdenDayPeriodPanel } from "@/components/BurdenDayPeriodPanel";
 import { IssueEditor } from "@/components/IssueEditor";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
@@ -112,6 +112,9 @@ export function BoardClient({
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
+  const [periodBurdenRoster, setPeriodBurdenRoster] = useState<BurdenRosterRow[]>([]);
+  const [dayMissionDayCount, setDayMissionDayCount] = useState<number | undefined>();
+  const [periodMissionDayCount, setPeriodMissionDayCount] = useState<number | undefined>();
   const [dutyOfficerNames, setDutyOfficerNames] = useState<string[]>([
     ...DUTY_OFFICER_NAMES,
   ]);
@@ -241,6 +244,9 @@ export function BoardClient({
     if (res.ok) {
       const data = await res.json();
       setBurdenRoster(data.roster || []);
+      setPeriodBurdenRoster(data.periodRoster || []);
+      setDayMissionDayCount(data.missionDayCount);
+      setPeriodMissionDayCount(data.periodMissionDayCount);
     }
   }, [activeDate]);
 
@@ -597,10 +603,14 @@ export function BoardClient({
       )}
 
       {showBurden && (
-        <BurdenSummaryPanel
-          roster={burdenRoster}
+        <BurdenDayPeriodPanel
+          dayRoster={burdenRoster}
+          periodRoster={periodBurdenRoster.length ? periodBurdenRoster : burdenRoster}
+          missionDateLabel={formatDate(activeDate)}
           onRefresh={loadBurden}
-          emptyMessage="אין נתוני שיבוץ ליום זה."
+          highlightName={personName}
+          dayMissionDayCount={dayMissionDayCount}
+          periodMissionDayCount={periodMissionDayCount}
         />
       )}
 

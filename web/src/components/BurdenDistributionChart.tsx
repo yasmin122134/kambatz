@@ -6,12 +6,20 @@ import { buildBurdenHistogram } from "@/lib/burden-distribution";
 type Props = {
   roster: { personName: string; fairnessPoints: number }[];
   highlightName?: string;
+  /** Hide outer title/caption — for side-by-side compare layouts */
+  compact?: boolean;
+  missionDayCount?: number;
 };
 
 const PLOT_HEIGHT = 120;
 const COUNT_HEIGHT = 16;
 
-export function BurdenDistributionChart({ roster, highlightName }: Props) {
+export function BurdenDistributionChart({
+  roster,
+  highlightName,
+  compact = false,
+  missionDayCount,
+}: Props) {
   const summary = useMemo(
     () =>
       buildBurdenHistogram(
@@ -31,9 +39,11 @@ export function BurdenDistributionChart({ roster, highlightName }: Props) {
   const maxBarHeight = PLOT_HEIGHT - COUNT_HEIGHT;
 
   return (
-    <div className="burden-distribution">
+    <div className={compact ? "burden-distribution burden-distribution--compact" : "burden-distribution"}>
       <div className="burden-distribution-header">
-        <h4 className="font-display text-base">גרף התפלגות — נקודות צדק</h4>
+        {!compact ? (
+          <h4 className="font-display text-base">גרף התפלגות — נקודות צדק</h4>
+        ) : null}
         <div className="burden-distribution-stats">
           <span>
             ממוצע: <strong className="mono">{summary.mean.toFixed(1)}</strong>
@@ -44,6 +54,11 @@ export function BurdenDistributionChart({ roster, highlightName }: Props) {
           <span>
             משובצים: <strong>{summary.assignedCount}</strong>
           </span>
+          {missionDayCount != null ? (
+            <span>
+              ימי משימה: <strong className="mono">{missionDayCount}</strong>
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -93,10 +108,12 @@ export function BurdenDistributionChart({ roster, highlightName }: Props) {
             })}
           </div>
         </div>
-        <p className="burden-distribution-caption text-xs text-ink3">
-          משמאל: פחות נקודות · מימין: יותר נקודות.
-          {highlightName ? " העמודה המודגשת = את/ה." : ""}
-        </p>
+        {!compact ? (
+          <p className="burden-distribution-caption text-xs text-ink3">
+            משמאל: פחות נקודות · מימין: יותר נקודות.
+            {highlightName ? " העמודה המודגשת = את/ה." : ""}
+          </p>
+        ) : null}
       </div>
     </div>
   );

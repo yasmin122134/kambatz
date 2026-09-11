@@ -17,6 +17,7 @@ export function HomeBurdenSection({
   title = "תפלגות עומס — נקודות צדק",
 }: Props) {
   const [roster, setRoster] = useState<BurdenRosterRow[]>([]);
+  const [missionDayCount, setMissionDayCount] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [error, setError] = useState("");
@@ -38,6 +39,7 @@ export function HomeBurdenSection({
       }
       const data = await res.json();
       setRoster(data.roster || []);
+      setMissionDayCount(data.missionDayCount);
     } finally {
       setLoading(false);
     }
@@ -88,6 +90,7 @@ export function HomeBurdenSection({
       emptyMessage="אין נתוני שיבוץ בימים שפורסמו."
       assignedLabel="משובצים בתקופה"
       highlightName={personName}
+      missionDayCount={missionDayCount}
     />
   );
 }

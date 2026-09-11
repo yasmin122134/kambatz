@@ -51,6 +51,7 @@ export default function FairnessPage() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
   const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
+  const [missionDayCount, setMissionDayCount] = useState<number | undefined>();
   const [burdenLoading, setBurdenLoading] = useState(false);
 
   const loadBurden = useCallback(async () => {
@@ -60,6 +61,7 @@ export default function FairnessPage() {
       if (res.ok) {
         const data = await res.json();
         setBurdenRoster(data.roster || []);
+        setMissionDayCount(data.missionDayCount);
       }
     } finally {
       setBurdenLoading(false);
@@ -160,6 +162,7 @@ export default function FairnessPage() {
                 title="עומס שיבוץ — כל הימים שפורסמו"
                 emptyMessage="אין נתוני שיבוץ בימים שפורסמו."
                 assignedLabel="משובצים בתקופה"
+                missionDayCount={missionDayCount}
               />
               <p className="text-xs text-ink3 -mt-4 mb-6">
                 לעומס לפי יום בודד —{" "}

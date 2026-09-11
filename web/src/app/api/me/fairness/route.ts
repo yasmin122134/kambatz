@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { getPersonFairnessStats } from "@/lib/fairness";
+import { countDistinctMissionDates } from "@/lib/mission-scope";
+import { listMissionDays } from "@/lib/missions";
 import { getSessionPerson } from "@/lib/session";
+import { isAdmin } from "@/lib/auth";
 
 export async function GET() {
   const session = await getSessionPerson();
@@ -9,11 +12,15 @@ export async function GET() {
   }
 
   try {
-    const stats = await getPersonFairnessStats(
-      session.person.name,
-      session.person.prior_score || 0,
-    );
-    return NextResponse.json(stats);
+    const admin = await isAdmin();
+    const [stats, missions] = await Promise.all([
+      getPersonFairnessStats(session.person.name, session.person.prior_score || 0),
+      listMissionDays(!admin),
+    ]);
+    return NextResponse.json({
+      ...stats,
+      missionDayCount: countDistinctMissionDates(missions),
+    });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

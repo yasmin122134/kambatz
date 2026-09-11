@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { MissionDayScopeNote } from "@/components/MissionDayScopeNote";
 import { JUSTICE_POINTS_EXPLANATION } from "@/lib/justice-points";
 import type { PlatoonFairnessRow } from "@/app/api/platoon/fairness/route";
 
@@ -15,6 +16,7 @@ function squadLabel(squad: number | null): string {
 export default function PlatoonPage() {
   const router = useRouter();
   const [roster, setRoster] = useState<PlatoonFairnessRow[]>([]);
+  const [missionDayCount, setMissionDayCount] = useState<number | undefined>();
   const [myName, setMyName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -42,6 +44,7 @@ export default function PlatoonPage() {
     }
     const data = await rosterRes.json();
     setRoster(data.roster || []);
+    setMissionDayCount(data.missionDayCount);
     setLoading(false);
   }, [router]);
 
@@ -66,8 +69,11 @@ export default function PlatoonPage() {
         <div className="card space-y-2">
           <h2 className="font-display text-xl">נקודות צדק — הפלוגה</h2>
           <p className="text-sm text-ink2">{JUSTICE_POINTS_EXPLANATION}</p>
+          {missionDayCount != null ? (
+            <MissionDayScopeNote count={missionDayCount} className="mb-1" />
+          ) : null}
           <p className="hint text-xs">
-            מחושב מכל הימים שפורסמו. לפרטים אישיים —{" "}
+            לפרטים אישיים —{" "}
             <Link href="/profile" className="text-brick hover:underline">
               הפרופיל שלי
             </Link>

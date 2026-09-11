@@ -1,5 +1,6 @@
-import { JUSTICE_POINTS_EXPLANATION } from "@/lib/justice-points";
 import { BurdenDistributionChart } from "@/components/BurdenDistributionChart";
+import { MissionDayScopeNote } from "@/components/MissionDayScopeNote";
+import { JUSTICE_POINTS_EXPLANATION } from "@/lib/justice-points";
 
 export type BurdenRosterRow = {
   personName: string;
@@ -24,6 +25,7 @@ type Props = {
   emptyMessage?: string;
   assignedLabel?: string;
   highlightName?: string;
+  missionDayCount?: number;
 };
 
 export function BurdenSummaryPanel({
@@ -33,6 +35,7 @@ export function BurdenSummaryPanel({
   emptyMessage = "אין נתוני שיבוץ.",
   assignedLabel = "משובצים ביום",
   highlightName,
+  missionDayCount,
 }: Props) {
   const assignedCount = roster.filter((r) => r.totalBurden > 0).length;
   const maxTotal = roster.reduce((m, r) => Math.max(m, r.totalWithHistory), 0);
@@ -65,6 +68,9 @@ export function BurdenSummaryPanel({
         </button>
       </div>
       <p className="text-xs text-ink3 mb-2">{JUSTICE_POINTS_EXPLANATION}</p>
+      {missionDayCount != null ? (
+        <MissionDayScopeNote count={missionDayCount} className="mb-2" />
+      ) : null}
       <p className="text-xs text-ink3 mb-2">ממוין לפי סה״כ+היסטוריה (גבוה → נמוך).</p>
       <div className="burden-roster-summary">
         <span>
@@ -79,8 +85,17 @@ export function BurdenSummaryPanel({
         <span>
           מקס׳ סה״כ+היסט׳: <strong>{maxTotal.toFixed(1)}</strong>
         </span>
+        {missionDayCount != null ? (
+          <span>
+            ימי משימה: <strong className="mono">{missionDayCount}</strong>
+          </span>
+        ) : null}
       </div>
-      <BurdenDistributionChart roster={roster} highlightName={highlightName} />
+      <BurdenDistributionChart
+        roster={roster}
+        highlightName={highlightName}
+        missionDayCount={missionDayCount}
+      />
       <div className="burden-roster-scroll" tabIndex={0} aria-label="רשימת עומס — ניתן לגלול">
         <table className="schedule-table w-full text-sm">
           <thead>

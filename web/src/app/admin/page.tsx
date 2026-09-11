@@ -3,8 +3,8 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
-import { NameCombobox } from "@/components/NameCombobox";
 import { AdminManualConstraints } from "@/components/AdminManualConstraints";
+import { AdminRosterSection } from "@/components/AdminRosterSection";
 import { createClient } from "@/lib/supabase/client";
 import {
   type Person,
@@ -15,13 +15,11 @@ export default function AdminPage() {
   const [password, setPassword] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [people, setPeople] = useState<Person[]>([]);
-  const [newName, setNewName] = useState("");
-  const [bulkNames, setBulkNames] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
 
   const loadPeople = useCallback(async () => {
-    const res = await fetch("/api/people");
+    const res = await fetch("/api/people?include_inactive=1");
     if (res.ok) setPeople(await res.json());
   }, []);
 
@@ -139,33 +137,6 @@ export default function AdminPage() {
     loadPeople();
   }
 
-  async function addPerson(e: FormEvent) {
-    e.preventDefault();
-    const name = newName.trim();
-    if (!name) return;
-    await fetch("/api/people", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    setNewName("");
-    loadPeople();
-  }
-
-  async function addBulk(e: FormEvent) {
-    e.preventDefault();
-    const names = bulkNames.split(/[\n,;]+/).map((s) => s.trim()).filter(Boolean);
-    for (const name of names) {
-      await fetch("/api/people", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
-    }
-    setBulkNames("");
-    loadPeople();
-  }
-
   if (authed === null) {
     return (
       <AppShell title="ניהול">
@@ -243,7 +214,7 @@ export default function AdminPage() {
       <section className="card mb-6">
         <h3 className="font-display text-base mb-2">סנכרון דוק פלוגה</h3>
         <p className="lede mb-3">
-          מייבא 53 צוערים מהדוק — שמות, מיילים, ותיקון שמות ישנים. דורש הרצת{" "}
+          מייבא שמות ומיילים מהדוק, ותיקון שמות ישנים. דורש הרצת{" "}
           <code className="mono text-xs">migration_email_auth.sql</code> ב-Supabase.
         </p>
         <div className="bar flex-wrap gap-2">
@@ -272,50 +243,13 @@ export default function AdminPage() {
       </section>
 
       <AdminManualConstraints
-        people={people}
+        people={people.filter((p) => p.active !== false)}
         onSaved={() => {
           loadPeople();
         }}
       />
 
-      <section className="card mb-6">
-        <h3 className="font-display text-base mb-2">מחזור ({people.length})</h3>
-        <form onSubmit={addPerson} className="bar mb-3">
-          <NameCombobox
-            value={newName}
-            onChange={setNewName}
-            placeholder="הקלידו שם חדש או קיים"
-            className="flex-1"
-          />
-          <button type="submit" className="btn-pri btn-sm">
-            הוסף
-          </button>
-        </form>
-        <form onSubmit={addBulk} className="space-y-2">
-          <textarea
-            placeholder="הדביקו רשימת שמות — שורה לכל שם"
-            rows={4}
-            value={bulkNames}
-            onChange={(e) => setBulkNames(e.target.value)}
-          />
-          <button type="submit" className="btn-sm">
-            הוסף הכל
-          </button>
-        </form>
-        <p className="hint mt-3">
-          {people
-            .map((p) =>
-              p.is_officer || p.is_admin
-                ? `${p.name} (קצין תורן / מנהל)`
-                : p.name,
-            )
-            .join(" · ") || "אין שמות"}
-        </p>
-        <p className="hint text-xs mt-2">
-          קצינים תורנים: רני פלג, יסמין חדד — הרצו{" "}
-          <code className="mono">migration_officer.sql</code> ב-Supabase לסימון ב-DB.
-        </p>
-      </section>
+      <AdminRosterSection people={people} onChanged={loadPeople} />
       </main>
     </AppShell>
   );

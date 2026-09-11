@@ -15,6 +15,7 @@ import {
   type ProfileRequest,
   type PersonFairnessStats,
 } from "@/lib/types";
+import { MissionDayScopeNote } from "@/components/MissionDayScopeNote";
 import { JUSTICE_POINTS_EXPLANATION, justicePoints, formatJusticePoints } from "@/lib/justice-points";
 import { createClient } from "@/lib/supabase/client";
 
@@ -75,7 +76,9 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [fairness, setFairness] = useState<PersonFairnessStats | null>(null);
+  const [fairness, setFairness] = useState<
+    (PersonFairnessStats & { missionDayCount?: number }) | null
+  >(null);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -222,6 +225,9 @@ export default function ProfilePage() {
               </div>
             </div>
             <p className="text-xs text-ink3">{JUSTICE_POINTS_EXPLANATION}</p>
+            {fairness.missionDayCount != null ? (
+              <MissionDayScopeNote count={fairness.missionDayCount} />
+            ) : null}
             <div className="text-center py-2">
               <p className="hint text-xs mb-1">סה״כ נקודות צדק (שמירה + תורנות)</p>
               <p className="font-display text-3xl text-accent">

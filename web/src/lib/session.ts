@@ -92,3 +92,46 @@ export function pickPersonalFlags(body: Record<string, unknown>): PersonalFlags 
     no_kitchen: !!body.no_kitchen,
   };
 }
+
+export function bodyHasPersonalFlags(body: Record<string, unknown>): boolean {
+  return EDITABLE_PERSONAL_KEYS.some((key) => key in body);
+}
+
+/** Admin PATCH payload: only include fields that were actually sent. */
+export function buildPeopleAdminPatch(
+  body: Record<string, unknown>,
+  options: { withFlags: boolean; withOfficer: boolean },
+):
+  | { ok: true; patch: Record<string, unknown>; flagsChanged: boolean }
+  | { ok: false; error: string; status: number } {
+  const patch: Record<string, unknown> = {};
+  let flagsChanged = false;
+
+  if (typeof body.active === "boolean") {
+    patch.active = body.active;
+  }
+
+  if (bodyHasPersonalFlags(body)) {
+    if (!options.withFlags) {
+      return {
+        ok: false,
+        status: 500,
+        error:
+          "עמודות הפטורים חסרות — הריצו supabase/migration_scheduling_exemptions.sql",
+      };
+    }
+    Object.assign(patch, pickPersonalFlags(body));
+    flagsChanged = true;
+  }
+
+  if (options.withOfficer && typeof body.is_officer === "boolean") {
+    patch.is_officer = body.is_officer;
+    patch.is_admin = body.is_officer;
+  }
+
+  if (Object.keys(patch).length === 0) {
+    return { ok: false, status: 400, error: "אין שדות לעדכון" };
+  }
+
+  return { ok: true, patch, flagsChanged };
+}
