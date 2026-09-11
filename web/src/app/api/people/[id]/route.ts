@@ -57,6 +57,9 @@ export async function GET(_request: Request, { params }: Params) {
         pointsManual: history?.pointsManual,
         bucket: history?.bucket,
         hours: history?.hours,
+        burdenBase: history?.burdenBase,
+        burdenRest: history?.burdenRest,
+        burdenIsSolo: history?.burdenIsSolo,
       };
     });
 

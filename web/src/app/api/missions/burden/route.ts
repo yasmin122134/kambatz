@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
-import { computeRosterBurdenSummary, getFairnessRules } from "@/lib/fairness";
+import { computeRosterFairnessFromStorage, getFairnessRules } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
 import { listMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
@@ -43,11 +43,14 @@ export async function GET(req: Request) {
       ? visible.filter((m) => m.mission_date === dateKey)
       : visible;
 
-    const roster = computeRosterBurdenSummary(people, dayMissions, rules);
-    roster.sort((a, b) => b.totalWithHistory - a.totalWithHistory);
+    const roster = (
+      await computeRosterFairnessFromStorage(people, rules, {
+        missionDate: dateKey,
+      })
+    ).sort((a, b) => b.totalWithHistory - a.totalWithHistory);
 
     const periodRoster = dateKey
-      ? computeRosterBurdenSummary(people, visible, rules).sort(
+      ? (await computeRosterFairnessFromStorage(people, rules)).sort(
           (a, b) => b.totalWithHistory - a.totalWithHistory,
         )
       : undefined;

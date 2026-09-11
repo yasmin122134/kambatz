@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guardBandRows } from "@/lib/fairness-display";
+import { explainAssignmentPoints, guardBandRows } from "@/lib/fairness-display";
 import { getGuardBaseBurden } from "@/lib/guard-burden";
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
 
@@ -23,6 +23,21 @@ describe("guardBandRows", () => {
       expect(row.solo).toBe(getGuardBaseBurden(start, end, 1, rules));
       expect(row.pair).toBe(getGuardBaseBurden(start, end, 2, rules));
     });
+  });
+
+  it("explains observation base plus rest penalty (3.8 = 1.8 + 2)", () => {
+    const lines = explainAssignmentPoints({
+      positionName: "תצפיתן",
+      timeLabel: "06:00–09:00",
+      hours: 3,
+      points: 3.8,
+      bucket: "solo",
+      burdenBase: 1.8,
+      burdenRest: 2,
+      burdenIsSolo: true,
+    });
+    expect(lines).toContain("בסיס: 3 שע׳ × 0.6 (תצפיתן) = 1.8");
+    expect(lines).toContain("+2 חוסר מנוחה ([4, 6) שעות מנוחה)");
   });
 
   it("shows hourly-derived values (not legacy band scores)", () => {

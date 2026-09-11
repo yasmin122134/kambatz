@@ -7,6 +7,8 @@ import {
   getGuardBaseBurden,
   getRestHoursBetween,
   getRestPenalty,
+  restPenaltyTierForHours,
+  REST_PENALTY_TIERS,
   toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
 } from "@/lib/guard-burden";
@@ -121,6 +123,18 @@ describe("guard base scoring", () => {
 
   it("observation post uses lower rate", () => {
     expect(getGuardBaseBurden("08:00", "12:00", 1, rules, "תצפיתן")).toBe(2.4);
+  });
+});
+
+describe("rest penalty intervals", () => {
+  it("labels match getRestPenalty boundaries", () => {
+    expect(restPenaltyTierForHours(12).restHoursInterval).toBe("[12, ∞)");
+    expect(restPenaltyTierForHours(11.9).restHoursInterval).toBe("[10, 12)");
+    expect(restPenaltyTierForHours(10).restHoursInterval).toBe("[10, 12)");
+    expect(restPenaltyTierForHours(9.9).restHoursInterval).toBe("[8, 10)");
+    expect(restPenaltyTierForHours(4).restHoursInterval).toBe("[4, 6)");
+    expect(restPenaltyTierForHours(3.9).restHoursInterval).toBe("[0, 4)");
+    expect(REST_PENALTY_TIERS).toHaveLength(6);
   });
 });
 

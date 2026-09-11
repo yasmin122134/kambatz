@@ -8,7 +8,6 @@ import {
   ISSUE_STATUS_LABELS,
   PERSONAL_FLAG_HINTS,
   PERSONAL_FLAG_LABELS,
-  FAIRNESS_BUCKET_LABELS,
   MISSION_TYPE_LABELS,
   type Person,
   type PersonalFlags,
@@ -16,18 +15,9 @@ import {
   type PersonFairnessStats,
 } from "@/lib/types";
 import { MissionDayScopeNote } from "@/components/MissionDayScopeNote";
+import { explainAssignmentPoints } from "@/lib/fairness-display";
 import { JUSTICE_POINTS_EXPLANATION, justicePoints, formatJusticePoints } from "@/lib/justice-points";
 import { createClient } from "@/lib/supabase/client";
-
-function fairnessHistoryLabel(h: PersonFairnessStats["history"][0]): string {
-  if (h.burdenBase != null) {
-    const kind = h.burdenIsSolo ? "סולו" : "זוג";
-    const rest =
-      h.burdenRest && h.burdenRest > 0 ? ` +${h.burdenRest} חוסר מנוחה` : "";
-    return `טבלת שעות · ${kind}${rest}`;
-  }
-  return FAIRNESS_BUCKET_LABELS[h.bucket].replace(" (לשעה)", "");
-}
 
 const EMPTY_FLAGS: PersonalFlags = {
   no_guard: false,
@@ -258,6 +248,25 @@ export default function ProfilePage() {
                 <p className="font-display">{fairness.totalPoints}</p>
               </div>
             </div>
+            {(fairness.burden?.guardBaseBurden != null ||
+              fairness.burden?.restPenalties != null) && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-xs border-t border-line2/60 pt-2">
+                <div>
+                  <p className="hint text-[10px]">בסיס שמירות</p>
+                  <p>{fairness.burden?.guardBaseBurden?.toFixed(1) ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="hint text-[10px]">עונשי חוסר מנוחה</p>
+                  <p>{fairness.burden?.restPenalties?.toFixed(1) ?? "—"}</p>
+                </div>
+                {(fairness.burden?.otherMissionPoints ?? 0) > 0 && (
+                  <div>
+                    <p className="hint text-[10px]">עב״ס / כוננות</p>
+                    <p>{fairness.burden?.otherMissionPoints?.toFixed(1)}</p>
+                  </div>
+                )}
+              </div>
+            )}
             {fairness.history.length > 0 ? (
               <ul className="text-sm space-y-2 max-h-48 overflow-y-auto">
                 {fairness.history.map((h) => (
@@ -268,15 +277,13 @@ export default function ProfilePage() {
                     <span className="mono text-xs">{h.missionDate}</span>
                     <span className="mono text-xs">{h.timeLabel}</span>
                     <span>{h.positionName}</span>
-                    <span className="text-ink2 text-xs">
-                      {MISSION_TYPE_LABELS[h.missionType]} · {fairnessHistoryLabel(h)}
-                      {h.burdenBase != null && (
-                        <span className="text-ink3">
-                          {" "}
-                          ({h.burdenBase}
-                          {h.burdenRest ? `+${h.burdenRest}` : ""})
+                    <span className="text-ink2 text-xs block">
+                      {MISSION_TYPE_LABELS[h.missionType]}
+                      {explainAssignmentPoints(h).map((line) => (
+                        <span key={line} className="block text-ink3 text-[10px]">
+                          {line}
                         </span>
-                      )}
+                      ))}
                     </span>
                     <span className="mr-auto font-semibold text-accent">
                       +{h.points}

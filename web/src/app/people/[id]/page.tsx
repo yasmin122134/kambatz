@@ -6,8 +6,12 @@ import { useParams, useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { MissionDayScopeNote } from "@/components/MissionDayScopeNote";
 import {
-  FAIRNESS_BUCKET_LABELS,
+  assignmentBucketLabel,
+  explainAssignmentPoints,
+} from "@/lib/fairness-display";
+import {
   MISSION_TYPE_LABELS,
+  type FairnessBucket,
   type Person,
   type PersonFairnessStats,
 } from "@/lib/types";
@@ -23,6 +27,9 @@ type AssignmentRow = PersonAssignmentRow & {
   pointsManual?: boolean;
   bucket?: string;
   hours?: number;
+  burdenBase?: number;
+  burdenRest?: number;
+  burdenIsSolo?: boolean;
 };
 
 type PersonDetailResponse = {
@@ -252,7 +259,7 @@ export default function PersonDetailPage() {
               <th className="py-2 pl-2">שעות</th>
               <th className="py-2 pl-2">תפקיד</th>
               <th className="py-2 pl-2">סוג</th>
-              <th className="py-2 pl-2">נק׳</th>
+              <th className="py-2 pl-2">נק׳ ופירוט</th>
               {data?.canEdit && <th className="py-2">פעולות</th>}
             </tr>
           </thead>
@@ -279,12 +286,20 @@ export default function PersonDetailPage() {
                     {MISSION_TYPE_LABELS[row.missionType]}
                     {row.bucket && (
                       <span className="block text-ink3">
-                        {FAIRNESS_BUCKET_LABELS[row.bucket as keyof typeof FAIRNESS_BUCKET_LABELS] ??
-                          row.bucket}
+                        {assignmentBucketLabel({
+                          positionName: row.positionName,
+                          timeLabel: row.timeLabel,
+                          hours: row.hours ?? 0,
+                          points: row.points ?? 0,
+                          bucket: row.bucket as FairnessBucket,
+                          burdenBase: row.burdenBase,
+                          burdenRest: row.burdenRest,
+                          burdenIsSolo: row.burdenIsSolo,
+                        })}
                       </span>
                     )}
                   </td>
-                  <td className="py-2 pl-2">
+                  <td className="py-2 pl-2 min-w-[10rem]">
                     {data?.canEdit ? (
                       <div className="flex flex-col gap-1 min-w-[5rem]">
                         <input
@@ -305,6 +320,20 @@ export default function PersonDetailPage() {
                         {row.points != null ? `+${row.points}` : "—"}
                       </span>
                     )}
+                    {explainAssignmentPoints({
+                      positionName: row.positionName,
+                      timeLabel: row.timeLabel,
+                      hours: row.hours ?? 0,
+                      points: row.points ?? 0,
+                      bucket: (row.bucket as FairnessBucket | undefined) ?? "solo",
+                      burdenBase: row.burdenBase,
+                      burdenRest: row.burdenRest,
+                      burdenIsSolo: row.burdenIsSolo,
+                    }).map((line) => (
+                      <span key={line} className="block text-[10px] text-ink3 leading-snug mt-0.5">
+                        {line}
+                      </span>
+                    ))}
                   </td>
                   {data?.canEdit && (
                     <td className="py-2">
@@ -454,6 +483,25 @@ export default function PersonDetailPage() {
               <p className="font-display">{fairness.totalPoints}</p>
             </div>
           </div>
+          {(fairness.burden?.guardBaseBurden != null ||
+            fairness.burden?.restPenalties != null) && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-xs border-t border-line2/60 pt-2">
+              <div>
+                <p className="hint text-[10px]">מתוכם — בסיס שמירות</p>
+                <p>{fairness.burden?.guardBaseBurden?.toFixed(1) ?? "—"}</p>
+              </div>
+              <div>
+                <p className="hint text-[10px]">עונשי חוסר מנוחה</p>
+                <p>{fairness.burden?.restPenalties?.toFixed(1) ?? "—"}</p>
+              </div>
+              {(fairness.burden?.otherMissionPoints ?? 0) > 0 && (
+                <div>
+                  <p className="hint text-[10px]">עב״ס / כוננות</p>
+                  <p>{fairness.burden?.otherMissionPoints?.toFixed(1)}</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <section className="card space-y-3">

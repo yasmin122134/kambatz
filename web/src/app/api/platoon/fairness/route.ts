@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
-import { computeRosterBurdenSummary, getFairnessRules } from "@/lib/fairness";
+import { computeRosterFairnessFromStorage, getFairnessRules } from "@/lib/fairness";
 import { countDistinctMissionDates } from "@/lib/mission-scope";
 import { listMissionDays } from "@/lib/missions";
 import { createClient } from "@/lib/supabase/server";
 import { getAuthSession } from "@/lib/session";
-import { isAdmin } from "@/lib/auth";
 
 export type PlatoonFairnessRow = {
   personId: string;
@@ -25,10 +24,9 @@ export async function GET() {
 
   try {
     const supabase = await createClient();
-    const admin = await isAdmin();
     const [rules, missions, peopleRes] = await Promise.all([
       getFairnessRules(),
-      listMissionDays(!admin),
+      listMissionDays(true),
       supabase
         .from("people")
         .select("id, name, prior_score, squad")
@@ -49,10 +47,11 @@ export async function GET() {
     }));
 
     const burdenByName = new Map(
-      computeRosterBurdenSummary(
-        people.map(({ name, prior_score }) => ({ name, prior_score })),
-        missions,
-        rules,
+      (
+        await computeRosterFairnessFromStorage(
+          people.map(({ name, prior_score }) => ({ name, prior_score })),
+          rules,
+        )
       ).map((row) => [row.personName, row]),
     );
 

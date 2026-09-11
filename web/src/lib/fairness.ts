@@ -11,7 +11,9 @@ import {
   statsFromStoredHistory,
 } from "@/lib/fairness-stats";
 import {
+  ensurePublishedFairnessSynced,
   hasStoredFairnessPoints,
+  listStoredFairnessGroupedByPerson,
   listStoredFairnessPointsForPerson,
   syncPublishedFairnessPoints,
 } from "@/lib/fairness-persistence";
@@ -25,6 +27,7 @@ import type {
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
 
 export {
+  aggregateHistoryBurden,
   bucketForAssignment,
   buildPersonFairnessStatsFromMissions,
   collectAssigneeNames,
@@ -81,6 +84,39 @@ export function computeRosterBurdenSummary(
   });
 }
 
+/** Roster fairness from persisted assignment points (same source as person profile). */
+export async function computeRosterFairnessFromStorage(
+  people: { name: string; prior_score?: number }[],
+  rules: FairnessRules,
+  options?: { missionDate?: string | null },
+): Promise<RosterBurdenEntry[]> {
+  await ensurePublishedFairnessSynced();
+  const grouped = await listStoredFairnessGroupedByPerson();
+  const meanPrior =
+    people.reduce((s, p) => s + (p.prior_score || 0), 0) / (people.length || 1);
+  const dateKey = options?.missionDate?.slice(0, 10) ?? null;
+
+  return people.map((p) => {
+    let history = grouped.get(p.name) || [];
+    if (dateKey) {
+      history = history.filter((h) => h.missionDate.slice(0, 10) === dateKey);
+    }
+    const stats = statsFromStoredHistory(history, rules, p.prior_score || 0);
+    const burden = stats.burden!;
+    const historicalAdjustment = Math.round(
+      ((p.prior_score || 0) - meanPrior) * rules.hist * 100,
+    ) / 100;
+    return {
+      personName: p.name,
+      priorScore: p.prior_score || 0,
+      historicalAdjustment,
+      totalWithHistory: Math.round((stats.periodPoints + historicalAdjustment) * 100) / 100,
+      ...burden,
+      guardDetails: [],
+    };
+  });
+}
+
 export async function getFairnessRules(): Promise<FairnessRules> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -113,33 +149,15 @@ export async function getPersonFairnessStats(
   personName: string,
   priorScore = 0,
 ): Promise<PersonFairnessStats> {
-  const [rules, missions] = await Promise.all([
-    getFairnessRules(),
-    listMissionDays(true),
-  ]);
+  const rules = await getFairnessRules();
+  await ensurePublishedFairnessSynced();
 
-  const hasAssignments = missions.some((m) =>
-    Object.values(m.assignments || {}).some((seats) => seats.some(Boolean)),
-  );
-
-  if (hasAssignments && !(await hasStoredFairnessPoints())) {
-    try {
-      await syncPublishedFairnessPoints();
-    } catch {
-      return buildPersonFairnessStatsFromMissions(
-        personName,
-        missions,
-        rules,
-        priorScore,
-      );
-    }
-  }
-
-  const storedHistory = await listStoredFairnessPointsForPerson(personName);
-  if (storedHistory.length > 0 || (hasAssignments && (await hasStoredFairnessPoints()))) {
+  if (await hasStoredFairnessPoints()) {
+    const storedHistory = await listStoredFairnessPointsForPerson(personName);
     return statsFromStoredHistory(storedHistory, rules, priorScore);
   }
 
+  const missions = await listMissionDays(true);
   return buildPersonFairnessStatsFromMissions(personName, missions, rules, priorScore);
 }
 
@@ -227,6 +245,8 @@ export async function resolveFairnessRequest(
 }
 
 export {
+  ensurePublishedFairnessSynced,
+  needsFairnessResync,
   syncPublishedFairnessPoints,
   deleteFairnessPointsForMission,
   setManualFairnessPoints,

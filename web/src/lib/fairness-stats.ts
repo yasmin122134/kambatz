@@ -3,6 +3,8 @@ import {
   calculatePersonBurden,
   toranutPointsForMissionBlock,
   type BurdenTimelineBlock,
+  type GuardAssignmentBurdenDetail,
+  type PersonBurdenBreakdown,
 } from "@/lib/guard-burden";
 import { flattenMissionSlots, isGuardKind, normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
@@ -148,6 +150,45 @@ export function bucketForAssignment(
   return seatCount <= 1 ? "solo" : "pair";
 }
 
+function roundPoints(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** Aggregate burden totals from persisted/computed history rows (single source of truth). */
+export function aggregateHistoryBurden(
+  history: PersonMissionHistoryItem[],
+  guardDetails: GuardAssignmentBurdenDetail[] = [],
+): PersonBurdenBreakdown {
+  const periodPoints = roundPoints(history.reduce((sum, h) => sum + h.points, 0));
+  const kitchenPoints = roundPoints(
+    history.filter((h) => h.bucket === "kitchen").reduce((sum, h) => sum + h.points, 0),
+  );
+  const toranutPoints = kitchenPoints;
+  const guardPoints = roundPoints(periodPoints - kitchenPoints);
+  const guardBaseBurden = roundPoints(
+    history.reduce((sum, h) => sum + (h.burdenBase ?? 0), 0),
+  );
+  const restPenalties = roundPoints(
+    history.reduce((sum, h) => sum + (h.burdenRest ?? 0), 0),
+  );
+  const otherMissionPoints = roundPoints(guardPoints - guardBaseBurden - restPenalties);
+  const guardAssignmentCount = history.filter((h) => h.burdenBase != null).length;
+
+  return {
+    guardBaseBurden,
+    restPenalties,
+    otherMissionPoints,
+    kitchenPoints,
+    guardPoints,
+    toranutPoints,
+    fairnessPoints: periodPoints,
+    dutyPoints: guardPoints,
+    guardAssignmentCount,
+    totalBurden: periodPoints,
+    guardDetails,
+  };
+}
+
 export function collectPersonBlocks(
   personName: string,
   missions: MissionDay[],
@@ -180,7 +221,10 @@ export function buildPersonFairnessHistory(
   rules: FairnessRules,
 ): PersonMissionHistoryItem[] {
   const blocks = collectPersonBlocks(personName, missions);
-  const breakdown = calculatePersonBurden(blocks, rules);
+  const scheduling = missions[0]
+    ? normalizeSchedulingRules(missions[0].scheduling_rules)
+    : undefined;
+  const breakdown = calculatePersonBurden(blocks, rules, scheduling);
   const guardDetailBySlot = new Map(
     breakdown.guardDetails.map((d) => [d.slotId || "", d]),
   );
@@ -197,7 +241,7 @@ export function buildPersonFairnessHistory(
         slot.positionKind,
       );
 
-      if (isGuardKind(slot.positionKind)) {
+      if (isGuardKind(slot.positionKind) || slot.positionKind === "patrol") {
         const detail = guardDetailBySlot.get(slot.slotId);
         history.push({
           id: `${mission.id}:${slot.slotId}:${personName}`,
@@ -205,6 +249,7 @@ export function buildPersonFairnessHistory(
           missionTitle: mission.title,
           missionDate: mission.mission_date,
           missionType: mission.mission_type,
+          slotId: slot.slotId,
           positionName: slot.positionName,
           timeLabel: slot.timeLabel,
           hours,
@@ -225,6 +270,7 @@ export function buildPersonFairnessHistory(
         missionTitle: mission.title,
         missionDate: mission.mission_date,
         missionType: mission.mission_type,
+        slotId: slot.slotId,
         positionName: slot.positionName,
         timeLabel: slot.timeLabel,
         hours,
@@ -249,10 +295,14 @@ export function buildPersonFairnessStatsFromMissions(
   priorScore = 0,
 ): PersonFairnessStats {
   const blocks = collectPersonBlocks(personName, missions);
-  const breakdown = calculatePersonBurden(blocks, rules);
+  const scheduling = missions[0]
+    ? normalizeSchedulingRules(missions[0].scheduling_rules)
+    : undefined;
+  const breakdown = calculatePersonBurden(blocks, rules, scheduling);
   const history = buildPersonFairnessHistory(personName, missions, rules);
-  const periodPoints = breakdown.totalBurden;
-  const totalPoints = Math.round((priorScore + periodPoints) * 100) / 100;
+  const burden = aggregateHistoryBurden(history, breakdown.guardDetails);
+  const periodPoints = burden.totalBurden;
+  const totalPoints = roundPoints(priorScore + periodPoints);
 
   return {
     rules,
@@ -260,7 +310,7 @@ export function buildPersonFairnessStatsFromMissions(
     periodPoints,
     totalPoints,
     history,
-    burden: breakdown,
+    burden,
   };
 }
 
@@ -288,45 +338,15 @@ export function statsFromStoredHistory(
   rules: FairnessRules,
   priorScore: number,
 ): PersonFairnessStats {
-  const periodPoints =
-    Math.round(history.reduce((sum, h) => sum + h.points, 0) * 100) / 100;
-  const guardBaseBurden =
-    Math.round(
-      history.reduce((sum, h) => sum + (h.burdenBase ?? 0), 0) * 100,
-    ) / 100;
-  const restPenalties =
-    Math.round(
-      history.reduce((sum, h) => sum + (h.burdenRest ?? 0), 0) * 100,
-    ) / 100;
-  const kitchenPoints = Math.round(
-    history.filter((h) => h.bucket === "kitchen").reduce((sum, h) => sum + h.points, 0) * 100,
-  ) / 100;
-  const guardPoints = Math.round((periodPoints - kitchenPoints) * 100) / 100;
-  const toranutPoints = kitchenPoints;
-  const fairnessPoints = periodPoints;
-  const dutyPoints = guardPoints;
-  const otherMissionPoints = Math.round(
-    (guardPoints - guardBaseBurden - restPenalties) * 100,
-  ) / 100;
-  const guardAssignmentCount = history.filter((h) => h.burdenBase != null).length;
+  const burden = aggregateHistoryBurden(history);
+  const periodPoints = burden.totalBurden;
 
   return {
     rules,
     priorScore,
     periodPoints,
-    totalPoints: Math.round((priorScore + periodPoints) * 100) / 100,
+    totalPoints: roundPoints(priorScore + periodPoints),
     history,
-    burden: {
-      guardBaseBurden,
-      restPenalties,
-      otherMissionPoints,
-      kitchenPoints,
-      guardPoints,
-      toranutPoints,
-      fairnessPoints,
-      dutyPoints,
-      guardAssignmentCount,
-      totalBurden: periodPoints,
-    },
+    burden,
   };
 }

@@ -15,7 +15,7 @@ import {
   pairGuardDayRate,
   pairGuardNightRate,
 } from "@/lib/fairness-display";
-import { REST_PENALTY_TIERS } from "@/lib/guard-burden";
+import { REST_PENALTY_INTERVAL_LEGEND, REST_PENALTY_TIERS } from "@/lib/guard-burden";
 import {
   DEFAULT_FAIRNESS_RULES,
   type FairnessHourlyRates,
@@ -233,18 +233,19 @@ export default function FairnessPage() {
 
             <div>
               <h3 className="font-display text-base mb-3">הצעת שינוי — בונוס חוסר מנוחה</h3>
+              <p className="text-xs text-ink3 mono mb-2">{REST_PENALTY_INTERVAL_LEGEND}</p>
               <div className="schedule-table-wrap overflow-x-auto">
                 <table className="schedule-table w-full text-sm">
                   <thead>
                     <tr>
-                      <th>פער מנוחה</th>
+                      <th>פער מנוחה (שעות)</th>
                       <th className="w-28">מוצע</th>
                     </tr>
                   </thead>
                   <tbody>
                     {REST_PENALTY_TIERS.map((tier) => (
-                      <tr key={tier.restHoursLabel}>
-                        <td>{tier.restHoursLabel}</td>
+                      <tr key={tier.restHoursInterval}>
+                        <td className="mono">{tier.restHoursInterval}</td>
                         <td>
                           <input
                             type="number"

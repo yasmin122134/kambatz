@@ -115,14 +115,14 @@ export function FairnessRulesPanel({
           <table className="schedule-table w-full text-sm">
             <thead>
               <tr>
-                <th>פער מנוחה בין משימות</th>
+                <th>פער מנוחה בין משימות (שעות)</th>
                 <th className="w-[22%]">בונוס (+נק׳)</th>
               </tr>
             </thead>
             <tbody>
               {restTiers.map((tier) => (
-                <tr key={tier.restHoursLabel}>
-                  <td>{tier.restHoursLabel}</td>
+                <tr key={tier.restHoursInterval}>
+                  <td className="mono">{tier.restHoursInterval}</td>
                   <td className="mono font-bold text-accent">+{tier.penalty}</td>
                 </tr>
               ))}

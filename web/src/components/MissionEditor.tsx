@@ -815,7 +815,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             />
             <p className="hint text-xs">
               40 צוערים בכל משמרת (52 בדוק פחות פטורים ≈ 11 במנוחה). בכל משמרת צוות אחד במנוחה.
-              נקודות צדק קבועות למשמרת (לא לפי שעות).
+              נקודות צדק לפי שעות (תעריף מטבח בטבלת הצדק).
             </p>
             <button
               type="button"

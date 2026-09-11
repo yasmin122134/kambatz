@@ -1,12 +1,17 @@
 ﻿import { fairnessRulesChanged } from "@/lib/fairness-stats";
-import { resolveHourlyRates } from "@/lib/fairness-hourly-rates";
+import { nightOverlapMinutes, resolveHourlyRates } from "@/lib/fairness-hourly-rates";
 import {
   GUARD_BAND_TIME_RANGES,
   GUARD_TIME_BAND_LABELS,
   PATROL_GUARD_POINTS,
+  REST_PENALTY_INTERVAL_LEGEND,
   REST_PENALTY_TIERS,
   getGuardBaseBurden,
+  pairGuardHourlyRate,
+  resolvePairGuardRateRatio,
+  restPenaltyIntervalForBonus,
 } from "@/lib/guard-burden";
+import { isObservationPost, parseTimeMinutes, slotDurationMinutes } from "@/lib/mission-utils";
 import {
   type FairnessHourlyRates,
   type FairnessRules,
@@ -16,12 +21,8 @@ import {
   FAIRNESS_BUCKET_HELP,
   FAIRNESS_BUCKET_LABELS,
   type FairnessBucket,
+  type PersonMissionHistoryItem,
 } from "@/lib/types";
-import {
-  pairGuardHourlyRate,
-  resolvePairGuardRateRatio,
-} from "@/lib/guard-burden";
-
 export const FAIRNESS_INTRO = {
   lead: "השיבוץ החכם מעדיף מי שנקודות הצדק שלו נמוכות יותר.",
   categories:
@@ -31,7 +32,7 @@ export const FAIRNESS_INTRO = {
 } as const;
 
 export const REST_PENALTY_NOTE =
-  "בונוס על חוסר מנוחה בין שמירות (לא בין מטבח/עב״ס). מדד צדק — לא אילוץ קשיח.";
+  `בונוס על חוסר מנוחה בין שמירות (לא בין מטבח/עב״ס). מדד צדק — לא אילוץ קשיח. ${REST_PENALTY_INTERVAL_LEGEND}`;
 
 export const HOURLY_RATE_ROWS: {
   key: keyof FairnessHourlyRates;
@@ -305,6 +306,117 @@ export function formatFairnessRulesDiff(
   });
 
   return parts.join(" · ");
+}
+
+export type AssignmentPointsExplainInput = Pick<
+  PersonMissionHistoryItem,
+  | "positionName"
+  | "timeLabel"
+  | "hours"
+  | "points"
+  | "bucket"
+  | "burdenBase"
+  | "burdenRest"
+  | "burdenIsSolo"
+>;
+
+function parseTimeLabelRange(timeLabel: string): { start: string; end: string } | null {
+  const parts = timeLabel.split("–").map((part) => part.trim());
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  return { start: parts[0], end: parts[1] };
+}
+
+function explainRegularGuardBase(
+  timeLabel: string,
+  base: number,
+  isSolo: boolean,
+  rules: FairnessRules,
+): string {
+  const range = parseTimeLabelRange(timeLabel);
+  if (!range) return `${base} נק׳ בסיס`;
+
+  const startMin = parseTimeMinutes(range.start);
+  if (startMin == null) return `${base} נק׳ בסיס`;
+
+  const durationMin = slotDurationMinutes(range.start, range.end);
+  const nightMin = nightOverlapMinutes(startMin, durationMin);
+  const dayMin = Math.max(0, durationMin - nightMin);
+  const rates = resolveHourlyRates(rules);
+  const ratio = isSolo ? 1 : resolvePairGuardRateRatio(rules);
+  const dayRate = rates.guard * ratio;
+  const nightRate = rates.guard_night * ratio;
+  const dayHours = dayMin / 60;
+  const nightHours = nightMin / 60;
+  const pairNote = isSolo ? "" : " (זוג 75%)";
+
+  if (nightHours > 0 && dayHours > 0) {
+    return `${dayHours.toFixed(1)} שע׳ יום × ${dayRate} + ${nightHours.toFixed(1)} שע׳ לילה × ${nightRate}${pairNote} = ${base}`;
+  }
+  if (nightHours > 0) {
+    return `${nightHours.toFixed(1)} שע׳ לילה × ${nightRate}${pairNote} = ${base}`;
+  }
+  return `${dayHours.toFixed(1)} שע׳ × ${dayRate}${pairNote} = ${base}`;
+}
+
+/** Human-readable lines for one assignment row (base, night, rest penalty, …). */
+export function explainAssignmentPoints(
+  item: AssignmentPointsExplainInput,
+  rules: FairnessRules = DEFAULT_FAIRNESS_RULES,
+): string[] {
+  const lines: string[] = [];
+
+  if (item.burdenBase != null) {
+    if (isObservationPost(item.positionName)) {
+      const rate = resolveHourlyRates(rules).observation;
+      lines.push(`בסיס: ${item.hours} שע׳ × ${rate} (תצפיתן) = ${item.burdenBase}`);
+    } else if (
+      item.burdenBase === PATROL_GUARD_POINTS &&
+      item.points === PATROL_GUARD_POINTS &&
+      item.hours >= 2
+    ) {
+      lines.push(`בסיס: ${PATROL_GUARD_POINTS} נק׳ (פטרול — קבוע)`);
+    } else {
+      const isSolo = item.burdenIsSolo !== false && item.bucket !== "pair";
+      lines.push(`בסיס: ${explainRegularGuardBase(item.timeLabel, item.burdenBase, isSolo, rules)}`);
+    }
+    if (item.burdenRest && item.burdenRest > 0) {
+      const interval = restPenaltyIntervalForBonus(item.burdenRest, rules);
+      lines.push(
+        interval
+          ? `+${item.burdenRest} חוסר מנוחה (${interval} שעות מנוחה)`
+          : `+${item.burdenRest} חוסר מנוחה לפני המשמרת`,
+      );
+    }
+    return lines;
+  }
+
+  if (item.bucket && item.hours > 0) {
+    const rateKey = item.bucket === "kitchen" ? "kitchen" : item.bucket === "duty" ? "base_work" : item.bucket === "standby_a" ? "standby_a" : item.bucket === "standby_b" ? "standby_b" : null;
+    if (rateKey) {
+      const rate = resolveHourlyRates(rules)[rateKey as keyof FairnessHourlyRates];
+      lines.push(`${item.hours} שע׳ × ${rate} (${FAIRNESS_BUCKET_LABELS[item.bucket].replace(" (לשעה)", "")})`);
+    }
+  }
+
+  return lines;
+}
+
+export function assignmentBucketLabel(item: AssignmentPointsExplainInput): string {
+  if (item.burdenBase != null) {
+    if (isObservationPost(item.positionName)) return "תצפיתן (לשעה)";
+    if (item.burdenIsSolo === false || item.bucket === "pair") return "שמירה בזוג (יחס מסולו)";
+    return "שמירה (לשעה)";
+  }
+  return FAIRNESS_BUCKET_LABELS[item.bucket ?? "solo"];
+}
+
+export function fairnessHistoryLabel(
+  item: AssignmentPointsExplainInput,
+  rules: FairnessRules = DEFAULT_FAIRNESS_RULES,
+): string {
+  const explain = explainAssignmentPoints(item, rules);
+  if (explain.length) return explain.join(" · ");
+  return assignmentBucketLabel(item);
 }
 
 export { fairnessRulesChanged };

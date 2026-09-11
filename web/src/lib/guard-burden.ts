@@ -261,19 +261,44 @@ export function getRestPenalty(restHours: number, rules?: FairnessRules): number
   return penalties[5];
 }
 
+/** How to read rest-hour intervals on the fairness table (matches getRestPenalty). */
+export const REST_PENALTY_INTERVAL_LEGEND =
+  "[ ] = כולל את הקצה · ( ) = לא כולל. לדוגמה: [8, 10) = מ-8 שעות (כולל) עד 10 (לא כולל).";
+
 /** Tiers shown on the fairness page — mirrors getRestPenalty(). */
 export const REST_PENALTY_TIERS = [
-  { restHoursLabel: "12 שעות ומעלה", penalty: 0, index: 0 },
-  { restHoursLabel: "10–12 שעות", penalty: 0.5, index: 1 },
-  { restHoursLabel: "8–10 שעות (לא כולל 10)", penalty: 0.7, index: 2 },
-  { restHoursLabel: "6–8 שעות", penalty: 1, index: 3 },
-  { restHoursLabel: "4–6 שעות (לא כולל 6)", penalty: 2, index: 4 },
-  { restHoursLabel: "0–4 שעות", penalty: 5, index: 5 },
+  { restHoursInterval: "[12, ∞)", restHoursLabel: "[12, ∞) שעות", penalty: 0, index: 0 },
+  { restHoursInterval: "[10, 12)", restHoursLabel: "[10, 12) שעות", penalty: 0.5, index: 1 },
+  { restHoursInterval: "[8, 10)", restHoursLabel: "[8, 10) שעות", penalty: 0.7, index: 2 },
+  { restHoursInterval: "[6, 8)", restHoursLabel: "[6, 8) שעות", penalty: 1, index: 3 },
+  { restHoursInterval: "[4, 6)", restHoursLabel: "[4, 6) שעות", penalty: 2, index: 4 },
+  { restHoursInterval: "[0, 4)", restHoursLabel: "[0, 4) שעות", penalty: 5, index: 5 },
 ] as const;
+
+export type RestPenaltyTier = (typeof REST_PENALTY_TIERS)[number];
+
+export function restPenaltyTierForHours(restHours: number): RestPenaltyTier {
+  if (restHours >= 12) return REST_PENALTY_TIERS[0];
+  if (restHours >= 10) return REST_PENALTY_TIERS[1];
+  if (restHours >= 8) return REST_PENALTY_TIERS[2];
+  if (restHours >= 6) return REST_PENALTY_TIERS[3];
+  if (restHours >= 4) return REST_PENALTY_TIERS[4];
+  return REST_PENALTY_TIERS[5];
+}
+
+export function restPenaltyIntervalForBonus(
+  penalty: number,
+  rules?: FairnessRules,
+): string | null {
+  if (penalty <= 0) return null;
+  const tiers = restPenaltyTiersFromRules(rules ?? DEFAULT_FAIRNESS_RULES);
+  return tiers.find((tier) => tier.penalty === penalty)?.restHoursInterval ?? null;
+}
 
 export function restPenaltyTiersFromRules(rules: FairnessRules) {
   const penalties = resolveRestPenalties(rules);
   return REST_PENALTY_TIERS.map((tier) => ({
+    restHoursInterval: tier.restHoursInterval,
     restHoursLabel: tier.restHoursLabel,
     penalty: penalties[tier.index],
     index: tier.index,

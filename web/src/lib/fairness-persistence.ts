@@ -11,6 +11,9 @@ import type { PersonMissionHistoryItem } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES } from "@/lib/types";
 import type { FairnessRules } from "@/lib/types";
 
+/** Bump when guard/fairness row computation logic changes (forces DB resync). */
+export const FAIRNESS_COMPUTE_VERSION = 2;
+
 async function loadFairnessRules(): Promise<FairnessRules> {
   const supabase = await createClient();
   const { data, error } = await supabase
@@ -23,6 +26,49 @@ async function loadFairnessRules(): Promise<FairnessRules> {
     return DEFAULT_FAIRNESS_RULES;
   }
   return normalizeFairnessRulesFromRaw(data.rules);
+}
+
+async function loadRawFairnessRulesRecord(): Promise<{
+  rules: FairnessRules;
+  raw: Record<string, unknown>;
+}> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fairness_rules")
+    .select("rules")
+    .eq("id", 1)
+    .maybeSingle();
+
+  const raw =
+    data?.rules && typeof data.rules === "object"
+      ? ({ ...(data.rules as Record<string, unknown>) } as Record<string, unknown>)
+      : {};
+  if (error || !data) {
+    return { rules: DEFAULT_FAIRNESS_RULES, raw };
+  }
+  return { rules: normalizeFairnessRulesFromRaw(data.rules), raw };
+}
+
+function storedComputeVersion(raw: Record<string, unknown>): number {
+  const v = raw._fairness_compute_version;
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+
+async function markFairnessComputeVersion(): Promise<void> {
+  const supabase = await createClient();
+  const { raw } = await loadRawFairnessRulesRecord();
+  if (storedComputeVersion(raw) === FAIRNESS_COMPUTE_VERSION) return;
+
+  const { error } = await supabase
+    .from("fairness_rules")
+    .update({
+      rules: { ...raw, _fairness_compute_version: FAIRNESS_COMPUTE_VERSION },
+    })
+    .eq("id", 1);
+
+  if (error && error.code !== "PGRST205") {
+    throw new Error(error.message);
+  }
 }
 
 function rowToHistoryItem(row: StoredFairnessPointRow): PersonMissionHistoryItem {
@@ -49,7 +95,7 @@ function historyToRow(
   item: PersonMissionHistoryItem,
   personName: string,
 ): Omit<StoredFairnessPointRow, "computed_at"> {
-  const slotId = item.id.split(":")[1] || item.missionId;
+  const slotId = item.slotId || item.id.split(":")[1] || item.missionId;
   return {
     person_name: personName,
     mission_id: item.missionId,
@@ -89,6 +135,90 @@ export async function listStoredFairnessPointsForPerson(
   return (data || []).map((row) =>
     rowToHistoryItem(row as StoredFairnessPointRow),
   );
+}
+
+async function latestFairnessComputedAt(): Promise<number | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fairness_assignment_points")
+    .select("computed_at")
+    .order("computed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data?.computed_at) return null;
+  const ts = Date.parse(String(data.computed_at));
+  return Number.isNaN(ts) ? null : ts;
+}
+
+/** True when published missions, assignments, or fairness rules changed since last sync. */
+export async function needsFairnessResync(): Promise<boolean> {
+  const supabase = await createClient();
+  const [missions, lastComputed, rulesRes, rulesRecord] = await Promise.all([
+    listMissionDays(true),
+    latestFairnessComputedAt(),
+    supabase.from("fairness_rules").select("updated_at").eq("id", 1).maybeSingle(),
+    loadRawFairnessRulesRecord(),
+  ]);
+
+  if (storedComputeVersion(rulesRecord.raw) !== FAIRNESS_COMPUTE_VERSION) {
+    return true;
+  }
+
+  const hasAssignments = missions.some((m) =>
+    Object.values(m.assignments || {}).some((seats) => seats.some(Boolean)),
+  );
+  if (!hasAssignments) return false;
+  if (lastComputed == null) return true;
+
+  for (const mission of missions) {
+    const updated = Date.parse(mission.updated_at);
+    if (!Number.isNaN(updated) && updated > lastComputed) return true;
+  }
+
+  const rulesUpdated = rulesRes.data?.updated_at
+    ? Date.parse(String(rulesRes.data.updated_at))
+    : NaN;
+  if (!Number.isNaN(rulesUpdated) && rulesUpdated > lastComputed) return true;
+
+  return false;
+}
+
+/** Sync published mission points when cache is empty or stale. */
+export async function ensurePublishedFairnessSynced(): Promise<void> {
+  if (!(await needsFairnessResync())) return;
+  try {
+    await syncPublishedFairnessPoints();
+  } catch {
+    /* table may be missing in dev */
+  }
+}
+
+export async function listStoredFairnessGroupedByPerson(): Promise<
+  Map<string, PersonMissionHistoryItem[]>
+> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("fairness_assignment_points")
+    .select("*")
+    .order("mission_date", { ascending: false })
+    .order("time_label", { ascending: false });
+
+  if (error) {
+    if (error.code === "PGRST205" || error.message.includes("fairness_assignment_points")) {
+      return new Map();
+    }
+    throw new Error(error.message);
+  }
+
+  const grouped = new Map<string, PersonMissionHistoryItem[]>();
+  for (const row of data || []) {
+    const item = rowToHistoryItem(row as StoredFairnessPointRow);
+    const list = grouped.get(row.person_name) || [];
+    list.push(item);
+    grouped.set(String(row.person_name), list);
+  }
+  return grouped;
 }
 
 export async function hasStoredFairnessPoints(): Promise<boolean> {
@@ -193,6 +323,8 @@ export async function syncPublishedFairnessPoints(): Promise<void> {
     if (insertErr.code === "PGRST205") return;
     throw new Error(insertErr.message);
   }
+
+  await markFairnessComputeVersion();
 }
 
 /** Admin: set or clear manual points override for one assignment row. */
