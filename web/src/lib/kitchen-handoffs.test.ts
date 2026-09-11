@@ -56,7 +56,7 @@ describe("kitchenShiftHandoffs", () => {
     const [pos] = positions;
     const extra = {
       id: crypto.randomUUID(),
-      name: "משמרות מטבch נוסף",
+      name: "משמרות מטבח נוסף",
       kind: "kitchen" as const,
       slots: pos.slots.map((s) => ({
         ...s,

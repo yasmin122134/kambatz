@@ -71,9 +71,9 @@ export async function GET() {
     });
 
     roster.sort((a, b) => {
-      const sa = a.squad ?? 99;
-      const sb = b.squad ?? 99;
-      if (sa !== sb) return sa - sb;
+      if (a.justicePoints !== b.justicePoints) {
+        return a.justicePoints - b.justicePoints;
+      }
       return a.personName.localeCompare(b.personName, "he");
     });
 

@@ -18,15 +18,17 @@ export default function PlatoonPage() {
   const [roster, setRoster] = useState<PlatoonFairnessRow[]>([]);
   const [missionDayCount, setMissionDayCount] = useState<number | undefined>();
   const [myName, setMyName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
-    const [meRes, rosterRes] = await Promise.all([
+    const [meRes, rosterRes, roleRes] = await Promise.all([
       fetch("/api/me"),
       fetch("/api/platoon/fairness"),
+      fetch("/api/me/role"),
     ]);
     if (meRes.status === 401 || rosterRes.status === 401) {
       router.replace("/login?next=/pluga");
@@ -42,6 +44,10 @@ export default function PlatoonPage() {
       const me = await meRes.json();
       setMyName(me.name || "");
     }
+    if (roleRes.ok) {
+      const role = await roleRes.json();
+      setIsAdmin(!!role.admin);
+    }
     const data = await rosterRes.json();
     setRoster(data.roster || []);
     setMissionDayCount(data.missionDayCount);
@@ -52,15 +58,13 @@ export default function PlatoonPage() {
     load();
   }, [load]);
 
-  const bySquad = useMemo(() => {
-    const groups = new Map<string, PlatoonFairnessRow[]>();
-    for (const row of roster) {
-      const key = squadLabel(row.squad);
-      const list = groups.get(key) || [];
-      list.push(row);
-      groups.set(key, list);
-    }
-    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, "he"));
+  const sortedRoster = useMemo(() => {
+    return [...roster].sort((a, b) => {
+      if (a.justicePoints !== b.justicePoints) {
+        return a.justicePoints - b.justicePoints;
+      }
+      return a.personName.localeCompare(b.personName, "he");
+    });
   }, [roster]);
 
   return (
@@ -73,7 +77,9 @@ export default function PlatoonPage() {
             <MissionDayScopeNote count={missionDayCount} className="mb-1" />
           ) : null}
           <p className="hint text-xs">
-            לחצו על שם לפרופיל מלא (שמירות, תורנויות, נקודות).{" "}
+            ממוין לפי נקודות צדק (מעט למעלה). לחצו על שורה לפרופיל — שמירות,
+            תורנויות
+            {isAdmin ? " ועריכת שיבוצים/נקודות" : ""}.{" "}
             <Link href="/profile" className="text-brick hover:underline">
               הפרופיל שלי
             </Link>
@@ -93,26 +99,27 @@ export default function PlatoonPage() {
             <p className="hint">אין צוערים פעילים.</p>
           </div>
         ) : (
-          bySquad.map(([squadName, members]) => (
-            <section key={squadName} className="card space-y-3">
-              <h3 className="font-display text-base">{squadName}</h3>
-              <ul className="platoon-fairness-list">
-                {members.map((row) => {
-                  const mine = row.personName === myName;
-                  return (
-                    <li
-                      key={row.personName}
-                      className={`platoon-fairness-row ${mine ? "is-you" : ""}`}
+          <section className="card space-y-3">
+            <h3 className="font-display text-base">כל הפלוגה</h3>
+            <ul className="platoon-fairness-list">
+              {sortedRoster.map((row, index) => {
+                const mine = row.personName === myName;
+                return (
+                  <li key={row.personId}>
+                    <Link
+                      href={`/people/${row.personId}`}
+                      className={`platoon-fairness-row platoon-fairness-row-link no-underline text-inherit ${mine ? "is-you" : ""}`}
                     >
+                      <div className="platoon-fairness-rank">{index + 1}</div>
                       <div className="platoon-fairness-name">
-                        <Link
-                          href={`/people/${row.personId}`}
-                          className="hover:text-brick hover:underline"
-                        >
-                          {row.personName}
-                        </Link>
+                        {row.personName}
                         {mine && (
                           <span className="text-[10px] text-accent mr-1">(את/ה)</span>
+                        )}
+                        {row.squad != null && (
+                          <span className="block text-[10px] font-normal text-ink3">
+                            {squadLabel(row.squad)}
+                          </span>
                         )}
                       </div>
                       <div className="platoon-fairness-points">
@@ -129,13 +136,19 @@ export default function PlatoonPage() {
                         <span title="מטבח וחמגשיות">
                           תורנות {row.toranutPoints.toFixed(1)}
                         </span>
+                        {row.priorScore !== 0 && (
+                          <>
+                            <span aria-hidden> · </span>
+                            <span title="ניקוד קודם">קודם {row.priorScore.toFixed(1)}</span>
+                          </>
+                        )}
                       </div>
-                    </li>
-                  );
-                })}
-              </ul>
-            </section>
-          ))
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         )}
 
         <div className="text-center">

@@ -30,7 +30,7 @@ describe("kitchen smart assign", () => {
     const positions = defaultKitchenDayPositions({ seatsPerShift: 3 });
     const mission: MissionDay = {
       id: "kitchen-1",
-      title: "מטבch",
+      title: "מטבח",
       mission_type: "kitchen",
       mission_date: "2026-08-26",
       starts_at: "2026-08-26T06:00:00+03:00",
@@ -88,7 +88,7 @@ describe("kitchen smart assign", () => {
     const positions = defaultKitchenDayPositions({ seatsPerShift: 40 });
     const mission: MissionDay = {
       id: "kitchen-full",
-      title: "מטבch",
+      title: "מטבח",
       mission_type: "kitchen",
       mission_date: "2026-08-26",
       starts_at: "2026-08-26T06:00:00+03:00",

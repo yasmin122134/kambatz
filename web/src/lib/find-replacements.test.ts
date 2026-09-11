@@ -244,7 +244,7 @@ describe("findReplacements", () => {
     const slotId = positions[0].slots[0].id;
     const mission: MissionDay = {
       id: "k1",
-      title: "מטbch",
+      title: "מטבח",
       mission_type: "kitchen",
       mission_date: "2026-08-26",
       starts_at: "2026-08-26T06:00:00+03:00",

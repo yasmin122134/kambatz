@@ -28,7 +28,7 @@ function kitchenMission(assignments: Record<string, string[]>): MissionDay {
   const positions = defaultKitchenDayPositions({ seatsPerShift: 2 });
   return {
     id: "k1",
-    title: "מטבch",
+    title: "מטבח",
     mission_type: "kitchen",
     mission_date: "2026-08-26",
     starts_at: "2026-08-26T06:00:00+03:00",
