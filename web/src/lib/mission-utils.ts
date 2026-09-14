@@ -28,13 +28,15 @@ import {
   isHamagshiyotPosition,
   isHamagshiyotPositionName,
   isHamagshiyotShiftSlot,
+  resolveHamagshiyotSlotInterval,
 } from "@/lib/hamagshiyot-template";
 import { normalizeKitchenOutNamesByShift } from "@/lib/kitchen-out-lists";
 import {
   isPatrolPosition,
   isPatrolShiftSlot,
+  resolvePatrolSlotInterval,
 } from "@/lib/patrol-day-template";
-import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -374,20 +376,18 @@ export function flattenMissionSlots(
             slot,
           )
         : isPatrolSlot
-          ? resolveCanonicalSlotInterval(mission, slot) ??
-            resolveSlotAbsoluteInterval(
+          ? resolvePatrolSlotInterval(
+              mission.mission_date,
               mission.starts_at,
               mission.ends_at,
-              slot.start_time,
-              slot.end_time,
+              slot,
             )
           : isHamagshiyotSlot
-            ? resolveCanonicalSlotInterval(mission, slot) ??
-              resolveSlotAbsoluteInterval(
+            ? resolveHamagshiyotSlotInterval(
+                mission.mission_date,
                 mission.starts_at,
                 mission.ends_at,
-                slot.start_time,
-                slot.end_time,
+                slot,
               )
             : resolveCanonicalSlotInterval(mission, slot);
       if (!abs) continue;

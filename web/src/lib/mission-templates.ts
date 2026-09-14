@@ -93,6 +93,7 @@ export type StandardMissionInput = {
   endsAt: string;
   scheduling?: MissionSchedulingRules;
   season?: "summer" | "winter";
+  missionDate?: string;
 };
 
 /** כל העמדות/משמרות לפי הפקודה — מקור אמת יחיד */
@@ -107,6 +108,7 @@ export function standardMissionPositions(input: StandardMissionInput): MissionPo
       season: input.season ?? "summer",
       missionStartsAt: input.startsAt,
       missionEndsAt: input.endsAt,
+      missionDate: input.missionDate ?? input.startsAt.slice(0, 10),
       baseWorkSeatsPerShift: scheduling.base_work?.seats_per_shift,
     });
   }
@@ -229,6 +231,7 @@ export type ResolveMissionPositionsInput = {
   endsAt: string;
   scheduling?: MissionSchedulingRules;
   season?: "summer" | "winter";
+  missionDate?: string;
   clientPositions?: MissionPosition[];
   /** When false (default), persisted client positions are authoritative. */
   regenerateStructure?: boolean;
@@ -245,6 +248,7 @@ export function resolveMissionPositions(input: ResolveMissionPositionsInput): Mi
         endsAt: input.endsAt,
         scheduling,
         season: input.season,
+        missionDate: input.missionDate,
       });
 
   if (input.missionType === "base_work") {
@@ -261,6 +265,7 @@ export function resolveMissionPositions(input: ResolveMissionPositionsInput): Mi
   if (!input.regenerateStructure) return withSyncedSeats;
 
   return generateGuardMissionStructure(withSyncedSeats, {
+    missionDate: input.missionDate,
     startsAt: input.startsAt,
     endsAt: input.endsAt,
     scheduling,

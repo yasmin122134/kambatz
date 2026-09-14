@@ -1097,8 +1097,9 @@ function missionBoardStartMin(mission: MissionDay): number {
 }
 
 const TIMELINE_CYCLE_MIN = 1440;
-const TIMELINE_HEIGHT_PX = 960;
-const TIMELINE_TICK_STEP_MIN = 120;
+const TIMELINE_HEIGHT_PX = 1440;
+const TIMELINE_TICK_STEP_MIN = 60;
+const TIMELINE_SHORT_SLOT_MIN = 90;
 
 function formatWallTime(totalMin: number): string {
   const h = Math.floor(totalMin / 60) % 24;
@@ -1111,14 +1112,35 @@ function cyclicToPx(cyclicMin: number): number {
 }
 
 function durationToPx(durationMin: number): number {
-  return Math.max((durationMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX, 32);
+  return (durationMin / TIMELINE_CYCLE_MIN) * TIMELINE_HEIGHT_PX;
+}
+
+function isTimelineShortSlot(slot: FlatSlot): boolean {
+  return slot.durationMinutes <= TIMELINE_SHORT_SLOT_MIN;
 }
 
 function usesTimelineCompactAssignees(slot: FlatSlot): boolean {
   return (
     slot.positionKind === "patrol" ||
     isHamagshiyotPositionName(slot.positionName) ||
+    isTimelineShortSlot(slot) ||
     (slot.seatCount > 2 && slot.durationMinutes <= 120)
+  );
+}
+
+function TimeRange({
+  start,
+  end,
+  className,
+}: {
+  start: string;
+  end?: string;
+  className?: string;
+}) {
+  return (
+    <span className={`time-ltr ${className ?? ""}`.trim()} dir="ltr">
+      {end ? `${start}–${end}` : start}
+    </span>
   );
 }
 
@@ -1138,13 +1160,8 @@ function slotAssigneeDisplayNames(mission: MissionDay, slot: FlatSlot): string[]
   return names;
 }
 
-function slotTimelineHeightPx(slot: FlatSlot, isAdmin: boolean): number {
-  const durationPx = durationToPx(slot.durationMinutes);
-  if (!usesTimelineCompactAssignees(slot)) return durationPx;
-  if (isAdmin) {
-    return Math.max(durationPx, 28 + slot.seatCount * 26 + 20);
-  }
-  return Math.max(durationPx, 56);
+function slotTimelineHeightPx(slot: FlatSlot): number {
+  return durationToPx(slot.durationMinutes);
 }
 
 function formatTimelineAssigneeSummary(
@@ -1353,10 +1370,13 @@ function GuardTimeline({
                   {posSlots.map((slot) => (
                     <div
                       key={slot.slotId}
-                      className="guard-timeline-slot"
+                      className={`guard-timeline-slot${isTimelineShortSlot(slot) ? " is-short" : ""}`}
+                      tabIndex={
+                        isAdmin && usesTimelineCompactAssignees(slot) ? 0 : undefined
+                      }
                       style={{
                         top: `${cyclicToPx(slot.cyclicStart)}px`,
-                        height: `${slotTimelineHeightPx(slot, isAdmin)}px`,
+                        height: `${slotTimelineHeightPx(slot)}px`,
                       }}
                     >
                       <SlotCard
@@ -1611,7 +1631,9 @@ function GuardShiftRosterPanel({
         {views.map((view) => (
           <section key={view.windowKey} className="guard-shift-roster-block">
             <header className="guard-shift-roster-block-header">
-              <span className="mono font-semibold">{view.timeLabel}</span>
+              <span className="mono font-semibold time-ltr" dir="ltr">
+                {view.timeLabel}
+              </span>
               <span className="hint text-xs">
                 {view.assignedCount}/{view.seatCapacity} משובצים
               </span>
@@ -1667,7 +1689,9 @@ function HourlyAbsenceColumn({
             }}
             title={`${view.wallTimeLabel} · ${view.absentNames.length} מתוך ${view.rosterSize}`}
           >
-            <div className="guard-timeline-absence-hour-label">{view.wallTimeLabel}</div>
+            <div className="guard-timeline-absence-hour-label time-ltr" dir="ltr">
+              {view.wallTimeLabel}
+            </div>
             <div className="guard-timeline-absence-names">
               {view.absentNames.length > 0 ? (
                 view.absentNames.map((name) => (
@@ -1720,7 +1744,9 @@ function KitchenShiftAbsentBar({
       style={{ borderColor: "var(--color-line2)", background: "var(--color-bg)" }}
     >
       <div className="mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        <span className="text-xs font-medium">בחוץ · {timeLabel}</span>
+        <span className="text-xs font-medium">
+          בחוץ · <span className="time-ltr" dir="ltr">{timeLabel}</span>
+        </span>
         <span className="hint text-xs">
           {absentNames.length} מתוך {rosterSize} צוערים ({assignedCount} במשמרת)
         </span>
@@ -2179,38 +2205,43 @@ function SlotCard({
 
   if (variant === "timeline") {
     const compactAssignees = usesTimelineCompactAssignees(slot);
+    const shortSlot = isTimelineShortSlot(slot);
     const summary = compactAssignees ? formatTimelineAssigneeSummary(mission, slot) : null;
+    const showBurden = isGuardKind(slot.positionKind) && !shortSlot;
 
     return (
       <div className={`slot-card ${isMine ? "mine" : ""}`}>
-        <div className="slot-card-time">{slot.timeLabel}</div>
+        <div className="slot-card-time">
+          <TimeRange start={slot.startTime} end={slot.endTime} />
+        </div>
         <div className="slot-card-body">
-          {isGuardKind(slot.positionKind) && (
+          {showBurden && (
             <div className="text-[10px] text-ink3 mb-0.5" title={guardSlotBurdenTitle(slot, fairnessRules)}>
               {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
-          {compactAssignees && !isAdmin && summary ? (
+          {summary && (
             <div
               className={`timeline-assignee-summary text-xs leading-snug ${
-                summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"
-              }`}
+                isAdmin ? "is-admin-preview" : ""
+              } ${summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"}`}
               title={summary.title}
             >
               {summary.text}
             </div>
-          ) : (
+          )}
+          {isAdmin && compactAssignees ? (
+            <div className="timeline-slot-editor">
+              <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
+              {assigneeList}
+            </div>
+          ) : !compactAssignees ? (
             <>
-              {compactAssignees && isAdmin && summary && summary.text !== "— פנוי —" && (
-                <div className="text-[10px] text-ink2 mb-0.5" title={summary.title}>
-                  משובצים: {summary.text}
-                </div>
-              )}
               <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
               {assigneeList}
             </>
-          )}
-          {calendarEvent && (
+          ) : null}
+          {calendarEvent && !shortSlot && (
             <div className="mt-1">
               <AddToCalendarLink event={calendarEvent} className="btn-sm" />
             </div>
@@ -2224,7 +2255,9 @@ function SlotCard({
   return (
     <div className={`slot-card ${isMine ? "mine" : ""}`}>
       <div className="flex items-start justify-between gap-2">
-        <div className="mono text-sm font-medium">{slot.timeLabel}</div>
+        <div className="mono text-sm font-medium">
+          <TimeRange start={slot.startTime} end={slot.endTime} />
+        </div>
         {calendarEvent && <AddToCalendarLink event={calendarEvent} className="btn-sm" />}
       </div>
       {isGuardKind(slot.positionKind) && (

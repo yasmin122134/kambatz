@@ -152,6 +152,7 @@ export async function PUT(request: Request, { params }: Params) {
       scheduling_rules ?? defaultSchedulingForType(mission_type, starts_at),
     clientPositions,
     regenerateStructure,
+    missionDate: body.mission_date ?? existing.mission_date,
   });
 
   const rawAssignments = body.assignments ?? existing.assignments;

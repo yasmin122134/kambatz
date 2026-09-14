@@ -136,6 +136,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       startsAt: isoStart,
       endsAt: isoEnd,
       scheduling,
+      missionDate: window.missionDate,
     });
     if (type === "guards") {
       scheduling = {
@@ -179,6 +180,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           scheduling: rules,
           clientPositions: m.positions,
           regenerateStructure: m.mission_type === "guards",
+          missionDate: m.mission_date,
         })
       : m.mission_type === "guards" || m.mission_type === "base_work"
         ? resolveMissionPositions({
@@ -188,6 +190,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             scheduling: rules,
             clientPositions: m.positions,
             regenerateStructure: false,
+            missionDate: m.mission_date,
           })
         : m.positions;
 

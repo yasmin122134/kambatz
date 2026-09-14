@@ -585,3 +585,107 @@ describe("base work assignment", () => {
     expect(names.some((n) => n.startsWith("S2-"))).toBe(true);
   });
 });
+
+describe("hamagshiyot must not overlap other duties", () => {
+  const p = person("Alex", 1);
+
+  function eveningGuardBundle(startsAt: string, endsAt: string): MissionDay {
+    const positions = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      missionDate: startsAt.slice(0, 10),
+      boardStart: startsAt.includes("T20:") ? "20:00" : startsAt.slice(11, 16),
+    });
+    return missionDay("guard-1", "guards", positions, {}, startsAt, endsAt);
+  }
+
+  it("does not allow hamagshiyot in parallel with ABAS", () => {
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        { positionName: "עבודות בסיס", startTime: "18:30", endTime: "20:00" },
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects the same person on evening hamagshiyot and evening ABAS (20:00 board)", () => {
+    const guard = eveningGuardBundle(
+      "2026-08-21T20:00:00+03:00",
+      "2026-08-22T20:00:00+03:00",
+    );
+    const slots = flattenMissionSlots(guard);
+    const ham = slots.find((s) => s.positionName === "חמגשיות" && s.startTime === "18:00")!;
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "18:30")!;
+
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+
+    const assigned = {
+      ...guard,
+      assignments: {
+        ...guard.assignments,
+        [ham.slotId]: [p.name, "", "", "", ""],
+        [abas.slotId]: [p.name, ...Array(Math.max(0, abas.seatCount - 1)).fill("")],
+      },
+    };
+    expect(validateNoPersonOverlaps([assigned]).length).toBeGreaterThan(0);
+    expect(
+      collectRosterWarnings({ missions: [assigned], peopleByName: { Alex: p } }).some((m) =>
+        /Overlap|חפיפ/.test(m),
+      ),
+    ).toBe(true);
+  });
+
+  it("allows morning hamagshiyot before morning ABAS (no time overlap)", () => {
+    const guard = eveningGuardBundle(
+      "2026-08-21T20:00:00+03:00",
+      "2026-08-22T20:00:00+03:00",
+    );
+    const slots = flattenMissionSlots(guard);
+    const ham = slots.find((s) => s.positionName === "חמגשיות" && s.startTime === "07:00")!;
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+  });
+
+  it("rejects hamagshiyot overlapping a guard post", () => {
+    const guard = eveningGuardBundle(
+      "2026-08-21T09:00:00+03:00",
+      "2026-08-22T09:00:00+03:00",
+    );
+    const slots = flattenMissionSlots(guard);
+    const ham = slots.find((s) => s.positionName === "חמגשיות" && s.startTime === "18:00")!;
+    const post = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < ham.endAtMs &&
+        s.endAtMs > ham.startAtMs,
+    );
+    expect(post).toBeTruthy();
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
+    expect(fitsPerson(p, post!, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+  });
+
+  it("rejects evening hamagshiyot overlapping the 18:30 patrol", () => {
+    const guard = eveningGuardBundle(
+      "2026-08-21T09:00:00+03:00",
+      "2026-08-22T09:00:00+03:00",
+    );
+    const slots = flattenMissionSlots(guard);
+    const ham = slots.find((s) => s.positionName === "חמגשיות" && s.startTime === "18:00")!;
+    const patrol = slots.find(
+      (s) => s.positionKind === "patrol" && s.startTime === "18:30",
+    )!;
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
+    expect(fitsPerson(p, patrol, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+  });
+});

@@ -5,6 +5,7 @@ import {
   normalizeTimeLabel,
   parseIsoMs,
   parseTimeMinutes,
+  resolveCanonicalSlotInterval,
   slotDurationMinutes,
   type TimeInterval,
 } from "@/lib/time-interval";
@@ -114,6 +115,21 @@ export function patrolWallClockInterval(
   const endMs = startMs + durMin * 60_000;
   if (endMs <= startMs) return null;
   return { startMs, endMs };
+}
+
+/** פטרולים — שעון קיר על mission_date (כמו עב״ס וחמגשיות). */
+export function resolvePatrolSlotInterval(
+  missionDate: string,
+  missionStartsAt: string,
+  missionEndsAt: string,
+  slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
+): TimeInterval | null {
+  const fixed = patrolWallClockInterval(missionDate, slot.start_time, slot.end_time);
+  if (fixed) return fixed;
+  return resolveCanonicalSlotInterval(
+    { starts_at: missionStartsAt, ends_at: missionEndsAt },
+    slot,
+  );
 }
 
 function materializePatrolSlot(

@@ -68,6 +68,7 @@ export async function createGuardDayBundle(
     startsAt: guardStartsAt,
     endsAt: guardEndsAt,
     scheduling: preliminary,
+    missionDate: mission_date,
   });
   const scheduling = {
     ...guardsScheduling(guardStartsAt, positions, input.scheduling),

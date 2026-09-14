@@ -73,6 +73,7 @@ export async function POST(request: Request) {
     scheduling: scheduling_rules,
     clientPositions,
     regenerateStructure,
+    missionDate: mission_date,
   });
 
   try {

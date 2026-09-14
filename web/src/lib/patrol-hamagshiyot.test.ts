@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
-import { DEFAULT_HAMAGSHIYOT_SHIFTS, DEFAULT_HAMAGSHIYOT_SEATS } from "@/lib/hamagshiyot-template";
+import { DEFAULT_HAMAGSHIYOT_SHIFTS, DEFAULT_HAMAGSHIYOT_SEATS, hamagshiyotWallClockInterval } from "@/lib/hamagshiyot-template";
 import { DEFAULT_PATROL_TOURS, patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 import {
@@ -102,6 +102,41 @@ describe("patrol and hamagshiyot guard day positions", () => {
     expect(patrolSlots.every((s) => s.slotLabel)).toBe(true);
     expect(hamSlots).toHaveLength(3);
     expect(hamSlots[0].startTime).toBe("07:00");
+    const morning = hamagshiyotWallClockInterval("2026-01-02", "07:00", "08:00")!;
+    expect(hamSlots[0].startAtMs).toBe(morning.startMs);
+    expect(hamSlots[0].endAtMs).toBe(morning.endMs);
+  });
+
+  it("anchors evening hamagshiyot to mission_date so it overlaps evening ABAS", () => {
+    const positions = buildGuardDayPositions({
+      missionStartsAt: "2026-08-21T20:00:00+03:00",
+      missionEndsAt: "2026-08-22T20:00:00+03:00",
+      missionDate: "2026-08-21",
+    });
+    const mission: MissionDay = {
+      id: "g1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: "2026-08-21T20:00:00+03:00",
+      ends_at: "2026-08-22T20:00:00+03:00",
+      status: "draft",
+      positions,
+      assignments: {},
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, board_start: "20:00" },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const flat = flattenMissionSlots(mission);
+    const hamEvening = flat.find(
+      (s) => s.positionName === "חמגשיות" && s.startTime === "18:00",
+    )!;
+    const abasEvening = flat.find(
+      (s) => s.missionType === "base_work" && s.startTime === "18:30",
+    )!;
+    expect(hamEvening.endAtMs).toBeGreaterThan(abasEvening.startAtMs);
+    expect(hamEvening.startAtMs).toBeLessThan(abasEvening.endAtMs);
   });
 
   it("does not flag wall-clock slots as outside the guard mission interval", () => {
