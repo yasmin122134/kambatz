@@ -30,7 +30,7 @@ import {
   DEFAULT_MISSION_SCHEDULING_RULES,
 } from "@/lib/types";
 
-import { fmtMissionTimeLabel, normalizeTimeLabel, sameMissionInstant } from "@/lib/time-interval";
+import { fmtMissionTimeLabel, normalizeTimeLabel, parseIsoMs, sameMissionInstant } from "@/lib/time-interval";
 
 export function boardStartFromMissionStart(startsAt: string): string {
   const ms = parseIsoMs(startsAt);
