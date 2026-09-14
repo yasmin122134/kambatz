@@ -47,6 +47,7 @@ import {
   type GuardShiftRosterView,
 } from "@/lib/guard-shift-roster";
 import { hourlyAbsenceViews } from "@/lib/hourly-absence";
+import { downloadMissionsExcel } from "@/lib/mission-export";
 import type { Person } from "@/lib/types";
 
 type Props = {
@@ -632,6 +633,20 @@ export function BoardClient({
         <div className="flex gap-2 flex-wrap">
           <button type="button" className="btn-sm" onClick={loadMissions}>
             רענון
+          </button>
+          <button
+            type="button"
+            className="btn-sm"
+            onClick={() => {
+              try {
+                downloadMissionsExcel(missions, activeRosterNames);
+              } catch {
+                setMsg("שגיאה בייצוא לאקסל");
+              }
+            }}
+            title="קובץ אקסל עם כל ימי השמירות בלוח — גלגולים, פירוט ולפי צוער"
+          >
+            הורדה לאקסל
           </button>
           <button
             type="button"
