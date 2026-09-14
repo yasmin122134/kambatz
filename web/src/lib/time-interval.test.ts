@@ -2,9 +2,23 @@ import { describe, expect, it } from "vitest";
 import { baseWorkWallClockInterval } from "@/lib/base-work-template";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
 import { buildGuardDayPositions, carmelSlotFromMission } from "@/lib/guard-day-template";
-import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval, sameMissionInstant } from "@/lib/time-interval";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
+
+describe("sameMissionInstant", () => {
+  it("treats +03:00 and UTC Z as the same minute", () => {
+    expect(sameMissionInstant("2026-08-21T20:00:00+03:00", "2026-08-21T17:00:00.000Z")).toBe(
+      true,
+    );
+  });
+
+  it("is false when the minute actually changed", () => {
+    expect(sameMissionInstant("2026-08-21T20:00:00+03:00", "2026-08-21T21:00:00+03:00")).toBe(
+      false,
+    );
+  });
+});
 
 describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
   const startsAt = "2026-08-21T09:00:00+03:00";

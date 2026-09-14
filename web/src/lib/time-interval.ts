@@ -14,6 +14,16 @@ export function parseIsoMs(iso: string | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
+/** Same wall minute — ignores timezone string format (`+03:00` vs `.000Z`). */
+export function sameMissionInstant(a?: string | null, b?: string | null): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const am = parseIsoMs(a);
+  const bm = parseIsoMs(b);
+  if (am === null || bm === null) return a === b;
+  return Math.floor(am / 60_000) === Math.floor(bm / 60_000);
+}
+
 export function normalizeTimeLabel(s: string): string {
   const m = parseTimeMinutes(s);
   if (m === null) return String(s || "").trim();

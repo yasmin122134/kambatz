@@ -564,6 +564,8 @@ function guardSlotsForPosition(pos: MissionPosition, ctx: GuardDayContext): Miss
     missionEndMs: ctx.missionEndMs,
     nominalShiftDurationMin: ctx.shiftMin,
     staffingProfile: profile,
+    /** Allow the 17:00–18:00 remainder instead of peeling the previous 4h window. */
+    minShiftMin: pos.name.includes("רכב אחורי") ? 60 : undefined,
   });
 
   return generatedSlotsToMissionSlots(pos.id, generated, ctx.board);
@@ -701,7 +703,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
       break;
   }
   if (pos.name.includes("רכב אחורי")) {
-    return "בדיוק 1 שומר 06:00–18:00, בדיוק 2 בכל שאר השעות. חלונות משמרת נקבעים לפי פרופיל הכיסוי.";
+    return "אותה רשת ~4 שעות כמו שאר העמדות. 1 שומר ביום, 2 בלילה מ־18:00; משמרת 17:00–18:00 משלימה את פערי האיוש.";
   }
   if (pos.name.includes("רכב קדמי")) {
     return "2 שומרים בכל משמרת — משמרות ~4 שעות מעוגנות לתחילת יום המשימה.";

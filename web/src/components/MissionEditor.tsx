@@ -26,6 +26,7 @@ import {
   missionTemplateComplete,
   resolveMissionPositions,
   generateGuardMissionStructure,
+  missionPositionsNeedTemplateFill,
   STANDARD_BASE_WORK_SUMMARY,
   STANDARD_GUARD_DAY_SUMMARY,
   STANDARD_HAMAGSHIYOT_SUMMARY,
@@ -36,6 +37,7 @@ import {
 } from "@/lib/mission-templates";
 import { syncBaseWorkSeatCounts } from "@/lib/base-work-template";
 import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-utils";
+import { sameMissionInstant, normalizeTimeLabel } from "@/lib/time-interval";
 import { KitchenOutListsEditor } from "@/components/KitchenOutListsEditor";
 import { MissionFairnessPanel } from "@/components/MissionFairnessPanel";
 
@@ -168,7 +170,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     const needsTemplateFix =
       m.status === "draft" &&
       !templateFixDone.current &&
-      !missionTemplateComplete(m.mission_type, m.positions);
+      missionPositionsNeedTemplateFill(m.mission_type, m.positions);
     const positions = needsTemplateFix
       ? resolveMissionPositions({
           missionType: m.mission_type,
@@ -276,31 +278,20 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
 
     const isoStart = new Date(startsAt).toISOString();
     const isoEnd = new Date(endsAt).toISOString();
-    const scheduling_rules =
-      missionType === "guards"
-        ? {
-            ...schedulingRules,
-            board_start: effectiveBoardStartLabel({
-              starts_at: isoStart,
-              positions,
-              scheduling_rules: schedulingRules,
-            }),
-          }
-        : schedulingRules;
+    const scheduling_rules = schedulingRules;
 
     const missionTimesChanged =
       missionType === "guards" &&
       loadedTimesRef.current != null &&
-      (loadedTimesRef.current.startsAt !== isoStart ||
-        loadedTimesRef.current.endsAt !== isoEnd);
+      (!sameMissionInstant(loadedTimesRef.current.startsAt, isoStart) ||
+        !sameMissionInstant(loadedTimesRef.current.endsAt, isoEnd));
 
     const schedulingChanged =
       missionType === "guards" &&
       loadedSchedulingRef.current != null &&
       (loadedSchedulingRef.current.shift_hours !== (scheduling_rules.shift_hours ?? 4) ||
-        loadedSchedulingRef.current.board_start !== (scheduling_rules.board_start ?? "20:00") ||
-        loadedSchedulingRef.current.base_work_seats !==
-          clampBaseWorkSeatsPerShift(scheduling_rules.base_work?.seats_per_shift));
+        normalizeTimeLabel(loadedSchedulingRef.current.board_start) !==
+          normalizeTimeLabel(scheduling_rules.board_start ?? "20:00"));
 
     const regenerateOnSave =
       missionType === "guards" &&

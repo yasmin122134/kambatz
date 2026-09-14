@@ -81,9 +81,14 @@ export function constantStaffingSegments(
   return segments;
 }
 
-/** Built-in profiles for standard guard positions (summer). */
+/**
+ * Summer rear gate: 1 seat by day, 2 at night.
+ * 17:00–18:00 is its own hour so the 4-hour grid (…13:00–17:00) stays aligned
+ * with other posts; 18:00 starts the 2-seat night block.
+ */
 export const REAR_GATE_STAFFING_SUMMER: StaffingProfile = [
-  { startTime: "06:00", endTime: "18:00", seats: 1 },
+  { startTime: "06:00", endTime: "17:00", seats: 1 },
+  { startTime: "17:00", endTime: "18:00", seats: 1 },
   { startTime: "18:00", endTime: "06:00", seats: 2 },
 ];
 

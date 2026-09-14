@@ -109,6 +109,7 @@ describe("rear gate slot generation", () => {
         missionEndMs: interval.endMs,
         nominalShiftDurationMin: 240,
         staffingProfile: REAR_GATE_STAFFING_SUMMER,
+        minShiftMin: 60,
       });
       expect(slots.length).toBeGreaterThan(0);
       for (const row of slotSeatsAtMid(slots, REAR_GATE_STAFFING_SUMMER)) {
@@ -160,6 +161,30 @@ describe("rear gate slot generation", () => {
     expect(endingAt18!.endMs - endingAt18!.startMs).toBeGreaterThan(0);
   });
 
+  it("09:00 mission keeps 13:00–17:00 like other posts and adds 17:00–18:00", () => {
+    const { startsAt, endsAt } = missionWindow("2026-08-21", 9);
+    const positions = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      shiftHours: 4,
+    });
+    const petal = positions.find((p) => p.name === "פטל")!;
+    const rear = positions.find((p) => p.name.includes("רכב אחורי"))!;
+    const petalWindows = petal.slots.map((s) => `${s.start_time}–${s.end_time}`);
+    const rearWindows = rear.slots.map((s) => `${s.start_time}–${s.end_time}`);
+    expect(petalWindows).toContain("13:00–17:00");
+    expect(petalWindows).toContain("17:00–21:00");
+    expect(rearWindows).toContain("13:00–17:00");
+    expect(rearWindows).toContain("17:00–18:00");
+    expect(rearWindows).toContain("18:00–21:00");
+    expect(rearWindows).not.toContain("13:00–16:00");
+    expect(rearWindows).not.toContain("16:00–18:00");
+    const filler = rear.slots.find((s) => s.start_time === "17:00" && s.end_time === "18:00");
+    expect(filler?.seat_count).toBe(1);
+    const night = rear.slots.find((s) => s.start_time === "18:00" && s.end_time === "21:00");
+    expect(night?.seat_count).toBe(2);
+  });
+
   it("standard 20:00 mission produces expected rear-gate slots", () => {
     const { startsAt, endsAt } = missionWindow("2026-08-21", 20);
     const interval = missionInterval(startsAt, endsAt)!;
@@ -173,6 +198,7 @@ describe("rear gate slot generation", () => {
       (s) => `${fmtTimeLabel(s.startMs)}–${fmtTimeLabel(s.endMs)}=${s.requiredSeats}`,
     );
     expect(labels[0]).toBe("20:00–00:00=2");
+    expect(labels).toContain("17:00–18:00=1");
     expect(labels.some((l) => l.startsWith("06:00") && l.endsWith("=1"))).toBe(true);
     expect(labels.some((l) => l.startsWith("18:00") && l.endsWith("=2"))).toBe(true);
     expect(slots.length).toBeGreaterThanOrEqual(6);

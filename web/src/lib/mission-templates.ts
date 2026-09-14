@@ -30,7 +30,7 @@ import {
   DEFAULT_MISSION_SCHEDULING_RULES,
 } from "@/lib/types";
 
-import { fmtMissionTimeLabel, parseIsoMs } from "@/lib/time-interval";
+import { fmtMissionTimeLabel, normalizeTimeLabel, sameMissionInstant } from "@/lib/time-interval";
 
 export function boardStartFromMissionStart(startsAt: string): string {
   const ms = parseIsoMs(startsAt);
@@ -208,13 +208,18 @@ export function shouldRegenerateGuardStructure(
   explicitFlag = false,
 ): boolean {
   if (explicitFlag) return true;
-  if (existing.starts_at !== next.starts_at || existing.ends_at !== next.ends_at) {
+  if (
+    !sameMissionInstant(existing.starts_at, next.starts_at) ||
+    !sameMissionInstant(existing.ends_at, next.ends_at)
+  ) {
     return true;
   }
   const a = existing.scheduling_rules;
   const b = next.scheduling_rules;
   if ((a?.shift_hours ?? 4) !== (b?.shift_hours ?? 4)) return true;
-  if (a?.board_start !== b?.board_start) return true;
+  const boardA = normalizeTimeLabel(a?.board_start || DEFAULT_MISSION_SCHEDULING_RULES.board_start);
+  const boardB = normalizeTimeLabel(b?.board_start || DEFAULT_MISSION_SCHEDULING_RULES.board_start);
+  if (boardA !== boardB) return true;
   return false;
 }
 
@@ -274,6 +279,44 @@ function guardSlotIdsUnique(positions: MissionPosition[]): boolean {
   return true;
 }
 
+const GUARD_DAY_REQUIRED_POSITIONS = [
+  "כרמל א׳ (כוננות)",
+  "כרמל ב׳ (כוננות)",
+  "ש״ג רכב אחורי",
+  "ש״ג רכב קדמי",
+  "פטל",
+  "תצפיתן",
+  "ש״ג רגלי",
+  "ימ״ח",
+  "נשקייה",
+  "בונקר",
+  "כוח עתודה",
+  "קצין תורן",
+  "עבודות בסיס",
+  "פטרולים",
+  "חמגשיות",
+] as const;
+
+/** Required posts exist — does not require standard slot hours. */
+export function guardDayHasRequiredPositions(positions: MissionPosition[]): boolean {
+  if (!positions?.length) return false;
+  const names = new Set(positions.map((p) => p.name));
+  return (
+    positions.length >= GUARD_DAY_REQUIRED_POSITIONS.length &&
+    GUARD_DAY_REQUIRED_POSITIONS.every((n) => names.has(n))
+  );
+}
+
+/** True when a draft is missing the standard posts and should load the template. */
+export function missionPositionsNeedTemplateFill(
+  missionType: MissionType,
+  positions: MissionPosition[],
+): boolean {
+  if (!positions?.length) return true;
+  if (missionType === "guards") return !guardDayHasRequiredPositions(positions);
+  return !missionTemplateComplete(missionType, positions);
+}
+
 export function missionTemplateComplete(
   missionType: MissionType,
   positions: MissionPosition[],
@@ -281,32 +324,13 @@ export function missionTemplateComplete(
 ): boolean {
   if (!positions?.length) return false;
   if (missionType === "guards") {
-    const required = [
-      "כרמל א׳ (כוננות)",
-      "כרמל ב׳ (כוננות)",
-      "ש״ג רכב אחורי",
-      "ש״ג רכב קדמי",
-      "פטל",
-      "תצפיתן",
-      "ש״ג רגלי",
-      "ימ״ח",
-      "נשקייה",
-      "בונקר",
-      "כוח עתודה",
-      "קצין תורן",
-      "עבודות בסיס",
-      "פטרולים",
-      "חמגשיות",
-    ];
-    const names = new Set(positions.map((p) => p.name));
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
     const foot = positions.find((p) => p.name.includes("רגלי"));
     const officer = positions.find((p) => p.kind === "officer_duty");
     const startsAt = opts?.startsAt ?? "2026-01-01T20:00:00";
     const endsAt = opts?.endsAt ?? "2026-01-02T20:00:00";
     return (
-      positions.length >= 15 &&
-      required.every((n) => names.has(n)) &&
+      guardDayHasRequiredPositions(positions) &&
       guardSlotIdsUnique(positions) &&
       (!rear || rearVehicleSlotsValid(rear.slots, "06:00", "18:00", startsAt, endsAt)) &&
       (!foot || footPatrolSlotsValid(foot.slots, "06:00", "19:00", startsAt, endsAt)) &&
@@ -343,7 +367,7 @@ export const STANDARD_GUARD_DAY_SUMMARY = [
   "משמרת פתיחה/סגירה קצרה — מסנכרנת לרשת 08:00 (למשל 09:00–10:00, 06:00–08:00, 08:00–09:00)",
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",
-  "ש״ג רכב אחורי — בדיוק 1 ב־06–18, בדיוק 2 בשאר השעות · חילוף מסונכרן",
+  "ש״ג רכב אחורי — אותה רשת 4 שעות; 1 ביום / 2 מ־18:00 · משמרת 17:00–18:00 משלימה איוש",
   "ש״ג רכב קדמי — 2 תמיד · ש״ג רגלי — בדיוק 1 ב־06–19, 0 בשאר השעות",
   "פטל, תצפיתן, ימ״ח, נשקייה, בונקר — 1 תמיד",
   "כוח עתודה — 5 תמיד · קצין תורן — רק רני פלג / יסמין חדד, שתי משמרות (חצי יום כל אחת)",
