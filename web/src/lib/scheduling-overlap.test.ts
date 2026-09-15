@@ -173,7 +173,7 @@ describe("overlap rejection across mission types", () => {
     ).toBe(false);
   });
 
-  it("Test B2 — Reserve Force vs Base Work overlap is allowed (parallel)", () => {
+  it("Test B2 — Reserve Force vs Base Work overlap is invalid", () => {
     const guardMission = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const reserveId = reserveForceSlot(guardMission).slotId;
     const guard = withCustomSlotTimes(guardMission, reserveId, "08:00", "12:00");
@@ -198,13 +198,13 @@ describe("overlap rejection across mission types", () => {
         { positionName: "כוח עתודה" },
         { positionName: "עבודות בסיס", startTime: "09:00", endTime: "13:00" },
       ),
-    ).toBe(true);
+    ).toBe(false);
 
     const tracker = trackerWith([{ slot: reserveSlot, missionId: "g1", missionType: "guards" }]);
-    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+    expect(fitsPerson(p, target, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
   });
 
-  it("guard bundle — Reserve Force + embedded ABAS parallel does not warn", () => {
+  it("guard bundle — Reserve Force + embedded ABAS overlap warns", () => {
     const guard = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
     const slots = flattenMissionSlots(guard);
     const reserve = slots.find((s) => s.positionName.includes("עתודה"))!;
@@ -220,8 +220,8 @@ describe("overlap rejection across mission types", () => {
     const overlapWarnings = findAssignmentConflicts(mission, people).filter((m) =>
       /חפיפה/.test(m),
     );
-    expect(overlapWarnings).toHaveLength(0);
-    expect(validateNoPersonOverlaps([mission])).toHaveLength(0);
+    expect(overlapWarnings.length).toBeGreaterThan(0);
+    expect(validateNoPersonOverlaps([mission]).length).toBeGreaterThan(0);
   });
 
   it("Test B — Carmel B vs Base Work overlap is allowed (parallel)", () => {

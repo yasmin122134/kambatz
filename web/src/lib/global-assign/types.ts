@@ -120,4 +120,5 @@ export type GlobalAssignOutput = {
   warnings: string[];
   objectiveSummary: SmartAssignObjectiveSummary;
   carmelSnapshots: CarmelFeasibilitySnapshot[];
+  abasReport?: string;
 };

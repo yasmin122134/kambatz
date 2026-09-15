@@ -36,7 +36,13 @@ import {
   isPatrolShiftSlot,
   resolvePatrolSlotInterval,
 } from "@/lib/patrol-day-template";
-import { resolveCanonicalSlotInterval, fmtMissionTimeLabel, parseIsoMs, parseTimeMinutes } from "@/lib/time-interval";
+import {
+  fmtMissionTimeLabel,
+  localMissionMidnightMs,
+  parseIsoMs,
+  parseTimeMinutes,
+  resolveCanonicalSlotInterval,
+} from "@/lib/time-interval";
 
 export type FlatSlot = {
   slotId: string;
@@ -334,9 +340,9 @@ export function flattenMissionSlots(
 ): FlatSlot[] {
   const rules = normalizeSchedulingRules(mission.scheduling_rules);
   const t0 = boardStart ?? effectiveBoardStartMin(mission);
-  const missionDateMidnight = new Date(mission.starts_at);
-  missionDateMidnight.setHours(0, 0, 0, 0);
-  const missionDateMidnightMs = missionDateMidnight.getTime();
+  const missionStartMs = parseIsoMs(mission.starts_at);
+  const missionDateMidnightMs =
+    missionStartMs !== null ? localMissionMidnightMs(missionStartMs) : 0;
 
   const out: FlatSlot[] = [];
   let kitchenIdx = 0;
@@ -411,7 +417,7 @@ export function flattenMissionSlots(
         seatCount: slot.seat_count,
         assignees,
         sortKey: startAtMs,
-        durationMinutes: dur,
+        durationMinutes: Math.max(1, Math.round((endAtMs - startAtMs) / 60_000) || dur),
         cyclicStart: cyclicPos(startMin, t0),
         wallStartMin: startMin,
         calendarDayOffset,

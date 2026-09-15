@@ -20,6 +20,7 @@ import {
 } from "@/lib/scheduling-engine";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
+import { validateAbasRosterIndependent } from "@/lib/abas-validator";
 import {
   applyAssignmentsOnly,
   assertMissionStructureUnchanged,
@@ -348,6 +349,19 @@ async function smartAssignScope(input: {
     }),
     ...validateNoPersonOverlaps(draftMissions).map((msg) => `⚠ ${msg}`),
   ];
+  for (const mission of draftMissions) {
+    const original = input.scopeMissions.find((m) => m.id === mission.id);
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+    validationErrors.push(
+      ...validateAbasRosterIndependent({
+        mission,
+        people: input.people,
+        minGuardAbasRestMin: scheduling.duty_guard_gap_minutes ?? 30,
+        minGuardGuardRestMin: 8,
+        originalAssignments: input.keepExisting ? original?.assignments : undefined,
+      }),
+    );
+  }
 
   let status = output.status;
   if (validationErrors.length) {

@@ -221,41 +221,18 @@ export function mergeAdjacentGuardSlots(
   return out;
 }
 
-/** קצין תורן — שתי משמרות בלבד, חצי מחזור יום השמירות כל אחת */
-function officerDutySlots(missionStartMs: number, missionEndMs: number): MissionSlot[] {
-  const span = missionEndMs - missionStartMs;
-  if (span <= 0) return [];
-  const mid = missionStartMs + Math.floor(span / 2);
-  return [
-    {
-      id: uid(),
-      start_time: fmtMissionTimeLabel(missionStartMs),
-      end_time: fmtMissionTimeLabel(mid),
-      seat_count: 1,
-      starts_at: new Date(missionStartMs).toISOString(),
-      ends_at: new Date(mid).toISOString(),
-    },
-    {
-      id: uid(),
-      start_time: fmtMissionTimeLabel(mid),
-      end_time: fmtMissionTimeLabel(missionEndMs),
-      seat_count: 1,
-      starts_at: new Date(mid).toISOString(),
-      ends_at: new Date(missionEndMs).toISOString(),
-    },
-  ];
+/** קצין תורן — משמרת אחת לאורך כל יום המשימה, שני מושבים (רני / יסמין) */
+export const OFFICER_DUTY_SEATS = 2;
+
+function officerDutySlots(
+  missionStartsAt: string,
+  missionEndsAt: string,
+  boardStart?: string,
+): MissionSlot[] {
+  return [carmelSlotFromMission(missionStartsAt, missionEndsAt, boardStart, OFFICER_DUTY_SEATS)];
 }
 
-function sortOfficerDutySlots(slots: MissionSlot[]): MissionSlot[] {
-  return [...slots].sort((a, b) => {
-    const as = parseIsoMs(a.starts_at);
-    const bs = parseIsoMs(b.starts_at);
-    if (as !== null && bs !== null) return as - bs;
-    return a.start_time.localeCompare(b.start_time);
-  });
-}
-
-/** האם מבנה קצין תורן תקין — בדיוק 2 משמרות, כל אחת חצי מחזור המשימה */
+/** האם מבנה קצין תורן תקין — משמרת אחת לכל יום המשימה, שני מושבים */
 export function officerDutySlotsValid(
   slots: MissionSlot[],
   missionStartsAt: string,
@@ -263,27 +240,22 @@ export function officerDutySlotsValid(
 ): boolean {
   const iv = missionInterval(missionStartsAt, missionEndsAt);
   if (!iv) return false;
-  if (slots.length !== 2 || !slots.every((s) => s.seat_count >= 1)) return false;
+  if (slots.length !== 1 || slots[0].seat_count !== OFFICER_DUTY_SEATS) return false;
 
-  const expected = officerDutySlots(iv.startMs, iv.endMs);
-  const sorted = sortOfficerDutySlots(slots);
-  const sortedExpected = sortOfficerDutySlots(expected);
-
-  for (let i = 0; i < 2; i++) {
-    const got = sorted[i];
-    const exp = sortedExpected[i];
-    const gotStart = parseIsoMs(got.starts_at);
-    const gotEnd = parseIsoMs(got.ends_at);
-    const expStart = parseIsoMs(exp.starts_at);
-    const expEnd = parseIsoMs(exp.ends_at);
-    if (gotStart !== null && gotEnd !== null && expStart !== null && expEnd !== null) {
-      if (gotStart !== expStart || gotEnd !== expEnd) return false;
-      continue;
-    }
-    if (normalizeTimeLabel(got.start_time) !== normalizeTimeLabel(exp.start_time)) return false;
-    if (normalizeTimeLabel(got.end_time) !== normalizeTimeLabel(exp.end_time)) return false;
+  const expected = officerDutySlots(missionStartsAt, missionEndsAt);
+  const got = slots[0];
+  const exp = expected[0];
+  const gotStart = parseIsoMs(got.starts_at);
+  const gotEnd = parseIsoMs(got.ends_at);
+  const expStart = parseIsoMs(exp.starts_at);
+  const expEnd = parseIsoMs(exp.ends_at);
+  if (gotStart !== null && gotEnd !== null && expStart !== null && expEnd !== null) {
+    return gotStart === expStart && gotEnd === expEnd;
   }
-  return true;
+  return (
+    normalizeTimeLabel(got.start_time) === normalizeTimeLabel(exp.start_time) &&
+    normalizeTimeLabel(got.end_time) === normalizeTimeLabel(exp.end_time)
+  );
 }
 
 /**
@@ -490,11 +462,9 @@ function generatedSlotsToMissionSlots(
 }
 
 function mergeOfficerDutySlotsByIndex(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
-  const sortedPrev = sortOfficerDutySlots(prev);
-  return sortOfficerDutySlots(next).map((slot, i) => ({
-    ...slot,
-    id: sortedPrev[i]?.id ?? slot.id,
-  }));
+  const nextSlot = next[0];
+  if (!nextSlot) return [];
+  return [{ ...nextSlot, id: prev[0]?.id ?? nextSlot.id }];
 }
 
 function mergeSlotsPreservingIds(prev: MissionSlot[], next: MissionSlot[]): MissionSlot[] {
@@ -553,7 +523,7 @@ function staffingProfileForPosition(
 
 function guardSlotsForPosition(pos: MissionPosition, ctx: GuardDayContext): MissionSlot[] | null {
   if (pos.kind === "officer_duty") {
-    return officerDutySlots(ctx.missionStartMs, ctx.missionEndMs);
+    return officerDutySlots(ctx.missionStartsAt, ctx.missionEndsAt, ctx.board);
   }
 
   const profile = staffingProfileForPosition(pos, ctx);
@@ -706,7 +676,7 @@ export function guardPositionHint(pos: Pick<MissionPosition, "name" | "kind">): 
     case "standby_carmel_b":
       return "3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופו. מותר במקביל לעב״ס (רס״ר) ולמטבח.";
     case "officer_duty":
-      return "קצין תורן אחד — רק רני פלג או יסמין חדד. שתי משמרות שמחלקות את יום השמירות לשניים.";
+      return "שני קציני תורן לאורך כל יום המשימה — רני פלג ויסמין חדד, באותה משמרת (כמו כרמל א׳ במבנה).";
     case "patrol":
       return "סיורים לפי הפקודה — רק קצין תורן (רני פלג / יסמין חדד). 1 נק׳ שמירה לסיור; חוסם זמן (לא חופף משמרות אחרות).";
     case "duty":

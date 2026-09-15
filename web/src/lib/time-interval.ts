@@ -243,7 +243,7 @@ export function resolveSlotAbsoluteInterval(
   const missionStartLabel = fmtMissionTimeLabel(missionStartMs);
   const missionEndLabel = fmtMissionTimeLabel(missionEndMs);
 
-  // Day shift anchored at mission start (officer duty first half, etc.).
+  // Day shift anchored at mission start (same wall start, different end).
   if (startLabel === missionStartLabel && endLabel !== missionEndLabel) {
     const candidateEnd = missionStartMs + durMin * 60_000;
     if (candidateEnd <= missionEndMs) {

@@ -1,3 +1,8 @@
+import {
+  formatAbasDiagnostics,
+  solveAbasShifts,
+  type AbasSolveResult,
+} from "@/lib/abas-csp";
 import { calculatePersonBurden } from "@/lib/guard-burden";
 import {
   compareByFairnessThenBurden,
@@ -326,6 +331,66 @@ function countCarmelCandidates(
     : 0;
 }
 
+function remainingBaseworkUnits(
+  units: AssignmentUnit[],
+  state: SolverState,
+): Extract<AssignmentUnit, { kind: "basework" }>[] {
+  return units.filter(
+    (u): u is Extract<AssignmentUnit, { kind: "basework" }> =>
+      u.kind === "basework" && !state.assignedUnitIds.has(u.id),
+  );
+}
+
+function assignRemainingAbas(input: {
+  units: AssignmentUnit[];
+  state: SolverState;
+  people: Person[];
+  issues: Issue[];
+  rules: FairnessRules;
+  meanPrior: number;
+}): AbasSolveResult | null {
+  const pending = remainingBaseworkUnits(input.units, input.state);
+  if (!pending.length) return null;
+  const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const scheduling = schedulingFor(pending[0].mission);
+  const result = solveAbasShifts({
+    shifts: pending.map((unit) => {
+      const row = input.state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
+      const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+      const fixed = [...unit.fixedNames];
+      for (const name of taken) if (!fixed.includes(name)) fixed.push(name);
+      return {
+        id: unit.id,
+        mission: unit.mission,
+        slot: unit.slot,
+        seatIndices: unit.seatIndices,
+        fixedNames: fixed,
+        required: unit.slot.seatCount,
+      };
+    }),
+    people: input.people,
+    tracker: input.state.tracker,
+    issues: input.issues,
+    scheduling,
+    rules: input.rules,
+    meanPrior: input.meanPrior,
+    peopleByName,
+  });
+
+  for (const unit of pending) {
+    const names = result.namesByShiftId.get(unit.id) || [];
+    const row = input.state.assignmentsByMission.get(unit.mission.id)?.[unit.slot.slotId] || [];
+    const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
+    const fresh = names.filter((n) => !taken.includes(n));
+    if (fresh.length) {
+      applyChoice(unit, { kind: "basework", names: fresh }, input.state, input.rules);
+    } else {
+      input.state.assignedUnitIds.add(unit.id);
+    }
+  }
+  return result;
+}
+
 function countBaseworkCandidates(
   unit: Extract<AssignmentUnit, { kind: "basework" }>,
   state: SolverState,
@@ -352,40 +417,7 @@ function countBaseworkCandidates(
     missionType: unit.mission.mission_type,
     taken,
   });
-  return result.diagnostics.assigned > taken.length ? 1 : 0;
-}
-
-function computeBaseworkNames(
-  unit: Extract<AssignmentUnit, { kind: "basework" }>,
-  state: SolverState,
-  people: Person[],
-  issues: Issue[],
-  rules: FairnessRules,
-  meanPrior: number,
-): string[] {
-  const scheduling = schedulingFor(unit.mission);
-  const seats = state.assignmentsByMission.get(unit.mission.id)!;
-  const row = seats[unit.slot.slotId] || [];
-  const taken = unit.seatIndices.map((i) => row[i]).filter(Boolean);
-  const probe = cloneTracker(state.tracker);
-  const result = assignBaseWorkShift({
-    people,
-    slot: unit.slot,
-    shiftIndex: unit.shiftIndex,
-    tracker: probe,
-    issues,
-    scheduling,
-    rules,
-    meanPrior,
-    missionId: unit.mission.id,
-    missionType: unit.mission.mission_type,
-    taken,
-  });
-  const roster = [...taken];
-  for (const name of result.names) {
-    if (!roster.includes(name)) roster.push(name);
-  }
-  return roster.filter((n) => !taken.includes(n));
+  return Math.max(0, result.diagnostics.assigned - taken.length);
 }
 
 function countKitchenCandidates(
@@ -1046,7 +1078,7 @@ function revertChoice(
   }
 }
 
-/** ממלא קצין תורן — תמיד רני/יסמין, משמרת אחת לכל אחד כשאפשר */
+/** ממלא קצין תורן — רני ויסמין יחד במשמרת מלאה לאורך כל היום */
 function dutyOfficersFromPeople(people: Person[]): Person[] {
   const byName = Object.fromEntries(people.map((p) => [p.name, p]));
   const ordered: Person[] = [];
@@ -1145,6 +1177,7 @@ function seedOfficerDutyInState(
         if (!pick) continue;
 
         row[seatIndex] = pick.name;
+        assignments[slot.slotId] = row;
         usedOfficers.add(pick.name);
         placePerson(
           pick.name,
@@ -1280,6 +1313,7 @@ function solveGreedy(input: {
   meanPrior: number;
   initialState: SolverState;
   seed: number;
+  abasSink?: AbasSolveResult[];
 }): SolverState {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const state: SolverState = {
@@ -1300,6 +1334,19 @@ function solveGreedy(input: {
     );
     if (!unit) break;
 
+    if (unit.kind === "basework") {
+      const report = assignRemainingAbas({
+        units: input.units,
+        state,
+        people: input.people,
+        issues: input.issues,
+        rules: input.rules,
+        meanPrior: input.meanPrior,
+      });
+      if (report) input.abasSink?.push(report);
+      continue;
+    }
+
     const choice: CandidateChoice | null =
       unit.kind === "carmel"
         ? (() => {
@@ -1315,19 +1362,7 @@ function solveGreedy(input: {
             )[0];
             return group ? { kind: "carmel", group } : null;
           })()
-        : unit.kind === "basework"
-          ? (() => {
-              const names = computeBaseworkNames(
-                unit,
-                state,
-                input.people,
-                input.issues,
-                input.rules,
-                input.meanPrior,
-              );
-              return names.length ? { kind: "basework", names } : null;
-            })()
-          : unit.kind === "kitchen"
+        : unit.kind === "kitchen"
             ? (() => {
                 const names = computeKitchenNames(
                   unit,
@@ -1390,6 +1425,7 @@ function solveBacktracking(input: {
   seed: number;
   maxNodes: number;
   deadlineMs: number;
+  abasSink?: AbasSolveResult[];
 }): { state: SolverState; nodes: number; score: number[]; timedOut: boolean } {
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
   const deadline = Date.now() + input.deadlineMs;
@@ -1452,6 +1488,21 @@ function solveBacktracking(input: {
     );
     if (!unit) return;
 
+    if (unit.kind === "basework") {
+      const child = cloneState(state);
+      const report = assignRemainingAbas({
+        units: input.units,
+        state: child,
+        people: input.people,
+        issues: input.issues,
+        rules: input.rules,
+        meanPrior: input.meanPrior,
+      });
+      if (report) input.abasSink?.push(report);
+      dfs(child);
+      return;
+    }
+
     const choices: CandidateChoice[] =
       unit.kind === "carmel"
         ? listCarmelCandidates(
@@ -1464,19 +1515,7 @@ function solveBacktracking(input: {
             peopleByName,
             input.seed,
           ).map((group) => ({ kind: "carmel", group }))
-        : unit.kind === "basework"
-          ? (() => {
-              const names = computeBaseworkNames(
-                unit,
-                state,
-                input.people,
-                input.issues,
-                input.rules,
-                input.meanPrior,
-              );
-              return names.length ? [{ kind: "basework" as const, names }] : [];
-            })()
-          : unit.kind === "kitchen"
+        : unit.kind === "kitchen"
             ? (() => {
                 const names = computeKitchenNames(
                   unit,
@@ -1637,6 +1676,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   let bestResult: { state: SolverState; nodes: number; score: number[]; timedOut: boolean } | null = null;
   let totalNodes = 0;
   let timedOut = false;
+  const abasSink: AbasSolveResult[] = [];
 
   const randomSeed =
     input.randomSeed ??
@@ -1655,6 +1695,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     meanPrior: input.meanPrior,
     initialState,
     seed: randomSeed,
+    abasSink,
   });
   bestResult = {
     state: greedyState,
@@ -1677,6 +1718,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
       seed: randomSeed + seed,
       maxNodes: Math.floor(maxNodes / maxAttempts),
       deadlineMs: Math.floor(deadlineMs / maxAttempts),
+      abasSink,
     });
     totalNodes += result.nodes;
     timedOut = timedOut || result.timedOut;
@@ -1748,6 +1790,10 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
   );
   const fairnessSpread = Math.round((dutySpread + kitchenSpread) * 1000) / 1000;
 
+  const abasReport = abasSink.length ? formatAbasDiagnostics(abasSink[abasSink.length - 1]) : undefined;
+  if (abasReport) warnings.unshift(abasReport);
+  const abasNodes = abasSink.reduce((sum, r) => sum + r.searchNodes, 0);
+
   const status = deriveStatus(filled, requiredSeats, []);
 
   return {
@@ -1759,13 +1805,14 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     unresolved,
     warnings,
     carmelSnapshots,
+    abasReport,
     objectiveSummary: {
       filledSeats: filled,
       requiredSeats,
       carmelFilled,
       carmelRequired,
       fairnessSpread,
-      searchNodes: totalNodes,
+      searchNodes: totalNodes + abasNodes,
       attempts: maxAttempts,
       timedOut,
     },

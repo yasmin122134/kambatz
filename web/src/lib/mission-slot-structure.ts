@@ -90,7 +90,7 @@ export function validateMissionStructureForAssignment(mission: MissionDay): stri
     }
     if (pos.kind === "officer_duty" && !officerDutySlotsValid(pos.slots, mission.starts_at, mission.ends_at)) {
       messages.push(
-        `${pos.name}: שתי משמרות בדיוק — כל אחת חצי מחזור המשימה (${mission.starts_at} → ${mission.ends_at})`,
+        `${pos.name}: משמרת אחת לאורך כל יום המשימה, שני מושבים (${mission.starts_at} → ${mission.ends_at})`,
       );
     }
     for (const slot of pos.slots) {

@@ -8,26 +8,25 @@ import {
 } from "@/lib/guard-day-template";
 import { resolveMissionPositions } from "@/lib/mission-templates";
 
-describe("officer duty half-mission shifts", () => {
+describe("officer duty full-mission shift", () => {
   const startsAt = "2026-08-21T09:00:00+03:00";
   const endsAt = "2026-08-22T09:00:00+03:00";
 
-  it("splits 09:00→09:00 mission into 09:00–21:00 and 21:00–09:00", () => {
+  it("spans the whole 09:00→09:00 mission with two seats", () => {
     const positions = buildGuardDayPositions({
       boardStart: "09:00",
       missionStartsAt: startsAt,
       missionEndsAt: endsAt,
     });
     const officer = positions.find((p) => p.kind === "officer_duty")!;
-    expect(officer.slots).toHaveLength(2);
+    expect(officer.slots).toHaveLength(1);
     expect(officer.slots[0].start_time).toBe("09:00");
-    expect(officer.slots[0].end_time).toBe("21:00");
-    expect(officer.slots[1].start_time).toBe("21:00");
-    expect(officer.slots[1].end_time).toBe("09:00");
+    expect(officer.slots[0].end_time).toBe("09:00");
+    expect(officer.slots[0].seat_count).toBe(2);
     expect(officerDutySlotsValid(officer.slots, startsAt, endsAt)).toBe(true);
   });
 
-  it("resync fixes stale officer windows to match mission span", () => {
+  it("resync collapses stale half-day windows to one full-mission slot", () => {
     const positions = buildGuardDayPositions({
       boardStart: "20:00",
       missionStartsAt: "2026-08-21T20:00:00+03:00",
@@ -44,12 +43,11 @@ describe("officer duty half-mission shifts", () => {
       missionEndsAt: "2026-08-22T20:00:00+03:00",
     });
     const next = synced.find((p) => p.kind === "officer_duty")!.slots;
+    expect(next).toHaveLength(1);
     expect(next[0].start_time).toBe("20:00");
-    expect(next[0].end_time).toBe("08:00");
-    expect(next[1].start_time).toBe("08:00");
-    expect(next[1].end_time).toBe("20:00");
+    expect(next[0].end_time).toBe("20:00");
+    expect(next[0].seat_count).toBe(2);
     expect(next[0].id).toBe("old-a");
-    expect(next[1].id).toBe("old-b");
   });
 });
 

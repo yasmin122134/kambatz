@@ -381,7 +381,7 @@ describe("hard constraints still gate eligibility", () => {
     ).toBe(false);
   });
 
-  it("prefers the other duty officer for the second half-day shift", () => {
+  it("prefers the other duty officer for the second seat", () => {
     const rani = basePerson({ id: "r1", name: "רני פלג", is_officer: true });
     const yasmin = basePerson({
       id: "y2",

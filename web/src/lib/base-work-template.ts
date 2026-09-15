@@ -8,6 +8,7 @@ import { normalizeSchedulingRules } from "@/lib/mission-utils";
 import {
   localMissionMidnightMs,
   materializeSlotAbsoluteBounds,
+  missionInterval,
   normalizeTimeLabel,
   parseIsoMs,
   parseTimeMinutes,
@@ -67,18 +68,55 @@ export function baseWorkWallClockInterval(
   return { startMs, endMs };
 }
 
-/** עב״ס על ציר יום השמירות (כמו הלוח) — לא שעון קיר של mission_date. */
+/**
+ * Place an ABAS window on the mission timeline WITHOUT clipping.
+ *
+ * On a 09:00 board, 08:30–11:30 stays 08:30–11:30 on mission_date (starts 30 min
+ * before the guard board). On a 20:00 board, 08:30–11:30 is the next morning
+ * inside the window. Stored starts_at/ends_at are ignored when they disagree —
+ * stale ISO from an old board must not move 08:30 to the following morning.
+ */
 export function resolveBaseWorkSlotInterval(
   missionDate: string,
   missionStartsAt: string,
   missionEndsAt: string,
   slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
 ): TimeInterval | null {
-  const canonical = resolveCanonicalSlotInterval(
-    { starts_at: missionStartsAt, ends_at: missionEndsAt },
-    slot,
-  );
-  if (canonical) return canonical;
+  const startMin = parseTimeMinutes(normalizeTimeLabel(slot.start_time));
+  const durMin = slotDurationMinutes(slot.start_time, slot.end_time);
+  const missionIv = missionInterval(missionStartsAt, missionEndsAt);
+  const date = missionDate.slice(0, 10);
+  const anchor = parseIsoMs(`${date}T12:00:00+03:00`);
+  if (startMin === null || durMin <= 0 || !anchor) {
+    return baseWorkWallClockInterval(missionDate, slot.start_time, slot.end_time);
+  }
+
+  const midnight = localMissionMidnightMs(anchor);
+  const candidates: TimeInterval[] = [];
+  for (let dayOffset = -1; dayOffset <= 2; dayOffset++) {
+    const startMs = midnight + dayOffset * 86_400_000 + startMin * 60_000;
+    candidates.push({ startMs, endMs: startMs + durMin * 60_000 });
+  }
+
+  if (missionIv) {
+    // 08:30 ABAS on a 09:00 mission: keep the full first-morning window.
+    const early = candidates.find((c) => {
+      const leadMin = (missionIv.startMs - c.startMs) / 60_000;
+      return leadMin >= 0 && leadMin <= 90 && c.endMs > missionIv.startMs;
+    });
+    if (early) return early;
+
+    const inside = candidates.find(
+      (c) => c.startMs >= missionIv.startMs && c.endMs <= missionIv.endMs,
+    );
+    if (inside) return inside;
+
+    const overlapping = candidates.find(
+      (c) => c.startMs < missionIv.endMs && c.endMs > missionIv.startMs,
+    );
+    if (overlapping) return overlapping;
+  }
+
   return baseWorkWallClockInterval(missionDate, slot.start_time, slot.end_time);
 }
 export function materializeBaseWorkSlots(

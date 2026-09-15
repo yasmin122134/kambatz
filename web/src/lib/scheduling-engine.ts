@@ -16,20 +16,15 @@ import {
 } from "@/lib/guard-burden";
 import {
   type FlatSlot,
-  eatsRest,
   slotEatsRest,
   flattenMissionSlots,
   isGuardKind,
   isKitchenMissionSlot,
   isObservationPost,
   isReserveForceBlock,
-  isReserveForceSlot,
   isStandbyKind,
   normalizeSchedulingRules,
-  parseTimeMinutes,
   resolveMissionForSlot,
-  resolvePositionKind,
-  slotDurationMinutes,
   slotUsesWallClockSchedule,
 } from "@/lib/mission-utils";
 import {
@@ -46,10 +41,14 @@ import { isDutyOfficerName, personIsDutyOfficer } from "@/lib/officers";
 import { isSeatLocked } from "@/lib/assignment-lock";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
-  intervalsConflictWithGap,
   intervalsOverlap,
   type TimeInterval,
 } from "@/lib/time-interval";
+import {
+  guardAbasRestOk,
+  missionIntervalsOverlap,
+  toMissionTimelineInterval,
+} from "@/lib/mission-timeline";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
 import {
   clampBaseWorkSeatsPerShift,
@@ -93,7 +92,7 @@ type AssignmentOverlapMeta = {
   endTime?: string;
 };
 
-function isBaseWorkAssignment(
+export function isBaseWorkAssignment(
   kind: MissionPositionKind,
   type: MissionType,
   meta?: AssignmentOverlapMeta,
@@ -250,7 +249,27 @@ function assignmentMeta(
   };
 }
 
-/** כרמל ב׳ וכוח עתודה מותרים במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
+function isCarmelA(kind: MissionPositionKind): boolean {
+  return kind === "standby_carmel_a";
+}
+
+/** כרמל א׳ blocks ABAS for the whole mission day. כרמל ב׳ may run in parallel with ABAS. */
+export function carmelBlocksAbas(
+  kindA: MissionPositionKind,
+  typeA: MissionType,
+  kindB: MissionPositionKind,
+  typeB: MissionType,
+  metaA?: AssignmentOverlapMeta,
+  metaB?: AssignmentOverlapMeta,
+): boolean {
+  const aCarmelA = isCarmelA(kindA);
+  const bCarmelA = isCarmelA(kindB);
+  const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
+  const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
+  return (aCarmelA && bBaseWork) || (bCarmelA && aBaseWork);
+}
+
+/** כרמל ב׳ מותר במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
 export function allowsParallelAssignmentOverlap(
   kindA: MissionPositionKind,
   typeA: MissionType,
@@ -259,22 +278,12 @@ export function allowsParallelAssignmentOverlap(
   metaA?: AssignmentOverlapMeta,
   metaB?: AssignmentOverlapMeta,
 ): boolean {
+  if (carmelBlocksAbas(kindA, typeA, kindB, typeB, metaA, metaB)) return false;
   const aCarmelB = kindA === "standby_carmel_b";
   const bCarmelB = kindB === "standby_carmel_b";
   const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
   const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
   if ((aCarmelB && bBaseWork) || (bCarmelB && aBaseWork)) return true;
-  const aReserve = isReserveForceSlot({
-    positionKind: kindA,
-    missionType: typeA,
-    positionName: metaA?.positionName,
-  });
-  const bReserve = isReserveForceSlot({
-    positionKind: kindB,
-    missionType: typeB,
-    positionName: metaB?.positionName,
-  });
-  if ((aReserve && bBaseWork) || (bReserve && aBaseWork)) return true;
   const aPatrol = kindA === "patrol";
   const bPatrol = kindB === "patrol";
   const aOfficer = kindA === "officer_duty";
@@ -465,7 +474,7 @@ function dutyOfficerAlreadyOnGuardDuty(
   return false;
 }
 
-/** קצין תורן שכבר משובץ במשמרת האחות (חצי יום שני) */
+/** קצין תורן שכבר משובץ באותה עמדה (מושב שותף לאורך היום) */
 export function siblingDutyOfficerAssignee(
   mission: MissionDay,
   slot: FlatSlot,
@@ -473,7 +482,7 @@ export function siblingDutyOfficerAssignee(
 ): string | null {
   if (slot.positionKind !== "officer_duty") return null;
   for (const s of flattenMissionSlots(mission)) {
-    if (s.positionId !== slot.positionId || s.slotId === slot.slotId) continue;
+    if (s.positionId !== slot.positionId) continue;
     for (const name of assignments[s.slotId] || []) {
       if (name && isDutyOfficerName(name)) return name;
     }
@@ -845,12 +854,8 @@ function overlapsSlot(
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
-    if (parallelOverlapAllowed(slot, b, tracker)) continue;
-
-    const blockIv = blockInterval(b);
-    const extraGap =
-      skipDutyGuardGap ||
-      !needsDutyGuardGap(
+    if (
+      carmelBlocksAbas(
         slot.positionKind,
         slot.missionType,
         b.positionKind,
@@ -858,12 +863,30 @@ function overlapsSlot(
         assignmentMeta(slot),
         assignmentMeta(b),
       )
-        ? 0
-        : gapMin;
+    ) {
+      return true;
+    }
+    if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
-    if (extraGap > 0) {
-      if (intervalsConflictWithGap(slotIv, blockIv, extraGap)) return true;
-    } else if (assignmentIntervalsOverlap(slotIv, blockIv)) {
+    const blockIv = blockInterval(b);
+    const dutyGuard = needsDutyGuardGap(
+      slot.positionKind,
+      slot.missionType,
+      b.positionKind,
+      b.missionType,
+      assignmentMeta(slot),
+      assignmentMeta(b),
+    );
+    if (dutyGuard && !skipDutyGuardGap) {
+      const slotTl = toMissionTimelineInterval(0, slotIv.startMs, slotIv.endMs);
+      const blockTl = toMissionTimelineInterval(0, blockIv.startMs, blockIv.endMs);
+      if (!guardAbasRestOk(slotTl, blockTl, gapMin)) return true;
+      continue;
+    }
+    if (missionIntervalsOverlap(
+      toMissionTimelineInterval(0, slotIv.startMs, slotIv.endMs),
+      toMissionTimelineInterval(0, blockIv.startMs, blockIv.endMs),
+    )) {
       return true;
     }
   }
@@ -1243,7 +1266,12 @@ export function explainFitsPersonFailure(
   if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) return "guardOk";
   if (policy !== "coverage") {
     const skipGuardGuardRest = policy === "relaxed_rest";
-    if (!skipGuardGuardRest) {
+    const slotIsAbas = isBaseWorkAssignment(
+      slot.positionKind,
+      slot.missionType,
+      assignmentMeta(slot),
+    );
+    if (!skipGuardGuardRest && !slotIsAbas) {
       if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
     }
     if (policy === "strict_rest" || policy === "relaxed_rest") {
@@ -1621,6 +1649,21 @@ function collectSpacingAndRestWarnings(
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
+    if (
+      carmelBlocksAbas(
+        slot.positionKind,
+        slot.missionType,
+        b.positionKind,
+        b.missionType,
+        assignmentMeta(slot),
+        assignmentMeta(b),
+      )
+    ) {
+      msgs.push(
+        `${personName}: כרמל חוסם עב״ס לכל יום המשימה (${describeAssignmentBlock(b)} / ${slot.positionName} ${slot.timeLabel})`,
+      );
+      continue;
+    }
     if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
@@ -1657,10 +1700,6 @@ function collectSpacingAndRestWarnings(
     if (slotIsGuardPost && blockIsGuardPost && restMin > 0 && idle < restMin) {
       msgs.push(
         `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${b.startTime}–${b.endTime} ו-${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
-      );
-    } else if (dutyGuard && restMin > 0 && idle < restMin) {
-      msgs.push(
-        `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס לשמירה (${b.startTime}–${b.endTime} ו-${slot.timeLabel}, נדרש ${scheduling.rest_hours})`,
       );
     }
 
@@ -2011,7 +2050,7 @@ export function pickBestCandidate(
   options?: {
     preferHighLoad?: boolean;
     scheduling?: MissionSchedulingRules;
-    /** משמרת קצין תורן אחרת באותו יום — העדפת הקצין השני */
+    /** קצין תורן שכבר משובץ באותה עמדה — העדפת הקצין השני */
     dutyOfficerAlreadyAssigned?: string;
     /** Full active roster — enables spread-aware fairness when provided */
     roster?: Person[];
@@ -3203,6 +3242,35 @@ export function validateNoPersonOverlaps(
           !focusMissionIds.has(a.missionId) &&
           !focusMissionIds.has(b.missionId)
         ) {
+          continue;
+        }
+        if (
+          carmelBlocksAbas(
+            a.positionKind,
+            a.missionType,
+            b.positionKind,
+            b.missionType,
+            {
+              positionName: a.positionName,
+              startTime: a.startTime,
+              endTime: a.endTime,
+            },
+            {
+              positionName: b.positionName,
+              startTime: b.startTime,
+              endTime: b.endTime,
+            },
+          )
+        ) {
+          messages.push(
+            [
+              "Overlap detected:",
+              `Person: ${person}`,
+              `Assignment A: ${a.label}`,
+              `Assignment B: ${b.label}`,
+              `(כרמל full-day vs עב״ס)`,
+            ].join("\n"),
+          );
           continue;
         }
         if (

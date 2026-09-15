@@ -233,7 +233,7 @@ describe("base work on 09:00 guard day", () => {
   const startsAt = "2026-08-21T09:00:00+03:00";
   const endsAt = "2026-08-22T09:00:00+03:00";
 
-  it("validates standard base work windows on mission_date", () => {
+  it("on a 09:00 board, morning ABAS is 08:30 the first morning (not clipped, not next day)", () => {
     const mission: MissionDay = {
       id: "g1",
       title: "שמירות",
@@ -261,5 +261,9 @@ describe("base work on 09:00 guard day", () => {
       updated_at: "",
     };
     expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+    const morning = flattenMissionSlots(mission).find((s) => s.startTime === "08:30")!;
+    expect(morning.startAtMs).toBe(Date.parse("2026-08-21T08:30:00+03:00"));
+    expect(morning.endAtMs).toBe(Date.parse("2026-08-21T11:30:00+03:00"));
+    expect(morning.durationMinutes).toBe(180);
   });
 });

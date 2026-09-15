@@ -45,12 +45,11 @@ describe("officer duty smart assign", () => {
           id: "p-off",
           name: "קצין תורן",
           slots: [
-            { id: "s1", start_time: "09:00", end_time: "21:00", seat_count: 1 },
-            { id: "s2", start_time: "21:00", end_time: "09:00", seat_count: 1 },
+            { id: "s1", start_time: "09:00", end_time: "09:00", seat_count: 2 },
           ],
         },
       ],
-      assignments: { s1: [""], s2: [""] },
+      assignments: { s1: ["", ""] },
       scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, board_start: "09:00" },
       notes: "",
       created_at: "",
@@ -87,8 +86,9 @@ describe("officer duty smart assign", () => {
     });
 
     const seats = out.assignmentsByMission.get("m1")!;
-    const assigned = new Set([...(seats.s1 || []), ...(seats.s2 || [])].filter(Boolean));
-    expect(assigned.has("רני פלג")).toBe(true);
-    expect(assigned.has("יסמין חדד")).toBe(true);
+    const assigned = (seats.s1 || []).filter(Boolean);
+    expect(assigned).toHaveLength(2);
+    expect(assigned).toContain("רני פלג");
+    expect(assigned).toContain("יסמין חדד");
   });
 });
