@@ -1,5 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
-import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
+import {
+  linkedGuardDayAssignScope,
+  missionsForDateAssignScope,
+  omitLegacyLinkedBaseWorkMissions,
+} from "@/lib/guard-day-bundle";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import { hashStringsToSeed } from "@/lib/seeded-random";
@@ -30,6 +34,7 @@ import {
 } from "@/lib/mission-slot-structure";
 import {
   getMissionDay,
+  listMissionDaysForBoardFocus,
   listMissionDaysForContext,
   listVisibleMissionDays,
   saveMissionDay,
@@ -467,13 +472,18 @@ export async function autoAssignMission(
 
 export async function autoAssignDate(
   missionDate: string,
-  options: { keepExisting?: boolean; constraintPolicy?: AssignConstraintPolicy } = {},
+  options: {
+    keepExisting?: boolean;
+    constraintPolicy?: AssignConstraintPolicy;
+    focusMissionId?: string;
+  } = {},
 ): Promise<SmartAssignDayResult> {
   const keepExisting = options.keepExisting !== false;
-  const allMissions = await listVisibleMissionDays();
-  const scopeMissions = allMissions.filter(
-    (m) => m.mission_date === missionDate.slice(0, 10),
-  );
+  const loaded = options.focusMissionId
+    ? await listMissionDaysForBoardFocus(options.focusMissionId)
+    : await listVisibleMissionDays();
+  const allMissions = omitLegacyLinkedBaseWorkMissions(loaded);
+  const scopeMissions = missionsForDateAssignScope(allMissions, missionDate);
 
   if (!scopeMissions.length) {
     throw new Error("אין ימי משימה בתאריך זה");

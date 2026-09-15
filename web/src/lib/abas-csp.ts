@@ -7,8 +7,7 @@ import {
   unplacePerson,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
-import type { FlatSlot } from "@/lib/mission-utils";
-import { isGuardKind } from "@/lib/mission-utils";
+import { isRestConstrainedGuardKind, type FlatSlot } from "@/lib/mission-utils";
 import {
   guardAbasRestOk,
   missionIdleMinutes,
@@ -162,7 +161,7 @@ export function explainAbasEligibility(input: {
     if (b.positionKind === "standby_carmel_b") continue;
 
     const other = blockTl(b, missionStartMs);
-    const otherIsGuard = isGuardKind(b.positionKind) && !isAbasMeta(b);
+    const otherIsGuard = isRestConstrainedGuardKind(b.positionKind) && !isAbasMeta(b);
     const overlap = missionIntervalsOverlap(abas, other);
     if (overlap) {
       const idle = 0;

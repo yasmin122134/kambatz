@@ -20,6 +20,7 @@ import {
   flattenMissionSlots,
   isGuardKind,
   isKitchenMissionSlot,
+  isRestConstrainedGuardKind,
   isObservationPost,
   isReserveForceBlock,
   isStandbyKind,
@@ -234,8 +235,8 @@ function needsDutyGuardGap(
   // Reserve force (guards + duty) does not require spacing from guard shifts — only עב״ס does.
   const aBase = isBaseWorkAssignment(kindA, typeA, metaA);
   const bBase = isBaseWorkAssignment(kindB, typeB, metaB);
-  const aGuard = isGuardKind(kindA) && !aBase;
-  const bGuard = isGuardKind(kindB) && !bBase;
+  const aGuard = isRestConstrainedGuardKind(kindA) && !aBase;
+  const bGuard = isRestConstrainedGuardKind(kindB) && !bBase;
   return (aBase && bGuard) || (aGuard && bBase);
 }
 
@@ -558,11 +559,11 @@ function guardOk(
   ratio: number,
   ignoreSlotId?: string,
 ): boolean {
-  if (!ratio || !isGuardKind(slot.positionKind)) return true;
+  if (!ratio || !isRestConstrainedGuardKind(slot.positionKind)) return true;
 
   for (const block of tracker.busy[personName] || []) {
     if (ignoreSlotId && block.slotId === ignoreSlotId) continue;
-    if (!isGuardKind(block.positionKind)) continue;
+    if (!isRestConstrainedGuardKind(block.positionKind)) continue;
     if (block.slotId === slot.slotId) continue;
 
     if (slot.startAtMs >= block.endAtMs) {
@@ -767,7 +768,7 @@ function strictRestGapOk(
 ): boolean {
   const restMin = Math.max(0, restHours) * 60;
   if (restMin <= 0) return true;
-  const slotIsGuard = isGuardKind(slot.positionKind);
+  const slotIsGuard = isRestConstrainedGuardKind(slot.positionKind);
   const slotIsAbas = isBaseWorkAssignment(
     slot.positionKind,
     slot.missionType,
@@ -778,7 +779,7 @@ function strictRestGapOk(
   const slotIv = slotInterval(slot);
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
-    const blockIsGuard = isGuardKind(b.positionKind);
+    const blockIsGuard = isRestConstrainedGuardKind(b.positionKind);
     const blockIsAbas = isBaseWorkAssignment(
       b.positionKind,
       b.missionType,
@@ -1695,8 +1696,8 @@ function collectSpacingAndRestWarnings(
       );
     }
 
-    const slotIsGuardPost = isGuardKind(slot.positionKind);
-    const blockIsGuardPost = isGuardKind(b.positionKind);
+    const slotIsGuardPost = isRestConstrainedGuardKind(slot.positionKind);
+    const blockIsGuardPost = isRestConstrainedGuardKind(b.positionKind);
     if (slotIsGuardPost && blockIsGuardPost && restMin > 0 && idle < restMin) {
       msgs.push(
         `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${b.startTime}–${b.endTime} ו-${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
@@ -1704,8 +1705,8 @@ function collectSpacingAndRestWarnings(
     }
 
     if (
-      isGuardKind(slot.positionKind) &&
-      isGuardKind(b.positionKind) &&
+      isRestConstrainedGuardKind(slot.positionKind) &&
+      isRestConstrainedGuardKind(b.positionKind) &&
       ratio > 0
     ) {
       const earlierIsBlock = blockIv.endMs <= slotIv.startMs;
@@ -3373,7 +3374,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
           messages.push(`${name}: illegal overlap at ${slot.positionName} ${slot.timeLabel}`);
         }
         if (
-          isGuardKind(slot.positionKind) &&
+          isRestConstrainedGuardKind(slot.positionKind) &&
           !guardOk(name, slot, tracker, effectiveGuardRatio(scheduling))
         ) {
           messages.push(`${name}: guard ratio violated at ${slot.timeLabel}`);

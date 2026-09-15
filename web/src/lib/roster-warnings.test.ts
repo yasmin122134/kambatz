@@ -248,4 +248,47 @@ describe("collectRosterWarnings", () => {
       ),
     ).toBe(true);
   });
+
+  it("does not warn daily rest for a full-day officer duty shift", () => {
+    const mission = guardMission();
+    const officerSlot = flattenMissionSlots(mission).find(
+      (s) => s.positionKind === "officer_duty",
+    )!;
+    const rani = person("רני פלג");
+    rani.is_officer = true;
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...mission,
+          assignments: { [officerSlot.slotId]: [rani.name, ""] },
+        },
+      ],
+      peopleByName: { [rani.name]: rani },
+    });
+    expect(warnings.some((w) => w.includes("מנוחה"))).toBe(false);
+  });
+
+  it("does not warn rest between consecutive full-day officer duty shifts", () => {
+    const day1 = guardMission();
+    const day2: MissionDay = {
+      ...guardMission(),
+      id: "m2",
+      mission_date: "2026-03-02",
+      starts_at: "2026-03-02T07:00:00.000Z",
+      ends_at: "2026-03-03T07:00:00.000Z",
+    };
+    const slot1 = flattenMissionSlots(day1).find((s) => s.positionKind === "officer_duty")!;
+    const slot2 = flattenMissionSlots(day2).find((s) => s.positionKind === "officer_duty")!;
+    const rani = person("רני פלג");
+    rani.is_officer = true;
+    const warnings = collectRosterWarnings({
+      missions: [
+        { ...day1, assignments: { [slot1.slotId]: [rani.name, ""] } },
+        { ...day2, assignments: { [slot2.slotId]: [rani.name, ""] } },
+      ],
+      peopleByName: { [rani.name]: rani },
+    });
+    expect(warnings.some((w) => w.includes("מנוחה"))).toBe(false);
+    expect(warnings.some((w) => w.includes("יחס שמירות"))).toBe(false);
+  });
 });

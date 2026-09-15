@@ -27,7 +27,8 @@ import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
-import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
+import { omitLegacyLinkedBaseWorkMissions } from "@/lib/guard-day-bundle";
+import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
@@ -80,15 +81,8 @@ function resolveInitialDate(
 
 type SwapMode = "take" | "swap" | null;
 
-/** Skip legacy linked base_work mission when ABAS is already embedded in the guard day. */
 function missionsForRosterWarnings(missions: MissionDay[]): MissionDay[] {
-  const guardsWithEmbeddedAbas = missions.find(
-    (m) => m.mission_type === "guards" && (m.positions || []).some(isBaseWorkPosition),
-  );
-  if (!guardsWithEmbeddedAbas) return missions;
-  const linkedId = guardsWithEmbeddedAbas.scheduling_rules?.linked_mission_id;
-  if (!linkedId) return missions;
-  return missions.filter((m) => m.id !== linkedId);
+  return omitLegacyLinkedBaseWorkMissions(missions);
 }
 
 function isoDateOffset(date: string, days: number): string {
@@ -631,42 +625,48 @@ export function BoardClient({
 
     setAutoAssigning(true);
     setMsg("");
-    const res = await fetch("/api/missions/auto-assign", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        mission_date: activeDate,
-        keep_existing: keepExisting,
-        constraint_policy: constraintPolicy,
-      }),
-    });
-    const data = await res.json();
-    setAutoAssigning(false);
-    if (!res.ok) {
-      setMsg(data.error || "שגיאה בשיבוץ");
-      return;
-    }
-    await loadMissions();
-    bumpBurdenRefresh();
-    const status = data.status as string | undefined;
-    const assignedSeats = data.assignedSeats ?? (data.results || []).reduce(
-      (sum: number, r: { filled: number; skipped?: number }) => sum + r.filled + (r.skipped ?? 0),
-      0,
-    );
-    const requiredSeats = data.requiredSeats;
-    const warnings: string[] = data.warnings || [];
-    const statusLine =
-      status === "complete"
-        ? `${constraintPolicy === "strict_rest" ? "חלוקה קשיחה" : keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
-        : status === "infeasible"
-          ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
-          : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
-    if (warnings.length) {
-      const preview = warnings.slice(0, 4).join(" · ");
-      const more = warnings.length > 4 ? ` · …ועוד ${warnings.length - 4}` : "";
-      setMsg(`${statusLine}. ${preview}${more}`);
-    } else {
-      setMsg(statusLine);
+    try {
+      const res = await fetch("/api/missions/auto-assign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mission_date: activeDate,
+          keep_existing: keepExisting,
+          constraint_policy: constraintPolicy,
+          ...(focusMissionId ? { focus_mission_id: focusMissionId } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה בשיבוץ");
+        return;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      const status = data.status as string | undefined;
+      const assignedSeats = data.assignedSeats ?? (data.results || []).reduce(
+        (sum: number, r: { filled: number; skipped?: number }) => sum + r.filled + (r.skipped ?? 0),
+        0,
+      );
+      const requiredSeats = data.requiredSeats;
+      const warnings: string[] = data.warnings || [];
+      const statusLine =
+        status === "complete"
+          ? `${constraintPolicy === "strict_rest" ? "חלוקה קשיחה" : keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+          : status === "infeasible"
+            ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
+            : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
+      if (warnings.length) {
+        const preview = warnings.slice(0, 4).join(" · ");
+        const more = warnings.length > 4 ? ` · …ועוד ${warnings.length - 4}` : "";
+        setMsg(`${statusLine}. ${preview}${more}`);
+      } else {
+        setMsg(statusLine);
+      }
+    } catch {
+      setMsg("שגיאה בשיבוץ");
+    } finally {
+      setAutoAssigning(false);
     }
   }
 

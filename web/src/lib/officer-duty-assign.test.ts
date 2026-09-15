@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { runGlobalAssign } from "@/lib/global-assign";
-import { resolvePositionKind } from "@/lib/mission-utils";
+import { flattenMissionSlots, resolvePositionKind, slotEatsRest } from "@/lib/mission-utils";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 import type { MissionDay, Person } from "@/lib/types";
 
@@ -90,5 +90,35 @@ describe("officer duty smart assign", () => {
     expect(assigned).toHaveLength(2);
     expect(assigned).toContain("רני פלג");
     expect(assigned).toContain("יסמין חדד");
+  });
+
+  it("does not treat full-day officer duty as a rest-consuming guard", () => {
+    const mission: MissionDay = {
+      id: "m1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-03-01",
+      starts_at: "2026-03-01T09:00:00",
+      ends_at: "2026-03-02T09:00:00",
+      status: "draft",
+      positions: [
+        {
+          id: "p-off",
+          name: "קצין תורן",
+          kind: "officer_duty",
+          slots: [
+            { id: "s1", start_time: "09:00", end_time: "09:00", seat_count: 2 },
+          ],
+        },
+      ],
+      assignments: { s1: ["רני פלג", "יסמין חדד"] },
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, rest_hours: 8 },
+      notes: "",
+      created_at: "",
+      updated_at: "",
+    };
+    const slot = flattenMissionSlots(mission).find((s) => s.positionKind === "officer_duty")!;
+    expect(slotEatsRest(slot)).toBe(false);
+    expect(slot.durationMinutes).toBeGreaterThanOrEqual(24 * 60);
   });
 });

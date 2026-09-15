@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
 import { autoAssignDate, autoAssignMission } from "@/lib/auto-assign";
 
+export const maxDuration = 60;
+
 export async function POST(request: Request) {
   if (!(await isAdmin())) {
     return NextResponse.json({ error: "לא מורשה" }, { status: 401 });
@@ -10,6 +12,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const missionId = body.mission_id ? String(body.mission_id) : "";
   const missionDate = body.mission_date ? String(body.mission_date).slice(0, 10) : "";
+  const focusMissionId = body.focus_mission_id ? String(body.focus_mission_id) : "";
   const keepExisting = body.keep_existing !== false;
   const includeSameDay = body.include_same_day !== false;
   const constraintPolicy =
@@ -26,7 +29,11 @@ export async function POST(request: Request) {
     }
 
     if (missionDate) {
-      const result = await autoAssignDate(missionDate, { keepExisting, constraintPolicy });
+      const result = await autoAssignDate(missionDate, {
+        keepExisting,
+        constraintPolicy,
+        focusMissionId: focusMissionId || undefined,
+      });
       return NextResponse.json(result);
     }
 

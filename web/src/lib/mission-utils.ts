@@ -136,13 +136,22 @@ export function isGuardKind(kind: MissionPositionKind): boolean {
   return kind === "guard" || kind === "officer_duty";
 }
 
+/** שמירת צוערים שדורשת מנוחה / יחס 2:1. קצין תורן הוא משמרת מלאה ולא נמדד ככה. */
+export function isRestConstrainedGuardKind(kind: MissionPositionKind): boolean {
+  return kind === "guard";
+}
+
 /** עמדת תצפיתן — היחידה המותרת לפטור עמידה */
 export function isObservationPost(positionName: string): boolean {
   return positionName.includes("תצפיתן");
 }
 
 export function eatsRest(kind: MissionPositionKind): boolean {
-  return kind !== "standby_carmel_a" && kind !== "standby_carmel_b";
+  return (
+    kind !== "standby_carmel_a" &&
+    kind !== "standby_carmel_b" &&
+    kind !== "officer_duty"
+  );
 }
 
 /** כוח עתודה — חוסם זמן אך לא צורך מנוחה */
@@ -174,6 +183,7 @@ export function slotEatsRest(slot: FlatSlot): boolean {
   if (isStandbyKind(slot.positionKind)) return false;
   if (isReserveForceSlot(slot)) return false;
   if (slot.positionKind === "patrol") return false;
+  if (slot.positionKind === "officer_duty") return false;
   if (isKitchenMissionSlot(slot)) return false;
   if (
     slot.positionKind === "kitchen" &&

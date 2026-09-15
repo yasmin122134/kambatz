@@ -5,7 +5,7 @@
  * or resolveBaseWorkSlotInterval — so a shared conversion bug cannot hide here.
  */
 import type { MissionDay, Person } from "@/lib/types";
-import { isGuardKind, resolvePositionKind } from "@/lib/mission-utils";
+import { isRestConstrainedGuardKind, resolvePositionKind } from "@/lib/mission-utils";
 import { isBaseWorkPositionName, isBaseWorkShiftSlot } from "@/lib/base-work-template";
 
 export type AbasValidationViolation = string;
@@ -131,7 +131,7 @@ function collectBlocks(mission: MissionDay): Map<string, Abs[]> {
           kind,
           name: pos.name,
           isAbas: abas,
-          isGuard: isGuardKind(kind) && !abas,
+          isGuard: isRestConstrainedGuardKind(kind) && !abas,
           isCarmelA: carmelA,
           isCarmelB: carmelB,
         });
