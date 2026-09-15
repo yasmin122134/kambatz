@@ -527,7 +527,7 @@ describe("collectRosterWarnings", () => {
     expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
   });
 
-  it("warns yesterday's overnight guard overlapping today's morning ABAS", () => {
+  it("does not warn yesterday's overnight guard against today's morning ABAS", () => {
     const today = guardMission();
     const yesterdayStartsAt = "2026-02-28T07:00:00.000Z";
     const yesterdayEndsAt = "2026-03-01T07:00:00.000Z";
@@ -567,6 +567,50 @@ describe("collectRosterWarnings", () => {
       peopleByName: { [alex.name]: alex },
       focusMissionIds: [today.id],
     });
-    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(false);
+  });
+
+  it("does not warn ABAS against a kitchen day on the same calendar date", () => {
+    const guards = guardMission();
+    const abas = flattenMissionSlots(guards).find(
+      (s) => s.missionType === "base_work" && s.startTime === "08:30",
+    )!;
+    const kitchen: MissionDay = {
+      id: "kitchen-1",
+      title: "מטבח",
+      mission_type: "kitchen",
+      mission_date: guards.mission_date,
+      starts_at: "2026-03-01T06:00:00.000Z",
+      ends_at: "2026-03-01T20:00:00.000Z",
+      status: "published",
+      positions: [
+        {
+          id: "k",
+          name: "מטבח",
+          kind: "kitchen",
+          slots: [{ id: "k1", start_time: "08:00", end_time: "12:00", seat_count: 1 }],
+        },
+      ],
+      assignments: { k1: ["אלכס"] },
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...guards,
+          assignments: {
+            [abas.slotId]: [alex.name, ...Array(Math.max(0, abas.seatCount - 1)).fill("")],
+          },
+        },
+        kitchen,
+      ],
+      peopleByName: { [alex.name]: alex },
+      focusMissionIds: [guards.id],
+    });
+    expect(warnings.some((w) => w.includes("חפיפה"))).toBe(false);
   });
 });

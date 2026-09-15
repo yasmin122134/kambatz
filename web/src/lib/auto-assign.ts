@@ -24,7 +24,6 @@ import {
   syncAssignmentSeats,
   normalizeSchedulingRules,
 } from "@/lib/mission-utils";
-import { addCalendarDays } from "@/lib/time-interval";
 import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
 import { validateAbasRosterIndependent } from "@/lib/abas-validator";
 import {
@@ -92,10 +91,7 @@ function missionsForAssignAudit(
   const dates = new Set<string>();
   for (const mission of drafts) {
     byId.set(mission.id, mission);
-    const date = mission.mission_date.slice(0, 10);
-    dates.add(date);
-    dates.add(addCalendarDays(date, -1));
-    dates.add(addCalendarDays(date, 1));
+    dates.add(mission.mission_date.slice(0, 10));
   }
   for (const mission of allMissions) {
     if (byId.has(mission.id)) continue;

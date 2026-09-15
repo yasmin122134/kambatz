@@ -84,6 +84,7 @@ type BusyBlock = BurdenTimelineBlock & {
   cyclicStart: number;
   slotId: string;
   missionId: string;
+  missionDate?: string;
   startAtMs: number;
   endAtMs: number;
   positionName?: string;
@@ -903,6 +904,22 @@ export function describeAssignmentBlock(block: BusyBlock): string {
   return `${blockLabel(block)} ${block.startTime}–${block.endTime}`;
 }
 
+function isKitchenDayType(missionType: MissionType): boolean {
+  return missionType === "kitchen";
+}
+
+/** יום מטבח ויום שמירות/עב״ס הם ימי משימה נפרדים; גם תאריכים שונים לא נבדקים לחפיפה. */
+function sameOperationalDay(
+  a: { missionDate?: string; missionType: MissionType },
+  b: { missionDate?: string; missionType: MissionType },
+): boolean {
+  if (isKitchenDayType(a.missionType) !== isKitchenDayType(b.missionType)) return false;
+  const da = a.missionDate?.slice(0, 10);
+  const db = b.missionDate?.slice(0, 10);
+  if (da && db) return da === db;
+  return true;
+}
+
 function overlapsSlot(
   personName: string,
   slot: FlatSlot,
@@ -929,6 +946,7 @@ function overlapsSlot(
       continue;
     }
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
+    if (!sameOperationalDay(slot, b)) continue;
     if (
       carmelBlocksAbas(
         slot.positionKind,
@@ -1424,6 +1442,7 @@ export function placePerson(
     eatsRest: slotEatsRest(slot),
     positionKind: slot.positionKind,
     missionType: slot.missionType,
+    missionDate: slot.missionDate,
     seatCount,
     startTime: slot.startTime,
     endTime: slot.endTime,
@@ -1738,6 +1757,7 @@ function collectSpacingAndRestWarnings(
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
+    if (!sameOperationalDay(slot, b)) continue;
     if (
       carmelBlocksAbas(
         slot.positionKind,
@@ -3361,6 +3381,7 @@ type TrackedAssignment = LabeledInterval & {
   label: string;
   slotId: string;
   missionId: string;
+  missionDate?: string;
   positionKind: MissionPositionKind;
   missionType: MissionType;
   positionName: string;
@@ -3411,6 +3432,7 @@ function collectTrackedAssignments(
           endMs: slot.endAtMs,
           slotId: slot.slotId,
           missionId: mission.id,
+          missionDate: slot.missionDate ?? mission.mission_date.slice(0, 10),
           positionKind: slot.positionKind,
           missionType: slot.missionType,
           positionName: slot.positionName,
@@ -3431,8 +3453,9 @@ function pairInFocus(
   b: TrackedAssignment,
   focusMissionIds?: Set<string>,
 ): boolean {
+  if (!sameOperationalDay(a, b)) return false;
   if (!focusMissionIds) return true;
-  // חפיפת עב״ס תמיד מדווחת — גם אם המשימה המקושרת הוסתרה מהלוח.
+  // חפיפת עב״ס מדווחת גם אם המשימה המקושרת הוסתרה מהלוח — רק באותו יום משימה.
   if (trackedIsAbas(a) || trackedIsAbas(b)) return true;
   return focusMissionIds.has(a.missionId) || focusMissionIds.has(b.missionId);
 }
@@ -3468,11 +3491,8 @@ function visibleTimeOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
   }
   if (!labeledMinutesOverlap(a, b)) return false;
   const startGapMs = Math.abs(a.startMs - b.startMs);
-  // אותו בוקר / ערב — תוויות שעון חופפות גם אם ISO ישן פיצל אותן.
-  if (startGapMs < 16 * 60 * 60 * 1000) return true;
-  // ~יום אחד הפרש עם שעות שונות: ISO ישן, או חפיפה ויזואלית בלוח המחזורי.
-  if (startGapMs > 32 * 60 * 60 * 1000) return false;
-  return a.startTime !== b.startTime;
+  // אותו בוקר / ערב באותו יום משימה — תוויות שעון חופפות גם אם ISO ישן פיצל אותן.
+  return startGapMs < 16 * 60 * 60 * 1000;
 }
 
 function labeledIdleMinutes(a: LabeledInterval, b: LabeledInterval): number | null {

@@ -53,6 +53,8 @@ export type FlatSlot = {
   sameGender: boolean;
   /** סוג יום המשימה — לחפיפות מותרות (כרמל + מטבח/עב״ס) */
   missionType: MissionType;
+  /** תאריך יום המשימה — ימי משימה שונים לא נבדקים לחפיפה */
+  missionDate?: string;
   startTime: string;
   endTime: string;
   timeLabel: string;
@@ -519,6 +521,7 @@ export function flattenMissionSlots(
         sameRoom,
         sameGender,
         missionType: slotMissionType,
+        missionDate: mission.mission_date.slice(0, 10),
         startTime: slot.start_time,
         endTime: slot.end_time,
         timeLabel: timeLabel(slot.start_time, slot.end_time),

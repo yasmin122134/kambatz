@@ -93,6 +93,17 @@ export function missionsForExcelExport(missions: MissionDay[]): MissionDay[] {
     );
 }
 
+/** Excel for one board day — previous/next mission dates stay out of the file. */
+export function missionsForDayExcelExport(
+  missions: MissionDay[],
+  missionDate: string,
+): MissionDay[] {
+  const date = missionDate.slice(0, 10);
+  return missionsForExcelExport(
+    missions.filter((m) => m.mission_date.slice(0, 10) === date),
+  );
+}
+
 function flattenedSlots(mission: MissionDay): FlatSlot[] {
   return flattenMissionSlots(mission, effectiveBoardStartMin(mission));
 }
@@ -418,7 +429,9 @@ export function buildMissionExportXlsx(
 export function downloadMissionsExcel(
   missions: MissionDay[],
   rosterNames: string[] = [],
+  missionDate?: string,
 ): void {
-  const bytes = buildMissionExportXlsx(missions, rosterNames);
-  triggerBrowserDownload(missionExportFilename(missions), bytes);
+  const scoped = missionDate ? missionsForDayExcelExport(missions, missionDate) : missions;
+  const bytes = buildMissionExportXlsx(scoped, rosterNames);
+  triggerBrowserDownload(missionExportFilename(scoped), bytes);
 }

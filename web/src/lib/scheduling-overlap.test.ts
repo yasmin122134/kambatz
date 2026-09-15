@@ -425,7 +425,7 @@ describe("validateNoPersonOverlaps", () => {
     expect(warnings.some((w) => w.includes("חפיפה עב״ס") && w.includes("Alex"))).toBe(true);
   });
 
-  it("warns when wall labels overlap even if stored ISO is ~24h later", () => {
+  it("does not treat ~24h-apart wall labels as overlap across calendar occurrences", () => {
     const startsAt = "2026-03-01T07:00:00.000Z";
     const endsAt = "2026-03-03T07:00:00.000Z";
     const abasId = "abas-stale";
@@ -468,7 +468,7 @@ describe("validateNoPersonOverlaps", () => {
       { startMs: post.startAtMs, endMs: post.endAtMs },
     )).toBe(false);
     const messages = validateNoPersonOverlaps([mission]);
-    expect(messages.some((m) => m.includes("חפיפה") && m.includes("Alex"))).toBe(true);
+    expect(messages.some((m) => m.includes("חפיפה") && m.includes("Alex"))).toBe(false);
   });
 
   it("does not warn identical wall times on consecutive days", () => {
@@ -556,7 +556,7 @@ describe("base work assignment", () => {
     expect(new Set(names).size).toBe(20);
   });
 
-  it("Test G — skips people blocked by kitchen overlap", () => {
+  it("Test G — kitchen day does not block ABAS (separate mission day)", () => {
     const people = makePeople(56);
     const base = missionDay(
       "base-1",
@@ -597,11 +597,8 @@ describe("base work assignment", () => {
     });
 
     expect(names.length).toBeGreaterThan(0);
-    expect(diagnostics.rejectedOverlap).toBeGreaterThan(0);
+    expect(diagnostics.rejectedOverlap).toBe(0);
     expect(new Set(names).size).toBe(names.length);
-    for (const name of names) {
-      expect(people.slice(0, 14).map((p) => p.name)).not.toContain(name);
-    }
   });
 
   it("fills shift when some people are blocked by guard overlap", () => {

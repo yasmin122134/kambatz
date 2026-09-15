@@ -4,6 +4,7 @@ import {
   buildMissionExportXlsx,
   formatMissionDateHe,
   missionExportFilename,
+  missionsForDayExcelExport,
   missionsForExcelExport,
 } from "@/lib/mission-export";
 import type { MissionDay } from "@/lib/types";
@@ -144,6 +145,35 @@ describe("mission excel export", () => {
     expect(missionExportFilename([a, b])).toBe(
       "luach-shmirot-2026-09-14-2026-09-16.xlsx",
     );
+  });
+
+  it("keeps only the selected mission date when exporting a board day", () => {
+    const selected = guardMission(
+      [{ id: "s1", start: "20:00", end: "00:00" }],
+      { s1: ["Alice"] },
+    );
+    const previous = guardMission(
+      [{ id: "s1", start: "20:00", end: "00:00" }],
+      { s1: ["Dana"] },
+      {
+        id: "g-prev",
+        mission_date: "2026-09-13",
+        starts_at: "2026-09-13T20:00:00+03:00",
+        ends_at: "2026-09-14T20:00:00+03:00",
+        title: "יום קודם",
+      },
+    );
+    const scoped = missionsForDayExcelExport([previous, selected], "2026-09-14");
+    expect(scoped.map((m) => m.id)).toEqual(["g1"]);
+    const tables = buildMissionExportTables(scoped);
+    const text = tables
+      .flatMap((t) => t.rows.flatMap((r) => r.cells))
+      .join(" ");
+    expect(text).toContain("Alice");
+    expect(text).not.toContain("Dana");
+    expect(text).toContain("14 בספטמבר");
+    expect(text).not.toContain("13 בספטמבר");
+    expect(missionExportFilename(scoped)).toBe("luach-shmirot-2026-09-14.xlsx");
   });
 
   it("writes a zip-based xlsx with a PK header", () => {

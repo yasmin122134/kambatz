@@ -75,25 +75,12 @@ function resolveInitialDate(
 type SwapMode = "take" | "swap" | null;
 
 function missionsForRosterWarnings(missions: MissionDay[]): MissionDay[] {
-  // כולל משימות עב״ס מקושרות שהוסתרו מהלוח — אחרת חפיפות שם נעלמות מהאזהרות.
-  return missions;
-}
-
-function isoDateOffset(date: string, days: number): string {
-  const d = new Date(`${date.slice(0, 10)}T12:00:00`);
-  d.setDate(d.getDate() + days);
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function rosterWarningContextDates(activeDate: string): Set<string> {
-  return new Set([
-    isoDateOffset(activeDate, -1),
-    activeDate.slice(0, 10),
-    isoDateOffset(activeDate, 1),
-  ]);
+  // כולל משימות עב״ס מקושרות באותו תאריך — בלי ימים אחרים ובלי יום מטבח.
+  const hasGuardDay = missions.some(
+    (m) => m.mission_type === "guards" || m.mission_type === "base_work",
+  );
+  if (!hasGuardDay) return missions;
+  return missions.filter((m) => m.mission_type !== "kitchen");
 }
 
 function peopleByNameFromList(people: Person[]): Record<string, Person> {
@@ -195,17 +182,13 @@ export function BoardClient({
 
   const rosterWarnings = useMemo(() => {
     if (!isAdminUser || !dayMissions.length) return [];
-    const contextDates = rosterWarningContextDates(activeDate);
-    const contextMissions = missionsForRosterWarnings(
-      missions.filter((m) => contextDates.has(m.mission_date.slice(0, 10))),
-    );
+    const contextMissions = missionsForRosterWarnings(dayMissions);
     return collectRosterWarnings({
       missions: contextMissions,
       peopleByName,
       issues: approvedIssues,
       focusMissionIds: [
         guardsMission?.id,
-        kitchenMission?.id,
         baseWorkMissionId,
       ].filter((id): id is string => Boolean(id)),
     });
@@ -217,7 +200,6 @@ export function BoardClient({
     peopleByName,
     approvedIssues,
     guardsMission?.id,
-    kitchenMission?.id,
     baseWorkMissionId,
   ]);
 
@@ -746,12 +728,12 @@ export function BoardClient({
             className="btn-sm"
             onClick={() => {
               try {
-                downloadMissionsExcel(missions, activeRosterNames);
+                downloadMissionsExcel(missions, activeRosterNames, activeDate);
               } catch {
                 setMsg("שגיאה בייצוא לאקסל");
               }
             }}
-            title="קובץ אקסל עם כל ימי השמירות בלוח — גלגולים, פירוט ולפי צוער"
+            title="קובץ אקסל ליום המשימה הנבחר — גלגולים, פירוט ולפי צוער"
           >
             הורדה לאקסל
           </button>
