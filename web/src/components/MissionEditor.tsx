@@ -1097,6 +1097,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           <Link
             href={`/board?date=${missionDate}&mission=${missionId}`}
             className="btn"
+            onClick={(e) => e.stopPropagation()}
           >
             צפייה בלוח
           </Link>

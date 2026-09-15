@@ -28,6 +28,7 @@ import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { omitLegacyLinkedBaseWorkMissions } from "@/lib/guard-day-scope";
+import { pickTypedDayMission, resolveBoardDate } from "@/lib/board-day-mission";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
@@ -68,15 +69,7 @@ function resolveInitialDate(
   initialDate?: string,
   focusMissionId?: string,
 ): string {
-  const dates = [...new Set(missions.map((m) => m.mission_date))].sort();
-  if (initialDate && dates.includes(initialDate)) return initialDate;
-  if (focusMissionId) {
-    const focus = missions.find((m) => m.id === focusMissionId);
-    if (focus?.mission_date && dates.includes(focus.mission_date)) {
-      return focus.mission_date;
-    }
-  }
-  return dates[0] || "";
+  return resolveBoardDate(missions, initialDate, focusMissionId);
 }
 
 type SwapMode = "take" | "swap" | null;
@@ -179,7 +172,7 @@ export function BoardClient({
     [missions, activeDate],
   );
 
-  const guardsMission = dayMissions.find((m) => m.mission_type === "guards");
+  const guardsMission = pickTypedDayMission(dayMissions, "guards", focusMissionId);
   const linkedBaseWorkId = guardsMission?.scheduling_rules?.linked_mission_id;
   const visibleDayMissions = useMemo(
     () =>
@@ -190,10 +183,10 @@ export function BoardClient({
   );
   const baseMission =
     (guardsMission && virtualBaseWorkMission(guardsMission)) ||
-    visibleDayMissions.find((m) => m.mission_type === "base_work") ||
+    pickTypedDayMission(visibleDayMissions, "base_work", focusMissionId) ||
     null;
   const baseWorkMissionId = baseMission?.id ?? guardsMission?.id;
-  const kitchenMission = dayMissions.find((m) => m.mission_type === "kitchen");
+  const kitchenMission = pickTypedDayMission(dayMissions, "kitchen", focusMissionId);
   const draftMissionsOnDay = useMemo(
     () => dayMissions.filter((m) => m.status === "draft"),
     [dayMissions],
@@ -209,9 +202,23 @@ export function BoardClient({
       missions: contextMissions,
       peopleByName,
       issues: approvedIssues,
-      focusMissionIds: dayMissions.map((m) => m.id),
+      focusMissionIds: [
+        guardsMission?.id,
+        kitchenMission?.id,
+        baseWorkMissionId,
+      ].filter((id): id is string => Boolean(id)),
     });
-  }, [isAdminUser, missions, dayMissions, activeDate, peopleByName, approvedIssues]);
+  }, [
+    isAdminUser,
+    missions,
+    dayMissions,
+    activeDate,
+    peopleByName,
+    approvedIssues,
+    guardsMission?.id,
+    kitchenMission?.id,
+    baseWorkMissionId,
+  ]);
 
   const mySlots = useMemo(() => {
     return dayMissions.flatMap((m) =>
@@ -227,15 +234,14 @@ export function BoardClient({
     if (!Array.isArray(data)) return;
     setMissions(data);
     setActiveDate((current) => {
-      const nextDates = [
-        ...new Set(data.map((m: MissionDay) => m.mission_date)),
-      ].sort() as string[];
-      if (current && nextDates.includes(current)) return current;
-      return (
-        resolveInitialDate(data, initialDate, focusMissionId) ||
-        nextDates[0] ||
-        current
-      );
+      const focusedDate = focusMissionId
+        ? data.find((m: MissionDay) => m.id === focusMissionId)?.mission_date
+        : undefined;
+      return resolveBoardDate(
+        data,
+        focusedDate || initialDate || current,
+        focusMissionId,
+      ) || current;
     });
   }, [focusMissionId, initialDate, isAdminUser]);
 

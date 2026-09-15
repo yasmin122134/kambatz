@@ -37,6 +37,7 @@ export default async function BoardPage({ searchParams }: BoardPageProps) {
   return (
     <AppShell title="רשימה מלאה">
       <BoardClient
+        key={`${focusMissionId ?? ""}:${initialDate ?? ""}`}
         personName={authSession.person?.name ?? ""}
         canAssign={authSession.person !== null}
         viewerEmail={authSession.person ? undefined : authSession.user.email}
