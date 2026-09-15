@@ -441,7 +441,7 @@ describe("strict_rest constraint policy", () => {
     expect(fitsPerson(p, morningGuard!, tracker, [], scheduling, [], peopleByName)).toBe(false);
   });
 
-  it("strict_rest forbids Carmel B in parallel with ABAS", () => {
+  it("strict_rest still allows Carmel B in parallel with ABAS", () => {
     const startsAt = "2026-08-21T20:00:00+03:00";
     const endsAt = "2026-08-22T20:00:00+03:00";
     const positions = buildGuardDayPositions({
@@ -472,10 +472,10 @@ describe("strict_rest constraint policy", () => {
     )!;
     const tracker = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
     placePerson(p.name, carmel, mission.id, tracker, rules, scheduling, carmel.seatCount, "guards");
-    expect(fitsPerson(p, abas, tracker, [], scheduling, [], peopleByName)).toBe(false);
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], peopleByName)).toBe(true);
     expect(
       explainFitsPersonFailure(p, abas, tracker, [], scheduling, [], peopleByName),
-    ).toBe("overlapsSlot");
+    ).toBe(null);
   });
 
   it("stripAbasTimeViolations removes an ABAS seat that overlaps a guard", () => {
@@ -638,7 +638,11 @@ describe("coverage fill priority", () => {
     });
     expect((filled.assignments[guard.slotId] || []).filter(Boolean)).toHaveLength(1);
     expect((filled.assignments[reserve.slotId] || []).filter(Boolean)).toHaveLength(1);
-    expect((filled.assignments[ham.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect((filled.assignments[ham.slotId] || []).filter(Boolean)).toHaveLength(1);
+    const guardName = filled.assignments[guard.slotId][0];
+    const reserveName = filled.assignments[reserve.slotId][0];
+    expect(filled.assignments[ham.slotId][0]).toBe(reserveName);
+    expect(filled.assignments[ham.slotId][0]).not.toBe(guardName);
   });
 
   it("breaks rest to fill a guard, but not to fill hamagshiyot", () => {

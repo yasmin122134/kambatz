@@ -212,6 +212,26 @@ export function isReserveForceBlock(
   return isReserveForceSlot(block);
 }
 
+/** חמגשיות בלוח שמירות — לא מטבח יום ולא עב״ס. */
+export function isHamagshiyotAssignment(
+  kind: MissionPositionKind,
+  type: MissionType,
+  meta?: BaseWorkAssignmentMeta,
+): boolean {
+  const name = meta?.positionName ?? "";
+  if (isHamagshiyotPositionName(name)) return true;
+  if (
+    kind === "kitchen" &&
+    type === "guards" &&
+    meta?.startTime &&
+    meta?.endTime &&
+    isHamagshiyotShiftSlot(meta.startTime, meta.endTime)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 export type CoverageFillTier = "mandatory" | "reserve" | "hamagshiyot";
 
 /** חמגשיות נשארות ריקות ראשונות, אחר כך עתודה; כל השאר חייב איוש. */

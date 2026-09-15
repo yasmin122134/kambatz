@@ -242,6 +242,17 @@ export function validateAbasRosterIndependent(
           continue;
         }
 
+        const aHam = a.name.includes("חמגש");
+        const bHam = b.name.includes("חמגש");
+        const aReserve = a.name.includes("עתודה");
+        const bReserve = b.name.includes("עתודה");
+        const hamagshiyotParallel =
+          (aHam && (b.isCarmelB || bReserve)) || (bHam && (a.isCarmelB || aReserve));
+
+        if (overlap && hamagshiyotParallel) {
+          continue;
+        }
+
         if (overlap && !(a.kind === "patrol" && b.kind === "officer_duty") && !(b.kind === "patrol" && a.kind === "officer_duty")) {
           violations.push(`${person}: overlap ${a.label} ∩ ${b.label}`);
         }

@@ -781,6 +781,64 @@ describe("hamagshiyot must not overlap other duties", () => {
     placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
     expect(fitsPerson(p, patrol, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
   });
+
+  it("allows hamagshiyot in parallel with Carmel B and reserve force", () => {
+    const guard = eveningGuardBundle(
+      "2026-08-21T09:00:00+03:00",
+      "2026-08-22T09:00:00+03:00",
+    );
+    const slots = flattenMissionSlots(guard);
+    const ham = slots.find((s) => s.positionName === "חמגשיות" && s.startTime === "18:00")!;
+    const carmel = slots.find((s) => s.positionKind === "standby_carmel_b")!;
+    const reserve = slots.find(
+      (s) =>
+        s.positionName.includes("עתודה") &&
+        s.startAtMs < ham.endAtMs &&
+        ham.startAtMs < s.endAtMs,
+    )!;
+    expect(carmel.startAtMs < ham.endAtMs && ham.startAtMs < carmel.endAtMs).toBe(true);
+
+    const people = { [p.name]: p };
+    const withCarmel = buildTrackerFromMissions([], rules);
+    placePerson(p.name, carmel, guard.id, withCarmel, rules, scheduling, carmel.seatCount, "guards");
+    expect(fitsPerson(p, ham, withCarmel, [], scheduling, [], people)).toBe(true);
+
+    const withReserve = buildTrackerFromMissions([], rules);
+    placePerson(p.name, reserve, guard.id, withReserve, rules, scheduling, reserve.seatCount, "guards");
+    expect(fitsPerson(p, ham, withReserve, [], scheduling, [], people)).toBe(true);
+
+    const hamSeats = Array(ham.seatCount).fill("");
+    hamSeats[0] = p.name;
+    const carmelSeats = Array(carmel.seatCount).fill("");
+    carmelSeats[0] = p.name;
+    const reserveSeats = Array(reserve.seatCount).fill("");
+    reserveSeats[0] = p.name;
+
+    expect(
+      validateNoPersonOverlaps([
+        {
+          ...guard,
+          assignments: {
+            ...guard.assignments,
+            [ham.slotId]: hamSeats,
+            [carmel.slotId]: carmelSeats,
+          },
+        },
+      ]).filter((m) => m.includes("חפיפה")),
+    ).toEqual([]);
+    expect(
+      validateNoPersonOverlaps([
+        {
+          ...guard,
+          assignments: {
+            ...guard.assignments,
+            [ham.slotId]: hamSeats,
+            [reserve.slotId]: reserveSeats,
+          },
+        },
+      ]).filter((m) => m.includes("חפיפה")),
+    ).toEqual([]);
+  });
 });
 
 describe("ABAS may overlap only Carmel B", () => {
@@ -896,6 +954,46 @@ describe("ABAS may overlap only Carmel B", () => {
         "base_work",
         { positionName: "קצין תורן" },
         abasMeta,
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "standby_carmel_b",
+        "guards",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        { positionName: "כרמל ב׳ (כוננות)" },
+      ),
+    ).toBe(true);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "duty",
+        "guards",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        { positionName: "כוח עתודה", startTime: "18:00", endTime: "21:00" },
+      ),
+    ).toBe(true);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "standby_carmel_a",
+        "guards",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        { positionName: "כרמל א׳ (כוננות)" },
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "guard",
+        "guards",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        { positionName: "פטל", startTime: "18:00", endTime: "21:00" },
       ),
     ).toBe(false);
   });

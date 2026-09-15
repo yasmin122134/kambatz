@@ -22,10 +22,12 @@ import {
   flattenMissionSlots,
   isBaseWorkAssignment,
   isGuardKind,
+  isHamagshiyotAssignment,
   isKitchenMissionSlot,
   isRestConstrainedGuardKind,
   isObservationPost,
   isReserveForceBlock,
+  isReserveForcePositionName,
   isStandbyKind,
   normalizeSchedulingRules,
   resolveMissionForSlot,
@@ -258,7 +260,7 @@ export function carmelBlocksAbas(
   return (aCarmelA && bBaseWork) || (bCarmelA && aBaseWork);
 }
 
-/** כרמל ב׳ מותר במקביל לעב״ס בלבד; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
+/** כרמל ב׳↔עב״ס; חמגשיות↔כרמל ב׳/עתודה; קצין תורן↔פטרול שלו. כל שאר החפיפות אסורות בכל סוגי השיבוץ. */
 export function allowsParallelAssignmentOverlap(
   kindA: MissionPositionKind,
   typeA: MissionType,
@@ -276,6 +278,15 @@ export function allowsParallelAssignmentOverlap(
   if (aBaseWork || bBaseWork) {
     return (aBaseWork && bCarmelB && !bBaseWork) || (bBaseWork && aCarmelB && !aBaseWork);
   }
+  const aHam = isHamagshiyotAssignment(kindA, typeA, metaA);
+  const bHam = isHamagshiyotAssignment(kindB, typeB, metaB);
+  const aReserve = isReserveForcePositionName(metaA?.positionName);
+  const bReserve = isReserveForcePositionName(metaB?.positionName);
+  // חמגשיות: מותר במקביל לכרמל ב׳ ולכוח עתודה בלבד.
+  if (aHam || bHam) {
+    if (aHam && bHam) return false;
+    return (aHam && (bCarmelB || bReserve)) || (bHam && (aCarmelB || aReserve));
+  }
   const aPatrol = kindA === "patrol";
   const bPatrol = kindB === "patrol";
   const aOfficer = kindA === "officer_duty";
@@ -286,9 +297,9 @@ export function allowsParallelAssignmentOverlap(
 function parallelOverlapAllowed(
   slot: FlatSlot,
   block: BusyBlock,
-  tracker?: ScheduleTracker,
+  _tracker?: ScheduleTracker,
 ): boolean {
-  const allowed = allowsParallelAssignmentOverlap(
+  return allowsParallelAssignmentOverlap(
     slot.positionKind,
     slot.missionType,
     block.positionKind,
@@ -304,22 +315,6 @@ function parallelOverlapAllowed(
       endTime: block.endTime,
     },
   );
-  if (!allowed) return false;
-  const policy = trackerConstraintPolicy(tracker);
-  if (policy === "standard") return true;
-  const slotAbas = isBaseWorkAssignment(
-    slot.positionKind,
-    slot.missionType,
-    assignmentMeta(slot),
-  );
-  const blockAbas = isBaseWorkAssignment(
-    block.positionKind,
-    block.missionType,
-    assignmentMeta(block),
-  );
-  // חלוקה קשיחה: עב״ס לא חולק זמן עם כרמל ב׳ / עתודה (ולא עם שום מקביל אחר).
-  if (slotAbas || blockAbas) return false;
-  return true;
 }
 
 export function blockedByIssue(
