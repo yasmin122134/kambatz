@@ -1099,4 +1099,83 @@ describe("ABAS may overlap only Carmel B", () => {
     expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
     expect(validateNoPersonOverlaps([assignPair(mission, carmel, abas)])).toHaveLength(0);
   });
+
+  it("does not treat Thursday 05:00–09:00 guard as overlapping Wednesday 08:30 ABAS", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const overnight = slots.find(
+      (s) => s.positionKind === "guard" && s.startTime === "05:00" && s.endTime === "09:00",
+    )!;
+    expect(abas.startAtMs).toBe(Date.parse("2026-08-21T08:30:00+03:00"));
+    expect(overnight.startAtMs).toBe(Date.parse("2026-08-22T05:00:00+03:00"));
+    expect(overnight.endAtMs).toBe(Date.parse("2026-08-22T09:00:00+03:00"));
+    expect(abas.endAtMs <= overnight.startAtMs || overnight.endAtMs <= abas.startAtMs).toBe(true);
+
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(
+      p.name,
+      overnight,
+      mission.id,
+      tracker,
+      rules,
+      scheduling,
+      overnight.seatCount,
+      "guards",
+    );
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+    expect(validateNoPersonOverlaps([assignPair(mission, overnight, abas)])).toHaveLength(0);
+    expect(
+      collectRosterWarnings({
+        missions: [assignPair(mission, overnight, abas)],
+        peopleByName: { [p.name]: p },
+      }).some((w) => w.includes("חפיפה")),
+    ).toBe(false);
+  });
+
+  it("warns and strips Wednesday 08:30 ABAS overlapping a 09:00–13:00 guard", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const guard0900 = slots.find(
+      (s) => s.positionKind === "guard" && s.startTime === "09:00" && s.endTime === "13:00",
+    )!;
+    expectHardOverlap(mission, guard0900, abas);
+    const warnings = collectRosterWarnings({
+      missions: [assignPair(mission, guard0900, abas)],
+      peopleByName: { [p.name]: p },
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes(p.name))).toBe(true);
+    expect(warnings.some((w) => w.includes("עב״ס") && w.includes(p.name))).toBe(true);
+  });
+
+  it("allows hamagshiyot only with Carmel B or reserve, and still warns other ham overlaps", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const ham = slots.find(
+      (s) => s.positionName === "חמגשיות" && s.startTime === "18:00",
+    )!;
+    const carmelB = slots.find((s) => s.positionKind === "standby_carmel_b")!;
+    const reserve = slots.find(
+      (s) =>
+        s.positionName.includes("עתודה") &&
+        s.startAtMs < ham.endAtMs &&
+        ham.startAtMs < s.endAtMs,
+    )!;
+    const guard = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < ham.endAtMs &&
+        ham.startAtMs < s.endAtMs,
+    )!;
+    expect(validateNoPersonOverlaps([assignPair(mission, ham, carmelB)])).toHaveLength(0);
+    expect(validateNoPersonOverlaps([assignPair(mission, ham, reserve)])).toHaveLength(0);
+    expect(validateNoPersonOverlaps([assignPair(mission, ham, guard)]).length).toBeGreaterThan(0);
+    expect(
+      collectRosterWarnings({
+        missions: [assignPair(mission, ham, guard)],
+        peopleByName: { [p.name]: p },
+      }).some((w) => w.includes("חפיפה") && w.includes(p.name)),
+    ).toBe(true);
+  });
 });

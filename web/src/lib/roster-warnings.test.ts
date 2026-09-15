@@ -421,7 +421,7 @@ describe("collectRosterWarnings", () => {
     expect(warnings.some((w) => w.includes("מנוחה") && w.includes("נדרש 8"))).toBe(true);
   });
 
-  it("warns short rest between ABAS and a later guard even when the minute-gap is ok", () => {
+  it("does not require rest_hours between ABAS and a later guard when the mission minute-gap is ok", () => {
     const mission: MissionDay = {
       id: "m-abas-rest",
       title: "שמירות",
@@ -459,9 +459,7 @@ describe("collectRosterWarnings", () => {
       peopleByName: { Alex: person("Alex") },
     });
     expect(warnings.some((w) => w.includes("חפיפה"))).toBe(false);
-    expect(
-      warnings.some((w) => w.includes("מנוחה") && w.includes("עב״ס") && w.includes("נדרש 8")),
-    ).toBe(true);
+    expect(warnings.some((w) => w.includes("מנוחה") && w.includes("עב״ס"))).toBe(false);
   });
 
   it("warns leftover linked ABAS overlapping a 09:00 guard when focus is only the guards mission", () => {

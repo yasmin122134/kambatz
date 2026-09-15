@@ -140,7 +140,7 @@ describe("strict_rest constraint policy", () => {
     expect(fitsPerson(p, second, tracker, [], scheduling, [], peopleByName)).toBe(true);
   });
 
-  it("strict_rest rejects ABAS then a guard when idle is under rest_hours", () => {
+  it("strict_rest allows ABAS then a guard when idle meets the mission ABAS gap, even if under rest_hours", () => {
     const abas = missionWithSlots(
       [{ id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 }],
       { id: "b1", mission_type: "base_work", title: "עב״ס" },
@@ -157,10 +157,10 @@ describe("strict_rest constraint policy", () => {
 
     const strict = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
     placePerson(p.name, abasSlot, abas.id, strict, rules, scheduling, 1, "base_work");
-    expect(fitsPerson(p, guardSlot, strict, [], scheduling, [], peopleByName)).toBe(false);
+    expect(fitsPerson(p, guardSlot, strict, [], scheduling, [], peopleByName)).toBe(true);
     expect(
       explainFitsPersonFailure(p, guardSlot, strict, [], scheduling, [], peopleByName),
-    ).toBe("guardRestGap");
+    ).toBe(null);
   });
 
   it("strict_rest and standard both reject ABAS→guard idle under the defined gap", () => {
@@ -257,7 +257,7 @@ describe("strict_rest constraint policy", () => {
     expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 
-  it("strict last-resort may break rest_hours for a 3.5h ABAS→guard gap, with a warning", () => {
+  it("strict last-resort is not needed for a 3.5h ABAS→guard gap when the mission minute-gap is met", () => {
     const mission = missionWithSlots([
       { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
       { id: "g", name: "פטל", kind: "guard", start: "15:00", end: "16:00", seats: 1 },
@@ -287,7 +287,6 @@ describe("strict_rest constraint policy", () => {
     });
     expect(lastResort.assignments[guardSlot.slotId]?.[0]).toBe(p.name);
     expect(lastResort.filled).toBe(1);
-    expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 
   it("never fills ABAS↔guard under the defined minute-gap, even as last resort", () => {

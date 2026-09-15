@@ -44,6 +44,7 @@ import { isSeatLocked } from "@/lib/assignment-lock";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
   intervalsOverlap,
+  localMissionMidnightMs,
   parseTimeMinutes,
   slotDurationMinutes,
   type TimeInterval,
@@ -715,6 +716,7 @@ export function stripAbasTimeViolations(input: {
           tracker,
           input.scheduling.rest_hours,
           restMode,
+          dutyGuardGapMinutes(input.scheduling),
         );
       if (overlapsSlot(name, slot, tracker, input.scheduling) || restBroken) {
         seats[seatIndex] = "";
@@ -788,9 +790,19 @@ export function clearOverlappingAbasAssignments(input: {
           continue;
         }
         if (
-          !assignmentIntervalsOverlap(
-            { startMs: a.startAtMs, endMs: a.endAtMs },
-            { startMs: b.startAtMs, endMs: b.endAtMs },
+          !visibleTimeOverlap(
+            labeledInterval({
+              startMs: a.startAtMs,
+              endMs: a.endAtMs,
+              startTime: a.startTime,
+              endTime: a.endTime,
+            }),
+            labeledInterval({
+              startMs: b.startAtMs,
+              endMs: b.endAtMs,
+              startTime: b.startTime,
+              endTime: b.endTime,
+            }),
           )
         ) {
           continue;
@@ -825,16 +837,20 @@ function restOk(
   return 1440 - worked - slot.durationMinutes >= restMin;
 }
 
-/** Idle minutes between two rest-consuming posts (guard↔guard or ABAS↔guard) ≥ rest_hours. */
+/**
+ * Guard↔guard: idle ≥ rest_hours.
+ * ABAS↔guard: idle ≥ duty_guard_gap_minutes of this mission day (not rest_hours).
+ */
 function strictRestGapOk(
   personName: string,
   slot: FlatSlot,
   tracker: ScheduleTracker,
   restHours: number,
   mode: "all" | "abas_guard" = "all",
+  abasGuardGapMin = 60,
 ): boolean {
   const restMin = Math.max(0, restHours) * 60;
-  if (restMin <= 0) return true;
+  const gapMin = Math.max(0, abasGuardGapMin);
   const slotIsGuard = isRestConstrainedGuardKind(slot.positionKind);
   const slotIsAbas = isBaseWorkAssignment(
     slot.positionKind,
@@ -846,6 +862,7 @@ function strictRestGapOk(
   const slotIv = slotInterval(slot);
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
+    if (!sameOperationalDay(slot, b)) continue;
     const blockIsGuard = isRestConstrainedGuardKind(b.positionKind);
     const blockIsAbas = isBaseWorkAssignment(
       b.positionKind,
@@ -854,16 +871,16 @@ function strictRestGapOk(
     );
     const abasGuardPair =
       (slotIsGuard && blockIsAbas) || (slotIsAbas && blockIsGuard);
-    const pairNeedsRest =
-      mode === "abas_guard"
-        ? abasGuardPair
-        : (slotIsGuard && blockIsGuard) || abasGuardPair;
-    if (!pairNeedsRest) continue;
     const blockIv = blockInterval(b);
     if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
     const idle = idleGapMinutes(slotIv, blockIv);
     if (idle == null) continue;
-    if (idle < restMin) return false;
+    if (abasGuardPair) {
+      if (idle < gapMin) return false;
+      continue;
+    }
+    if (mode === "abas_guard") continue;
+    if (slotIsGuard && blockIsGuard && restMin > 0 && idle < restMin) return false;
   }
   return true;
 }
@@ -962,8 +979,8 @@ function overlapsSlot(
     if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
-    const sameMorningWall =
-      labeledMinutesOverlap(
+    if (
+      visibleTimeOverlap(
         labeledInterval({
           startMs: slot.startAtMs,
           endMs: slot.endAtMs,
@@ -976,8 +993,8 @@ function overlapsSlot(
           startTime: b.startTime,
           endTime: b.endTime,
         }),
-      ) && Math.abs(slot.startAtMs - b.startAtMs) < 16 * 60 * 60 * 1000;
-    if (assignmentIntervalsOverlap(slotIv, blockIv) || sameMorningWall) {
+      )
+    ) {
       return true;
     }
 
@@ -1387,6 +1404,7 @@ export function explainFitsPersonFailure(
           tracker,
           scheduling.rest_hours,
           skipGuardGuardRest ? "abas_guard" : "all",
+          dutyGuardGapMinutes(scheduling),
         )
       ) {
         return "guardRestGap";
@@ -1785,14 +1803,42 @@ function collectSpacingAndRestWarnings(
       assignmentMeta(b),
     );
 
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) {
+    if (
+      visibleTimeOverlap(
+        labeledInterval({
+          startMs: slot.startAtMs,
+          endMs: slot.endAtMs,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        }),
+        labeledInterval({
+          startMs: b.startAtMs,
+          endMs: b.endAtMs,
+          startTime: b.startTime,
+          endTime: b.endTime,
+        }),
+      )
+    ) {
       msgs.push(
         `${personName}: חפיפה עם ${describeAssignmentBlock(b)} (${slot.positionName} ${slot.timeLabel})`,
       );
       continue;
     }
 
-    const idle = idleGapMinutes(slotIv, blockIv);
+    const idle = visibleIdleMinutes(
+      labeledInterval({
+        startMs: slot.startAtMs,
+        endMs: slot.endAtMs,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      }),
+      labeledInterval({
+        startMs: b.startAtMs,
+        endMs: b.endAtMs,
+        startTime: b.startTime,
+        endTime: b.endTime,
+      }),
+    );
     if (idle == null) continue;
 
     if (dutyGuard && idle < gapMin) {
@@ -1809,28 +1855,6 @@ function collectSpacingAndRestWarnings(
     if (slotIsGuardPost && blockIsGuardPost && restMin > 0 && idle < restMin) {
       msgs.push(
         `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${b.startTime}–${b.endTime} ו-${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
-      );
-    }
-
-    const slotIsAbas = isBaseWorkAssignment(
-      slot.positionKind,
-      slot.missionType,
-      assignmentMeta(slot),
-    );
-    const blockIsAbas = isBaseWorkAssignment(
-      b.positionKind,
-      b.missionType,
-      assignmentMeta(b),
-    );
-    if (
-      restMin > 0 &&
-      idle < restMin &&
-      ((slotIsAbas && blockIsGuardPost) || (blockIsAbas && slotIsGuardPost))
-    ) {
-      msgs.push(
-        slotIsGuardPost
-          ? `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס ${b.startTime}–${b.endTime} לשמירה ${slot.timeLabel} (נדרש ${scheduling.rest_hours})`
-          : `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירה ${b.startTime}–${b.endTime} לעב״ס ${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
       );
     }
 
@@ -1925,12 +1949,6 @@ export function pickRestRelaxedCandidate(
     if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
     if (blockedByIssue(p.name, slot, issues)) return false;
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
-    const slotIv = slotInterval(slot);
-    for (const b of tracker.busy[p.name] || []) {
-      if (b.slotId === slot.slotId) continue;
-      if (parallelOverlapAllowed(slot, b, tracker)) continue;
-      if (assignmentIntervalsOverlap(slotIv, blockInterval(b))) return false;
-    }
     if (
       isGuardKind(slot.positionKind) &&
       !guardOk(p.name, slot, tracker, effectiveGuardRatio(scheduling))
@@ -3480,6 +3498,11 @@ function labeledMinutesOverlap(a: LabeledInterval, b: LabeledInterval): boolean 
   return false;
 }
 
+/** Same Israel local calendar date — Wednesday 08:30 is not Thursday 05:00. */
+function sameLocalCalendarDay(aMs: number, bMs: number): boolean {
+  return localMissionMidnightMs(aMs) === localMissionMidnightMs(bMs);
+}
+
 function visibleTimeOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
   if (
     assignmentIntervalsOverlap(
@@ -3490,9 +3513,9 @@ function visibleTimeOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
     return true;
   }
   if (!labeledMinutesOverlap(a, b)) return false;
-  const startGapMs = Math.abs(a.startMs - b.startMs);
-  // אותו בוקר / ערב באותו יום משימה — תוויות שעון חופפות גם אם ISO ישן פיצל אותן.
-  return startGapMs < 16 * 60 * 60 * 1000;
+  // תוויות שעון חופפות באותו יום לוח — תופס ISO ישן שהזיז משמרת בכמה שעות.
+  // לא מערבבים בוקר רביעי (08:30 עב״ס) עם בוקר חמישי (05:00–09:00 שמירה).
+  return sameLocalCalendarDay(a.startMs, b.startMs);
 }
 
 function labeledIdleMinutes(a: LabeledInterval, b: LabeledInterval): number | null {
@@ -3515,8 +3538,7 @@ function visibleIdleMinutes(a: LabeledInterval, b: LabeledInterval): number | nu
     { startMs: a.startMs, endMs: a.endMs },
     { startMs: b.startMs, endMs: b.endMs },
   );
-  const startGapMs = Math.abs(a.startMs - b.startMs);
-  if (startGapMs >= 16 * 60 * 60 * 1000) return abs;
+  if (!sameLocalCalendarDay(a.startMs, b.startMs)) return abs;
   const wall = labeledIdleMinutes(a, b);
   if (wall == null) return abs;
   if (abs == null) return wall;
@@ -3629,25 +3651,18 @@ export function validateShortRestGaps(
         if (visibleTimeOverlap(a, b)) continue;
         const idle = visibleIdleMinutes(a, b);
         if (idle == null) continue;
-        const restHours = Math.max(a.restHours, b.restHours);
-        const restMin = Math.max(0, restHours) * 60;
-        const gapMin = Math.max(a.dutyGuardGapMin, b.dutyGuardGapMin);
         const aGuard = isRestConstrainedGuardKind(a.positionKind);
         const bGuard = isRestConstrainedGuardKind(b.positionKind);
         const aAbas = trackedIsAbas(a);
         const bAbas = trackedIsAbas(b);
         const abasGuard = (aAbas && bGuard) || (bAbas && aGuard);
+        const restHours = aGuard ? a.restHours : b.restHours;
+        const restMin = Math.max(0, restHours) * 60;
+        const gapMin = aGuard ? a.dutyGuardGapMin : b.dutyGuardGapMin;
 
         if (aGuard && bGuard && restMin > 0 && idle < restMin) {
           messages.push(
             `${person}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${a.startTime}–${a.endTime} ו-${b.startTime}–${b.endTime} (נדרש ${restHours})`,
-          );
-        }
-        if (abasGuard && restMin > 0 && idle < restMin) {
-          const abas = aAbas ? a : b;
-          const guard = aGuard ? a : b;
-          messages.push(
-            `${person}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס ${abas.startTime}–${abas.endTime} לשמירה ${guard.startTime}–${guard.endTime} (נדרש ${restHours})`,
           );
         }
         if (abasGuard && idle < gapMin) {
