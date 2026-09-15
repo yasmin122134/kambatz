@@ -971,7 +971,7 @@ button:hover,
 
 .guard-timeline-slot:hover,
 .guard-timeline-slot:focus-within {
-  z-index: 8;
+  z-index: 20;
 }
 
 .guard-timeline-slot .slot-card {
@@ -980,14 +980,15 @@ button:hover,
   flex-direction: column;
   padding: 0.25rem 0.4rem;
   overflow: hidden;
-  overscroll-behavior: none;
+  overscroll-behavior: contain;
 }
 
 .guard-timeline-slot:hover .slot-card,
 .guard-timeline-slot:focus-within .slot-card {
   height: auto;
   min-height: 100%;
-  overflow: visible;
+  max-height: min(22rem, 70vh);
+  overflow: hidden;
   box-shadow: 0 10px 28px rgba(109, 91, 158, 0.18);
 }
 
@@ -1041,13 +1042,16 @@ button:hover,
 .slot-card-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin: 0.15rem 0;
 }
 
 .guard-timeline-slot:hover .slot-card-body,
 .guard-timeline-slot:focus-within .slot-card-body {
-  overflow: visible;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .slot-card-body ul {
@@ -1122,4 +1126,53 @@ button:hover,
 
 .admin-roster-meta b {
   display: block;
+}
+
+.name-combobox-menu {
+  position: fixed;
+  z-index: 80;
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-md);
+  box-shadow: 0 10px 28px rgba(28, 25, 23, 0.16);
+}
+
+.name-combobox-empty {
+  padding: 8px 12px;
+  color: var(--color-ink3);
+  font-size: 12.5px;
+}
+
+.name-combobox-option {
+  display: block;
+  width: 100%;
+  text-align: inherit;
+  font-weight: 500;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 12px;
+  box-shadow: none;
+}
+
+.name-combobox-option:hover {
+  background: var(--color-accent-bg);
+  border-color: transparent;
+}
+
+.replacement-picker-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 260px;
+  max-width: min(24rem, calc(100vw - 16px));
+  max-height: min(24rem, calc(100vh - 16px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }

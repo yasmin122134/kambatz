@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { AddToCalendarLink } from "@/components/AddToCalendarLink";
 import {
@@ -2028,11 +2029,14 @@ function ReplacementPicker({
   isKitchenSlot?: boolean;
   onApply: (option: ReplacementApplyOption) => Promise<boolean>;
 }) {
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<"replace" | "swap" | "manual">("replace");
   const [manualName, setManualName] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [menuBox, setMenuBox] = useState<{ top: number; left: number } | null>(null);
   const [options, setOptions] = useState<
     {
       type: "direct" | "swap";
@@ -2044,6 +2048,60 @@ function ReplacementPicker({
       swapSeatIndex?: number;
     }[]
   >([]);
+
+  function updateMenuBox() {
+    const el = buttonRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const width = Math.min(320, window.innerWidth - 16);
+    let left = rect.right - width;
+    if (left < 8) left = 8;
+    if (left + width > window.innerWidth - 8) {
+      left = window.innerWidth - width - 8;
+    }
+    const estimatedHeight = Math.min(window.innerHeight - 16, 384);
+    let top = rect.bottom + 4;
+    if (top + 180 > window.innerHeight) {
+      top = Math.max(8, rect.top - estimatedHeight - 4);
+    }
+    setMenuBox({ top, left });
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuBox(null);
+      return;
+    }
+    updateMenuBox();
+    const onWin = () => updateMenuBox();
+    window.addEventListener("resize", onWin);
+    window.addEventListener("scroll", onWin, true);
+    return () => {
+      window.removeEventListener("resize", onWin);
+      window.removeEventListener("scroll", onWin, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (buttonRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".name-combobox-menu")) return;
+      setOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   async function load(nextMode: "replace" | "swap") {
     setMode(nextMode);
@@ -2068,20 +2126,20 @@ function ReplacementPicker({
 
   if (!currentName) return null;
 
-  return (
-    <div className="relative">
-      <button type="button" className="btn-sm" onClick={() => load("replace")}>
-        מחליף
-      </button>
-      {open && (
-        <div className="absolute z-50 mt-1 min-w-[260px] max-w-sm card shadow-lg p-3 text-sm right-0">
+  const panel = open && menuBox && typeof document !== "undefined"
+    ? createPortal(
+        <div
+          ref={menuRef}
+          className="replacement-picker-menu card shadow-lg p-3 text-sm"
+          style={{ top: menuBox.top, left: menuBox.left }}
+        >
           <div className="bar spread mb-2">
             <b>מחליף ל{currentName}</b>
             <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
               ×
             </button>
           </div>
-          <div className="flex gap-1 mb-2">
+          <div className="flex gap-1 mb-2 flex-wrap">
             <button
               type="button"
               className={`btn-sm ${mode === "replace" ? "on" : ""}`}
@@ -2145,7 +2203,7 @@ function ReplacementPicker({
           ) : options.length === 0 ? (
             <p className="hint">אין מחליף שעומד בכללים</p>
           ) : (
-            <ul className="space-y-2 max-h-72 overflow-y-auto">
+            <ul className="space-y-2">
               {options.map((o) => (
                 <li key={`${o.type}-${o.personName}-${o.swapSlotId || ""}`}>
                   <button
@@ -2189,8 +2247,22 @@ function ReplacementPicker({
               ))}
             </ul>
           )}
-        </div>
-      )}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <div className="relative">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="btn-sm"
+        onClick={() => load("replace")}
+      >
+        מחליף
+      </button>
+      {panel}
     </div>
   );
 }
