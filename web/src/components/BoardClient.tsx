@@ -27,7 +27,7 @@ import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
-import { omitLegacyLinkedBaseWorkMissions } from "@/lib/guard-day-bundle";
+import { omitLegacyLinkedBaseWorkMissions } from "@/lib/guard-day-scope";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";

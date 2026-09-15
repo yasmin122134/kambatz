@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { defaultBaseWorkPositions } from "@/lib/base-work-template";
+import { planLinkedBaseWorkConsolidation } from "@/lib/guard-day-bundle";
 import {
   missionsForDateAssignScope,
   omitLegacyLinkedBaseWorkMissions,
-  planLinkedBaseWorkConsolidation,
-} from "@/lib/guard-day-bundle";
+} from "@/lib/guard-day-scope";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 

@@ -1,9 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
+import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
 import {
-  linkedGuardDayAssignScope,
   missionsForDateAssignScope,
   omitLegacyLinkedBaseWorkMissions,
-} from "@/lib/guard-day-bundle";
+} from "@/lib/guard-day-scope";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import { hashStringsToSeed } from "@/lib/seeded-random";
