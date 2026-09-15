@@ -153,7 +153,7 @@ export type ScheduleTracker = {
    * standard — current smart assign (4–8 ratio, daily rest, ABAS gap).
    * strict_rest — rest_hours idle between guards and between ABAS↔guard.
    * relaxed_rest — last-resort: skip rest_hours idle / daily rest, keep ABAS minute-gap.
-   * coverage — last resort: skip rest_hours, ABAS gap, daily rest, room/gender.
+   * coverage — unused in strict assign; skip rest_hours, ABAS gap, daily rest, room/gender.
    */
   constraintPolicy?: AssignConstraintPolicy;
 };
@@ -1707,7 +1707,7 @@ export function forceFillEmptySeats(input: {
         input.meanPrior,
         pickOpts(slot),
       );
-      let lastResort: "relaxed_rest" | "coverage" | false = false;
+      let lastResort = false;
 
       if (!chosen && policy === "standard") {
         chosen =
@@ -1751,8 +1751,8 @@ export function forceFillEmptySeats(input: {
 
       if (!chosen && policy === "strict_rest" && input.allowCoverageFill) {
         const prevPolicy = input.tracker.constraintPolicy;
+        input.tracker.constraintPolicy = "relaxed_rest";
         try {
-          input.tracker.constraintPolicy = "relaxed_rest";
           const relaxed = input.people.filter(
             (p) =>
               !inSlot.has(p.name) &&
@@ -1774,33 +1774,7 @@ export function forceFillEmptySeats(input: {
             input.meanPrior,
             pickOpts(slot),
           );
-          if (chosen) {
-            lastResort = "relaxed_rest";
-          } else {
-            input.tracker.constraintPolicy = "coverage";
-            const coverage = input.people.filter(
-              (p) =>
-                !inSlot.has(p.name) &&
-                fitsPerson(
-                  p,
-                  slot,
-                  input.tracker,
-                  input.issues,
-                  input.scheduling,
-                  mates,
-                  peopleByName,
-                ),
-            );
-            chosen = pickBestCandidate(
-              coverage,
-              slot,
-              input.tracker,
-              input.rules,
-              input.meanPrior,
-              pickOpts(slot),
-            );
-            if (chosen) lastResort = "coverage";
-          }
+          lastResort = Boolean(chosen);
         } finally {
           input.tracker.constraintPolicy = prevPolicy;
         }
@@ -1814,10 +1788,7 @@ export function forceFillEmptySeats(input: {
       }
 
       if (lastResort) {
-        const msg =
-          lastResort === "relaxed_rest"
-            ? `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות — מרווח עב״ס נשמר`
-            : `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה בין שמירות או מרווח עב״ס — לא נמצא שיבוץ אחר שממלא`;
+        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות — מרווח עב״ס וחפיפה נשמרו`;
         if (!warnings.includes(msg)) warnings.push(msg);
       }
 
