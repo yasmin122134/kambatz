@@ -50,7 +50,7 @@ export async function POST(request: Request) {
   const payload = {
     id: target?.id,
     title: draft.title,
-    mission_type: draft.mission_type as const,
+    mission_type: "guards" as const,
     mission_date: draft.mission_date,
     starts_at: draft.starts_at,
     ends_at: draft.ends_at,
