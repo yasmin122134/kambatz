@@ -89,6 +89,9 @@ export async function assignPersonToMissionSlot(input: {
     issues,
     rules,
   });
+  if (warnings.some((w) => w.includes("חפיפה"))) {
+    throw new Error(warnings[0]);
+  }
 
   const updated = applyManualSlotAssignment(
     mission,

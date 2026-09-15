@@ -81,6 +81,20 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
     expect(iv?.endMs).toBe(Date.parse(endsAt));
   });
 
+  it("ignores stored ISO that disagrees with wall-clock labels", () => {
+    const iv = resolveCanonicalSlotInterval(
+      { starts_at: startsAt, ends_at: endsAt },
+      {
+        start_time: "09:00",
+        end_time: "13:00",
+        starts_at: "2026-08-21T21:00:00+03:00",
+        ends_at: "2026-08-22T00:00:00+03:00",
+      },
+    );
+    expect(iv?.startMs).toBe(Date.parse(startsAt));
+    expect(iv?.endMs).toBe(Date.parse("2026-08-21T13:00:00+03:00"));
+  });
+
   it("passes mission structure validation for carmel + officer", () => {
     const carmel = carmelSlotFromMission(startsAt, endsAt, "09:00", 3);
     const officer = buildGuardDayPositions({

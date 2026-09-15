@@ -18,6 +18,7 @@ import {
   type FlatSlot,
   slotEatsRest,
   flattenMissionSlots,
+  isBaseWorkAssignment,
   isGuardKind,
   isKitchenMissionSlot,
   isRestConstrainedGuardKind,
@@ -28,10 +29,6 @@ import {
   resolveMissionForSlot,
   slotUsesWallClockSchedule,
 } from "@/lib/mission-utils";
-import {
-  isBaseWorkPositionName,
-  isBaseWorkShiftSlot,
-} from "@/lib/base-work-template";
 import { isHamagshiyotPositionName } from "@/lib/hamagshiyot-template";
 import {
   hasExplicitKitchenOutLists,
@@ -93,19 +90,7 @@ type AssignmentOverlapMeta = {
   endTime?: string;
 };
 
-export function isBaseWorkAssignment(
-  kind: MissionPositionKind,
-  type: MissionType,
-  meta?: AssignmentOverlapMeta,
-): boolean {
-  if (type === "base_work" && kind === "duty") return true;
-  if (kind !== "duty") return false;
-  if (meta?.positionName && isBaseWorkPositionName(meta.positionName)) return true;
-  if (meta?.startTime && meta?.endTime && isBaseWorkShiftSlot(meta.startTime, meta.endTime)) {
-    return true;
-  }
-  return false;
-}
+export { isBaseWorkAssignment } from "@/lib/mission-utils";
 
 function busyToBurdenBlocks(blocks: BusyBlock[]): BurdenTimelineBlock[] {
   return blocks;
@@ -270,7 +255,7 @@ export function carmelBlocksAbas(
   return (aCarmelA && bBaseWork) || (bCarmelA && aBaseWork);
 }
 
-/** כרמל ב׳ מותר במקביל לעב״ס; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
+/** כרמל ב׳ מותר במקביל לעב״ס בלבד; קצין תורן במשמרת מותר במקביל לפטרול שלו. */
 export function allowsParallelAssignmentOverlap(
   kindA: MissionPositionKind,
   typeA: MissionType,
@@ -284,7 +269,10 @@ export function allowsParallelAssignmentOverlap(
   const bCarmelB = kindB === "standby_carmel_b";
   const aBaseWork = isBaseWorkAssignment(kindA, typeA, metaA);
   const bBaseWork = isBaseWorkAssignment(kindB, typeB, metaB);
-  if ((aCarmelB && bBaseWork) || (bCarmelB && aBaseWork)) return true;
+  // עב״ס: חפיפת זמן מותרת רק מול כרמל ב׳ — לא עתודה, שמירה, חמגשיות, פטרול או קצין.
+  if (aBaseWork || bBaseWork) {
+    return (aBaseWork && bCarmelB && !bBaseWork) || (bBaseWork && aCarmelB && !aBaseWork);
+  }
   const aPatrol = kindA === "patrol";
   const bPatrol = kindB === "patrol";
   const aOfficer = kindA === "officer_duty";
@@ -700,6 +688,11 @@ export function stripAbasTimeViolations(input: {
       const name = seats[seatIndex];
       if (!name) continue;
       if (isSeatLocked(input.mission, slot.slotId, seatIndex)) {
+        if (overlapsSlot(name, slot, tracker, input.scheduling)) {
+          seats[seatIndex] = "";
+          removed += 1;
+          continue;
+        }
         placePerson(
           name,
           slot,

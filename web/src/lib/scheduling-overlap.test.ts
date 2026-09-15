@@ -15,6 +15,8 @@ import {
   assignmentNeedsSpacingGap,
   allowsParallelAssignmentOverlap,
   collectRosterWarnings,
+  isBaseWorkAssignment,
+  stripAbasTimeViolations,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -687,5 +689,228 @@ describe("hamagshiyot must not overlap other duties", () => {
     const tracker = buildTrackerFromMissions([], rules);
     placePerson(p.name, ham, guard.id, tracker, rules, scheduling, ham.seatCount, "guards");
     expect(fitsPerson(p, patrol, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+  });
+});
+
+describe("ABAS may overlap only Carmel B", () => {
+  const p = person("Alex", 1);
+  const abasMeta = { positionName: "עבודות בסיס", startTime: "08:30", endTime: "11:30" };
+
+  function nineAmBundle(): MissionDay {
+    return guardBundleMission("2026-08-21T09:00:00+03:00", "2026-08-22T09:00:00+03:00");
+  }
+
+  function assignPair(mission: MissionDay, a: ReturnType<typeof flattenMissionSlots>[number], b: ReturnType<typeof flattenMissionSlots>[number]) {
+    const assignments = { ...mission.assignments };
+    const aSeats = Array(a.seatCount).fill("");
+    aSeats[0] = p.name;
+    const bSeats = Array(b.seatCount).fill("");
+    bSeats[0] = p.name;
+    assignments[a.slotId] = aSeats;
+    assignments[b.slotId] = bSeats;
+    return { ...mission, assignments };
+  }
+
+  function expectHardOverlap(
+    mission: MissionDay,
+    other: ReturnType<typeof flattenMissionSlots>[number],
+    abas: ReturnType<typeof flattenMissionSlots>[number],
+  ) {
+    expect(other).toBeTruthy();
+    expect(abas).toBeTruthy();
+    expect(other.startAtMs < abas.endAtMs && abas.startAtMs < other.endAtMs).toBe(true);
+
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, other, mission.id, tracker, rules, scheduling, other.seatCount, other.missionType);
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(false);
+    expect(
+      explainFitsPersonFailure(p, abas, tracker, [], scheduling, [], { [p.name]: p }),
+    ).toBe("overlapsSlot");
+
+    const assigned = assignPair(mission, other, abas);
+    expect(validateNoPersonOverlaps([assigned]).length).toBeGreaterThan(0);
+    expect(findAssignmentConflicts(assigned, { [p.name]: p }).some((m) => /חפיפה/.test(m))).toBe(
+      true,
+    );
+
+    const stripped = stripAbasTimeViolations({
+      mission: assigned,
+      assignments: assigned.assignments,
+      scheduling,
+      rules,
+    });
+    expect(stripped.removed).toBeGreaterThan(0);
+    expect((stripped.assignments[abas.slotId] || []).includes(p.name)).toBe(false);
+  }
+
+  it("allows parallel only for Carmel B + ABAS", () => {
+    expect(
+      allowsParallelAssignmentOverlap(
+        "standby_carmel_b",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "כרמל ב׳ (כוננות)" },
+        abasMeta,
+      ),
+    ).toBe(true);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "standby_carmel_a",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "כרמל א׳ (כוננות)" },
+        abasMeta,
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap("guard", "guards", "duty", "base_work", { positionName: "פטל" }, abasMeta),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "duty",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "כוח עתודה", startTime: "09:00", endTime: "13:00" },
+        abasMeta,
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "kitchen",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "חמגשיות", startTime: "18:00", endTime: "19:00" },
+        abasMeta,
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "patrol",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "פטרול", startTime: "18:30", endTime: "19:00" },
+        abasMeta,
+      ),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "officer_duty",
+        "guards",
+        "duty",
+        "base_work",
+        { positionName: "קצין תורן" },
+        abasMeta,
+      ),
+    ).toBe(false);
+  });
+
+  it("does not classify reserve with ABAS hours as ABAS", () => {
+    expect(
+      isBaseWorkAssignment("duty", "guards", {
+        positionName: "כוח עתודה",
+        startTime: "13:30",
+        endTime: "17:30",
+      }),
+    ).toBe(false);
+
+    const guard = nineAmBundle();
+    const reserve = reserveForceSlot(guard);
+    const timed = withCustomSlotTimes(guard, reserve.slotId, "13:30", "17:30");
+    const slot = flattenMissionSlots(timed).find((s) => s.slotId === reserve.slotId)!;
+    expect(slot.missionType).toBe("guards");
+    expect(slot.positionKind).toBe("duty");
+    expect(
+      isBaseWorkAssignment(slot.positionKind, slot.missionType, {
+        positionName: slot.positionName,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      }),
+    ).toBe(false);
+    expect(
+      allowsParallelAssignmentOverlap(
+        "standby_carmel_b",
+        "guards",
+        slot.positionKind,
+        slot.missionType,
+        { positionName: "כרמל ב׳ (כוננות)" },
+        { positionName: slot.positionName, startTime: slot.startTime, endTime: slot.endTime },
+      ),
+    ).toBe(false);
+  });
+
+  it("rejects overlapping reserve force", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const reserve = slots.find(
+      (s) =>
+        s.positionName.includes("עתודה") &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    expectHardOverlap(mission, reserve, abas);
+  });
+
+  it("rejects overlapping guard post", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const post = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    expectHardOverlap(mission, post, abas);
+  });
+
+  it("rejects overlapping evening hamagshiyot", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "18:30")!;
+    const ham = slots.find(
+      (s) =>
+        s.positionName === "חמגשיות" &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    expectHardOverlap(mission, ham, abas);
+  });
+
+  it("rejects overlapping patrol", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "18:30")!;
+    const patrol = slots.find(
+      (s) =>
+        s.positionKind === "patrol" &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    expectHardOverlap(mission, patrol, abas);
+  });
+
+  it("rejects overlapping officer duty", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "13:30")!;
+    const officer = slots.find((s) => s.positionKind === "officer_duty")!;
+    expectHardOverlap(mission, officer, abas);
+  });
+
+  it("still allows Carmel B on the same ABAS window", () => {
+    const mission = nineAmBundle();
+    const slots = flattenMissionSlots(mission);
+    const carmel = slots.find((s) => s.positionKind === "standby_carmel_b")!;
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const tracker = buildTrackerFromMissions([], rules);
+    placePerson(p.name, carmel, mission.id, tracker, rules, scheduling, carmel.seatCount, "guards");
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], { [p.name]: p })).toBe(true);
+    expect(validateNoPersonOverlaps([assignPair(mission, carmel, abas)])).toHaveLength(0);
   });
 });

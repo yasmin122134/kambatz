@@ -11,6 +11,7 @@ import {
 import { runGlobalAssign } from "@/lib/global-assign";
 import {
   buildTrackerFromMissions,
+  explainFitsPersonFailure,
   fitsPerson,
   placePerson,
 } from "@/lib/scheduling-engine";
@@ -229,6 +230,22 @@ describe("09:00 mission-day placement", () => {
     const tracker = buildTrackerFromMissions([], DEFAULT_FAIRNESS_RULES);
     placePerson(p.name, morning, mission.id, tracker, DEFAULT_FAIRNESS_RULES, scheduling30, 1, "base_work");
     expect(fitsPerson(p, evening, tracker, [], scheduling30, [], { [p.name]: p })).toBe(true);
+  });
+
+  it("same person cannot do 08:30 ABAS and 09:00–13:00 guard", () => {
+    const mission = nineAmMission();
+    const abas = slotOf(mission, (s) => s.missionType === "base_work" && s.startTime === "08:30");
+    const guard = slotOf(
+      mission,
+      (s) => s.positionKind === "guard" && s.startTime === "09:00" && s.endTime === "13:00",
+    );
+    const p = person("Alex");
+    const tracker = buildTrackerFromMissions([], DEFAULT_FAIRNESS_RULES);
+    placePerson(p.name, guard, mission.id, tracker, DEFAULT_FAIRNESS_RULES, scheduling30, 1, "guards");
+    expect(fitsPerson(p, abas, tracker, [], scheduling30, [], { [p.name]: p })).toBe(false);
+    expect(
+      explainFitsPersonFailure(p, abas, tracker, [], scheduling30, [], { [p.name]: p }),
+    ).toBe("overlapsSlot");
   });
 });
 

@@ -155,14 +155,55 @@ export function eatsRest(kind: MissionPositionKind): boolean {
 }
 
 /** כוח עתודה — חוסם זמן אך לא צורך מנוחה */
+export function isReserveForcePositionName(name?: string | null): boolean {
+  return (name ?? "").includes("עתודה");
+}
+
 export function isReserveForceSlot(
   slot: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },
 ): boolean {
   return (
     slot.missionType === "guards" &&
     slot.positionKind === "duty" &&
-    (slot.positionName?.includes("עתודה") ?? false)
+    isReserveForcePositionName(slot.positionName)
   );
+}
+
+type BaseWorkAssignmentMeta = {
+  positionName?: string;
+  startTime?: string;
+  endTime?: string;
+};
+
+/** עב״ס בלבד — לא עתודה, לא חמגשיות, לא שמירה. */
+export function isBaseWorkAssignment(
+  kind: MissionPositionKind,
+  type: MissionType,
+  meta?: BaseWorkAssignmentMeta,
+): boolean {
+  const name = meta?.positionName ?? "";
+  if (isReserveForcePositionName(name) || isHamagshiyotPositionName(name)) return false;
+  if (
+    kind === "guard" ||
+    kind === "patrol" ||
+    kind === "officer_duty" ||
+    kind === "standby_carmel_a" ||
+    kind === "standby_carmel_b" ||
+    kind === "kitchen"
+  ) {
+    return false;
+  }
+  if (type === "base_work") return true;
+  if (isBaseWorkPositionName(name)) return true;
+  if (
+    kind === "duty" &&
+    meta?.startTime &&
+    meta?.endTime &&
+    isBaseWorkShiftSlot(meta.startTime, meta.endTime)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 export function isReserveForceBlock(
@@ -203,8 +244,15 @@ export function slotUsesWallClockSchedule(
   >,
 ): boolean {
   if (slot.positionKind === "patrol") return true;
-  if (slot.missionType === "base_work") return true;
-  if (isBaseWorkShiftSlot(slot.startTime, slot.endTime)) return true;
+  if (
+    isBaseWorkAssignment(slot.positionKind, slot.missionType, {
+      positionName: slot.positionName,
+      startTime: slot.startTime,
+      endTime: slot.endTime,
+    })
+  ) {
+    return true;
+  }
   if (
     slot.positionKind === "kitchen" &&
     (isHamagshiyotPositionName(slot.positionName) ||
@@ -375,10 +423,11 @@ export function flattenMissionSlots(
       const isHamagshiyotSlot =
         kind === "kitchen" &&
         (isHamagshiyotPosition(pos) || isHamagshiyotShiftSlot(slot.start_time, slot.end_time));
-      const isBaseWorkSlot =
-        mission.mission_type === "base_work" ||
-        isBaseWorkPosition(pos) ||
-        (kind === "duty" && isBaseWorkShiftSlot(slot.start_time, slot.end_time));
+      const isBaseWorkSlot = isBaseWorkAssignment(kind, mission.mission_type, {
+        positionName: pos.name,
+        startTime: slot.start_time,
+        endTime: slot.end_time,
+      });
       const isPatrolSlot =
         kind === "patrol" ||
         isPatrolPosition(pos) ||

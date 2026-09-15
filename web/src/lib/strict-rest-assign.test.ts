@@ -497,4 +497,32 @@ describe("strict_rest constraint policy", () => {
     expect((assignments[abasSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
     expect(assignments[guardSlot.slotId]?.[0]).toBe(p.name);
   });
+
+  it("stripAbasTimeViolations removes a locked ABAS seat that overlaps a guard", () => {
+    const mission = missionWithSlots([
+      { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
+      { id: "g", name: "פטל", kind: "guard", start: "09:00", end: "13:00", seats: 1 },
+    ]);
+    const abasSlot = slotByName(mission, "עבודות");
+    const guardSlot = slotByName(mission, "פטל");
+    const seeded = syncAssignmentSeats(mission.positions, {
+      [abasSlot.slotId]: [p.name],
+      [guardSlot.slotId]: [p.name],
+    });
+    const lockedMission = {
+      ...mission,
+      assignments: seeded,
+      locked_seats: { [abasSlot.slotId]: [true], [guardSlot.slotId]: [true] },
+    };
+    const { assignments, removed } = stripAbasTimeViolations({
+      mission: lockedMission,
+      assignments: seeded,
+      scheduling,
+      rules,
+      constraintPolicy: "strict_rest",
+    });
+    expect(removed).toBe(1);
+    expect((assignments[abasSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect(assignments[guardSlot.slotId]?.[0]).toBe(p.name);
+  });
 });

@@ -311,16 +311,33 @@ async function smartAssignScope(input: {
     }
 
     currentAssignments = restoreLockedAssignments(mission, currentAssignments);
+    const afterLocks = stripAbasTimeViolations({
+      mission,
+      assignments: currentAssignments,
+      scheduling,
+      rules: input.rules,
+      constraintPolicy,
+    });
+    currentAssignments = afterLocks.assignments;
+    if (afterLocks.removed > 0) {
+      const msg = `הוסרו ${afterLocks.removed} שיבוצי עב״ס נעולים שחפפו שמירה`;
+      if (!output.warnings.includes(msg)) output.warnings.push(msg);
+    }
     output.assignmentsByMission.set(mission.id, currentAssignments);
   }
 
   for (const mission of input.scopeMissions) {
     const assignments = output.assignmentsByMission.get(mission.id);
     if (!assignments) continue;
-    output.assignmentsByMission.set(
-      mission.id,
-      restoreLockedAssignments(mission, assignments),
-    );
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
+    const restored = restoreLockedAssignments(mission, assignments);
+    const stripped = stripAbasTimeViolations({
+      mission,
+      assignments: restored,
+      scheduling,
+      rules: input.rules,
+    });
+    output.assignmentsByMission.set(mission.id, stripped.assignments);
   }
 
   let postFilled = 0;

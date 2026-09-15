@@ -375,6 +375,10 @@ export async function PATCH(request: Request, { params }: Params) {
         issues,
         rules,
       });
+      const overlapWarning = warnings.find((w) => w.includes("חפיפה"));
+      if (overlapWarning) {
+        return NextResponse.json({ error: overlapWarning }, { status: 400 });
+      }
       const updatedMission = applyManualSlotAssignment(
         hostMission,
         slot_id,

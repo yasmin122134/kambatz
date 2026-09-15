@@ -196,7 +196,9 @@ export function resolveCanonicalSlotInterval(
     fromStoredEnd !== null &&
     fromStoredEnd > fromStoredStart &&
     fromStoredStart >= missionIv.startMs &&
-    fromStoredEnd <= missionIv.endMs
+    fromStoredEnd <= missionIv.endMs &&
+    fmtMissionTimeLabel(fromStoredStart) === startTime &&
+    fmtMissionTimeLabel(fromStoredEnd) === endTime
   ) {
     return { startMs: fromStoredStart, endMs: fromStoredEnd };
   }
