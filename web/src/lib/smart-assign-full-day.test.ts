@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
-import { patrolAssigneeRole } from "@/lib/patrol-day-template";
 import { runGlobalAssign } from "@/lib/global-assign";
 import { flattenMissionSlots, syncAssignmentSeats } from "@/lib/mission-utils";
 import {
@@ -109,12 +108,7 @@ function autoAssignableSeatCount(mission: MissionDay): number {
   return flattenMissionSlots(mission)
     .filter((s) => {
       if (s.positionKind === "officer_duty") return false;
-      if (
-        s.positionKind === "patrol" &&
-        patrolAssigneeRole(s.startTime, s.endTime) === "company_commander"
-      ) {
-        return false;
-      }
+      if (s.positionKind === "patrol") return false;
       return true;
     })
     .reduce((sum, sl) => sum + sl.seatCount, 0);
@@ -284,6 +278,6 @@ describe("full guard day pipeline", () => {
     expect(required).toBeGreaterThan(abasRequired);
     expect(filled).toBe(cadetRequired);
     expect(gaps.every(isExpectedManualGap)).toBe(true);
-    expect(req - cadetRequired).toBe(5);
+    expect(req - cadetRequired).toBe(8);
   });
 });

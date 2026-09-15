@@ -2209,9 +2209,7 @@ function SlotCard({
                         : "שם"
                   }
                   allowedNames={
-                    slot.positionKind === "officer_duty" ||
-                    (slot.positionKind === "patrol" &&
-                      patrolAssigneeRole(slot.startTime, slot.endTime) === "duty_officer")
+                    slot.positionKind === "officer_duty" || slot.positionKind === "patrol"
                       ? dutyOfficerNames
                       : undefined
                   }

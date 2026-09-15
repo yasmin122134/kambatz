@@ -29,7 +29,7 @@ export const DEFAULT_PATROL_TOURS: PatrolTourDef[] = [
     label: "סיור פנים גדר",
     start: "09:30",
     end: "10:00",
-    assigneeRole: "company_commander",
+    assigneeRole: "duty_officer",
   },
   {
     label: "סיור פנים גדר + סבב עמדות",
@@ -41,7 +41,7 @@ export const DEFAULT_PATROL_TOURS: PatrolTourDef[] = [
     label: "זמן גשר יזומות + סבב עמדות + גדר היקפית",
     start: "18:30",
     end: "19:30",
-    assigneeRole: "company_commander",
+    assigneeRole: "duty_officer",
   },
   {
     label: "סיור פנים גדר + חתימות",
@@ -59,7 +59,7 @@ export const DEFAULT_PATROL_TOURS: PatrolTourDef[] = [
     label: "סבב עמדות + גדר היקפית",
     start: "05:00",
     end: "06:00",
-    assigneeRole: "company_commander",
+    assigneeRole: "duty_officer",
   },
 ];
 

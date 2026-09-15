@@ -25,9 +25,8 @@ import {
   syncAssignmentSeats,
   type FlatSlot,
 } from "@/lib/mission-utils";
-import { patrolAssigneeRole } from "@/lib/patrol-day-template";
-import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
 import { DUTY_OFFICER_NAMES, personIsDutyOfficer } from "@/lib/officers";
+import type { FairnessRules, Issue, MissionDay, MissionSchedulingRules, Person } from "@/lib/types";
 import { shouldKeepSeatOnAssign, isSeatLocked } from "@/lib/assignment-lock";
 import { mulberry32, hashStringsToSeed } from "@/lib/seeded-random";
 import {
@@ -119,13 +118,6 @@ function buildUnits(missions: MissionDay[], keepExisting: boolean): AssignmentUn
         .map(({ i }) => i);
 
       if (!emptyIndices.length) continue;
-
-      if (
-        slot.positionKind === "patrol" &&
-        patrolAssigneeRole(slot.startTime, slot.endTime) === "company_commander"
-      ) {
-        continue;
-      }
 
       const slotIsKitchen =
         mission.mission_type === "kitchen" ||
@@ -1189,7 +1181,6 @@ function seedPatrolInState(
 
     for (const slot of flattenMissionSlots(mission)) {
       if (slot.positionKind !== "patrol") continue;
-      if (patrolAssigneeRole(slot.startTime, slot.endTime) !== "duty_officer") continue;
 
       const row = [...(assignments[slot.slotId] || [])];
       for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
@@ -1203,16 +1194,28 @@ function seedPatrolInState(
           row[seatIndex] = "";
         }
 
+        const mates = row.filter(Boolean);
         const officerName = dutyOfficerAtPatrolTime(mission, slot, assignments);
-        const officer = officerName ? peopleByName[officerName] : undefined;
-        if (
-          officer &&
-          personIsDutyOfficer(officer) &&
-          fitsPerson(officer, slot, state.tracker, issues, scheduling, row.filter(Boolean), peopleByName)
-        ) {
-          row[seatIndex] = officer.name;
+        const overlapping = officerName ? peopleByName[officerName] : undefined;
+        const chosen =
+          overlapping &&
+          personIsDutyOfficer(overlapping) &&
+          !mates.includes(overlapping.name)
+            ? overlapping
+            : pickDutyOfficerForSeed(
+                dutyOfficersFromPeople(people),
+                overlapping?.name,
+                mates,
+                slot,
+                state,
+                issues,
+                scheduling,
+                peopleByName,
+              );
+        if (chosen) {
+          row[seatIndex] = chosen.name;
           placePerson(
-            officer.name,
+            chosen.name,
             slot,
             mission.id,
             state.tracker,

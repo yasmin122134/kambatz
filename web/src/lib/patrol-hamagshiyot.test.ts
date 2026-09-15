@@ -6,6 +6,7 @@ import { flattenMissionSlots } from "@/lib/mission-utils";
 import {
   allowsParallelAssignmentOverlap,
   buildTrackerFromMissions,
+  canAssignKind,
   dutyOfficerAtPatrolTime,
   fitsPerson,
   placePerson,
@@ -59,12 +60,12 @@ describe("patrol and hamagshiyot guard day positions", () => {
   });
 
   it("maps patrol tour roles from wall-clock windows", () => {
-    expect(patrolAssigneeRole("09:30", "10:00")).toBe("company_commander");
+    expect(patrolAssigneeRole("09:30", "10:00")).toBe("duty_officer");
     expect(patrolAssigneeRole("13:00", "13:30")).toBe("duty_officer");
-    expect(patrolAssigneeRole("18:30", "19:30")).toBe("company_commander");
+    expect(patrolAssigneeRole("18:30", "19:30")).toBe("duty_officer");
     expect(patrolAssigneeRole("23:00", "23:30")).toBe("duty_officer");
     expect(patrolAssigneeRole("02:00", "02:30")).toBe("duty_officer");
-    expect(patrolAssigneeRole("05:00", "06:00")).toBe("company_commander");
+    expect(patrolAssigneeRole("05:00", "06:00")).toBe("duty_officer");
   });
 
   it("flattens patrol slots with labels on mission timeline", () => {
@@ -380,14 +381,14 @@ describe("patrol and hamagshiyot guard day positions", () => {
     expect(resolvePatrolAssigneeName(mission, patrolFlat)).toBe("רני פלג");
   });
 
-  it("uses assigned name on company commander patrol", () => {
+  it("uses assigned duty officer name on morning patrol", () => {
     const positions = buildGuardDayPositions({
       missionDate: "2026-03-01",
       missionStartsAt: "2026-03-01T08:00:00+03:00",
       missionEndsAt: "2026-03-02T08:00:00+03:00",
     });
     const patrolPos = positions.find((p) => p.name === "פטרולים")!;
-    const ccPatrolSlot = patrolPos.slots.find((s) => s.start_time === "09:30")!;
+    const morningPatrolSlot = patrolPos.slots.find((s) => s.start_time === "09:30")!;
     const mission: MissionDay = {
       id: "g1",
       title: "שמירות",
@@ -398,7 +399,7 @@ describe("patrol and hamagshiyot guard day positions", () => {
       status: "published",
       positions,
       assignments: {
-        [ccPatrolSlot.id]: ["דני כהן"],
+        [morningPatrolSlot.id]: ["רני פלג"],
       },
       scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES },
       notes: null,
@@ -406,11 +407,25 @@ describe("patrol and hamagshiyot guard day positions", () => {
       updated_at: "",
     };
     const patrolFlat = flattenMissionSlots(mission).find(
-      (s) => s.slotId === ccPatrolSlot.id,
+      (s) => s.slotId === morningPatrolSlot.id,
     )!;
     expect(patrolAssigneeRole(patrolFlat.startTime, patrolFlat.endTime)).toBe(
-      "company_commander",
+      "duty_officer",
     );
-    expect(resolvePatrolAssigneeName(mission, patrolFlat)).toBe("דני כהן");
+    expect(resolvePatrolAssigneeName(mission, patrolFlat)).toBe("רני פלג");
+  });
+
+  it("allows only duty officers on every patrol window", () => {
+    const rani = cadet("רני פלג");
+    rani.is_officer = true;
+    const cadetPerson = cadet("דני כהן");
+    expect(canAssignKind(rani, "patrol", { startTime: "09:30", endTime: "10:00" })).toBe(true);
+    expect(canAssignKind(rani, "patrol", { startTime: "18:30", endTime: "19:30" })).toBe(true);
+    expect(canAssignKind(cadetPerson, "patrol", { startTime: "09:30", endTime: "10:00" })).toBe(
+      false,
+    );
+    expect(canAssignKind(cadetPerson, "patrol", { startTime: "13:00", endTime: "13:30" })).toBe(
+      false,
+    );
   });
 });

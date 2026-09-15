@@ -140,7 +140,7 @@ export function fairnessBurdenBucketForSlot(slot: FlatSlot): FairnessBurdenBucke
 }
 
 /** How hard rest / ABAS-gap rules are while searching for a roster. */
-export type AssignConstraintPolicy = "standard" | "strict_rest" | "coverage";
+export type AssignConstraintPolicy = "standard" | "strict_rest" | "relaxed_rest" | "coverage";
 
 export type ScheduleTracker = {
   busy: Record<string, BusyBlock[]>;
@@ -151,7 +151,8 @@ export type ScheduleTracker = {
   dutyPoints: Record<string, number>;
   /**
    * standard — current smart assign (4–8 ratio, daily rest, ABAS gap).
-   * strict_rest — also require rest_hours idle between two guards.
+   * strict_rest — rest_hours idle between guards and between ABAS↔guard.
+   * relaxed_rest — last-resort: skip rest_hours idle / daily rest, keep ABAS minute-gap.
    * coverage — last resort: skip rest_hours, ABAS gap, daily rest, room/gender.
    */
   constraintPolicy?: AssignConstraintPolicy;
@@ -351,12 +352,7 @@ export function canAssignKind(
     return personIsDutyOfficer(person);
   }
   if (kind === "patrol") {
-    const patrolRole =
-      ctx?.startTime && ctx?.endTime
-        ? patrolAssigneeRole(ctx.startTime, ctx.endTime)
-        : null;
-    if (patrolRole === "duty_officer") return personIsDutyOfficer(person);
-    return true;
+    return personIsDutyOfficer(person);
   }
   if (kind === "kitchen") {
     return !person.no_kitchen;
@@ -402,9 +398,8 @@ function ineligibilityMessage(
     return `${person.name}: רק קצין תורן יכול לשמש ב«${slot.positionName}»`;
   }
   if (kind === "patrol") {
-    const role = patrolAssigneeRole(slot.startTime, slot.endTime);
-    if (role === "duty_officer" && !personIsDutyOfficer(person)) {
-      return `${person.name}: רק קצין תורן נוכחי יכול לבצע סיור זה`;
+    if (!personIsDutyOfficer(person)) {
+      return `${person.name}: רק קצין תורן (רני / יסמין) יכול לבצע פטרול`;
     }
   }
   if (kind === "kitchen" && person.no_kitchen) {
@@ -641,20 +636,37 @@ function restOk(
   return 1440 - worked - slot.durationMinutes >= restMin;
 }
 
-/** Idle minutes between two guard posts must be at least rest_hours (not the 4–8 ratio). */
-function guardRestGapOk(
+/** Idle minutes between two rest-consuming posts (guard↔guard or ABAS↔guard) ≥ rest_hours. */
+function strictRestGapOk(
   personName: string,
   slot: FlatSlot,
   tracker: ScheduleTracker,
   restHours: number,
 ): boolean {
-  if (!isGuardKind(slot.positionKind)) return true;
   const restMin = Math.max(0, restHours) * 60;
   if (restMin <= 0) return true;
+  const slotIsGuard = isGuardKind(slot.positionKind);
+  const slotIsAbas = isBaseWorkAssignment(
+    slot.positionKind,
+    slot.missionType,
+    assignmentMeta(slot),
+  );
+  if (!slotIsGuard && !slotIsAbas) return true;
+
   const slotIv = slotInterval(slot);
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
-    if (!isGuardKind(b.positionKind)) continue;
+    const blockIsGuard = isGuardKind(b.positionKind);
+    const blockIsAbas = isBaseWorkAssignment(
+      b.positionKind,
+      b.missionType,
+      assignmentMeta(b),
+    );
+    const pairNeedsRest =
+      (slotIsGuard && blockIsGuard) ||
+      (slotIsGuard && blockIsAbas) ||
+      (slotIsAbas && blockIsGuard);
+    if (!pairNeedsRest) continue;
     const blockIv = blockInterval(b);
     if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
     const idle = idleGapMinutes(slotIv, blockIv);
@@ -1115,12 +1127,15 @@ export function explainFitsPersonFailure(
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
   if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) return "guardOk";
   if (policy !== "coverage") {
-    if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
-    if (
-      policy === "strict_rest" &&
-      !guardRestGapOk(person.name, slot, tracker, scheduling.rest_hours)
-    ) {
-      return "guardRestGap";
+    const skipRestHours = policy === "relaxed_rest";
+    if (!skipRestHours) {
+      if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
+      if (
+        policy === "strict_rest" &&
+        !strictRestGapOk(person.name, slot, tracker, scheduling.rest_hours)
+      ) {
+        return "guardRestGap";
+      }
     }
     if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "sameRoom";
     if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "sameGender";
@@ -1515,14 +1530,15 @@ function collectSpacingAndRestWarnings(
       );
     }
 
-    if (
-      isGuardKind(slot.positionKind) &&
-      isGuardKind(b.positionKind) &&
-      restMin > 0 &&
-      idle < restMin
-    ) {
+    const slotIsGuardPost = isGuardKind(slot.positionKind);
+    const blockIsGuardPost = isGuardKind(b.positionKind);
+    if (slotIsGuardPost && blockIsGuardPost && restMin > 0 && idle < restMin) {
       msgs.push(
         `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${b.startTime}–${b.endTime} ו-${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
+      );
+    } else if (dutyGuard && restMin > 0 && idle < restMin) {
+      msgs.push(
+        `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס לשמירה (${b.startTime}–${b.endTime} ו-${slot.timeLabel}, נדרש ${scheduling.rest_hours})`,
       );
     }
 
@@ -1691,7 +1707,7 @@ export function forceFillEmptySeats(input: {
         input.meanPrior,
         pickOpts(slot),
       );
-      let lastResort = false;
+      let lastResort: "relaxed_rest" | "coverage" | false = false;
 
       if (!chosen && policy === "standard") {
         chosen =
@@ -1735,9 +1751,9 @@ export function forceFillEmptySeats(input: {
 
       if (!chosen && policy === "strict_rest" && input.allowCoverageFill) {
         const prevPolicy = input.tracker.constraintPolicy;
-        input.tracker.constraintPolicy = "coverage";
         try {
-          const coverage = input.people.filter(
+          input.tracker.constraintPolicy = "relaxed_rest";
+          const relaxed = input.people.filter(
             (p) =>
               !inSlot.has(p.name) &&
               fitsPerson(
@@ -1751,17 +1767,43 @@ export function forceFillEmptySeats(input: {
               ),
           );
           chosen = pickBestCandidate(
-            coverage,
+            relaxed,
             slot,
             input.tracker,
             input.rules,
             input.meanPrior,
             pickOpts(slot),
           );
+          if (chosen) {
+            lastResort = "relaxed_rest";
+          } else {
+            input.tracker.constraintPolicy = "coverage";
+            const coverage = input.people.filter(
+              (p) =>
+                !inSlot.has(p.name) &&
+                fitsPerson(
+                  p,
+                  slot,
+                  input.tracker,
+                  input.issues,
+                  input.scheduling,
+                  mates,
+                  peopleByName,
+                ),
+            );
+            chosen = pickBestCandidate(
+              coverage,
+              slot,
+              input.tracker,
+              input.rules,
+              input.meanPrior,
+              pickOpts(slot),
+            );
+            if (chosen) lastResort = "coverage";
+          }
         } finally {
           input.tracker.constraintPolicy = prevPolicy;
         }
-        lastResort = Boolean(chosen);
       }
 
       if (!chosen) {
@@ -1772,7 +1814,10 @@ export function forceFillEmptySeats(input: {
       }
 
       if (lastResort) {
-        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה בין שמירות או מרווח עב״ס — לא נמצא שיבוץ אחר שממלא`;
+        const msg =
+          lastResort === "relaxed_rest"
+            ? `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות — מרווח עב״ס נשמר`
+            : `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה בין שמירות או מרווח עב״ס — לא נמצא שיבוץ אחר שממלא`;
         if (!warnings.includes(msg)) warnings.push(msg);
       }
 
@@ -2209,16 +2254,22 @@ function classifyCandidateRejection(
   mates: string[],
   peopleByName: Record<string, Person>,
 ): keyof Omit<BaseWorkShiftDiagnostics, "required" | "assigned"> | null {
-  if (!canAssignKind(person, slot.positionKind, assignKindContext(slot))) return "rejectedIneligible";
-  if (blockedByIssue(person.name, slot, issues)) return "rejectedIssue";
-  if (overlapsSlot(person.name, slot, tracker, scheduling)) return "rejectedOverlap";
-  if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling))) {
-    return "rejectedGuardRatio";
-  }
-  if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "rejectedRest";
-  if (slot.sameRoom && !sameRoomOk(person, mates, peopleByName)) return "rejectedOther";
-  if (slot.sameGender && !sameGenderOk(person, mates, peopleByName)) return "rejectedOther";
-  return null;
+  const code = explainFitsPersonFailure(
+    person,
+    slot,
+    tracker,
+    issues,
+    scheduling,
+    mates,
+    peopleByName,
+  );
+  if (!code) return null;
+  if (code === "canAssignKind") return "rejectedIneligible";
+  if (code === "blockedByIssue") return "rejectedIssue";
+  if (code === "overlapsSlot") return "rejectedOverlap";
+  if (code === "guardOk") return "rejectedGuardRatio";
+  if (code === "restOk" || code === "guardRestGap") return "rejectedRest";
+  return "rejectedOther";
 }
 
 export function formatBaseWorkDiagnostics(

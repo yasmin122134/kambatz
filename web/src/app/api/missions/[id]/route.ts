@@ -79,8 +79,10 @@ function assertCanAssign(
   if (!canAssignKind(person, slot.positionKind, {
     positionName: slot.positionName,
     missionType: slot.missionType,
+    startTime: slot.startTime,
+    endTime: slot.endTime,
   })) {
-    if (slot.positionKind === "officer_duty") {
+    if (slot.positionKind === "officer_duty" || slot.positionKind === "patrol") {
       return `${personName}: רק קצין תורן יכול לשמש בתפקיד זה`;
     }
     return `${personName}: לא זכאי לתפקיד זה`;

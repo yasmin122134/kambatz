@@ -136,6 +136,29 @@ describe("strict_rest constraint policy", () => {
     expect(fitsPerson(p, second, tracker, [], scheduling, [], peopleByName)).toBe(true);
   });
 
+  it("strict_rest rejects ABAS then a guard when idle is under rest_hours", () => {
+    const abas = missionWithSlots(
+      [{ id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 }],
+      { id: "b1", mission_type: "base_work", title: "עב״ס" },
+    );
+    const guard = missionWithSlots([
+      { id: "g", name: "פטל", kind: "guard", start: "15:00", end: "16:00", seats: 1 },
+    ]);
+    const abasSlot = slotByName(abas, "עבודות");
+    const guardSlot = slotByName(guard, "פטל");
+
+    const standard = buildTrackerFromMissions([], rules);
+    placePerson(p.name, abasSlot, abas.id, standard, rules, scheduling, 1, "base_work");
+    expect(fitsPerson(p, guardSlot, standard, [], scheduling, [], peopleByName)).toBe(true);
+
+    const strict = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
+    placePerson(p.name, abasSlot, abas.id, strict, rules, scheduling, 1, "base_work");
+    expect(fitsPerson(p, guardSlot, strict, [], scheduling, [], peopleByName)).toBe(false);
+    expect(
+      explainFitsPersonFailure(p, guardSlot, strict, [], scheduling, [], peopleByName),
+    ).toBe("guardRestGap");
+  });
+
   it("strict_rest and standard both reject ABAS→guard idle under the defined gap", () => {
     const abas = missionWithSlots(
       [{ id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 }],
@@ -228,5 +251,40 @@ describe("strict_rest constraint policy", () => {
     expect(lastResort.assignments[second.slotId]?.[0]).toBe(p.name);
     expect(lastResort.filled).toBe(1);
     expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
+  });
+
+  it("strict last-resort keeps the ABAS minute-gap until coverage", () => {
+    const mission = missionWithSlots([
+      { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
+      { id: "g", name: "פטל", kind: "guard", start: "15:00", end: "16:00", seats: 1 },
+    ]);
+    const abasSlot = slotByName(mission, "עבודות");
+    const guardSlot = slotByName(mission, "פטל");
+    const seeded = syncAssignmentSeats(mission.positions, {
+      [abasSlot.slotId]: [p.name],
+      [guardSlot.slotId]: [""],
+    });
+
+    const lastResort = forceFillEmptySeats({
+      mission,
+      assignments: seeded,
+      people: [p],
+      tracker: buildTrackerFromMissions(
+        [{ ...mission, assignments: seeded }],
+        rules,
+        new Set(),
+        "strict_rest",
+      ),
+      issues: [],
+      scheduling,
+      rules,
+      meanPrior: 0,
+      allowCoverageFill: true,
+    });
+    expect(lastResort.assignments[guardSlot.slotId]?.[0]).toBe(p.name);
+    expect(lastResort.warnings.some((w) => w.includes("מרווח עב״ס נשמר"))).toBe(true);
+    expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה בין שמירות או מרווח עב״ס"))).toBe(
+      false,
+    );
   });
 });
