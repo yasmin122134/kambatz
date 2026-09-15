@@ -50,6 +50,7 @@ import {
 } from "@/lib/guard-shift-roster";
 import { hourlyAbsenceViews } from "@/lib/hourly-absence";
 import { downloadMissionsExcel } from "@/lib/mission-export";
+import { LuachXlsxImportButton } from "@/components/LuachXlsxImportButton";
 import type { Person } from "@/lib/types";
 
 type Props = {
@@ -708,9 +709,18 @@ export function BoardClient({
       <div className="card mx-5 mt-6 max-w-4xl">
         <p className="hint mb-4">אין ימי משימה שפורסמו עדיין.</p>
         {isAdminUser && (
-          <Link href="/admin/missions" className="btn-pri btn-sm">
-            צור יום משימה
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/missions" className="btn-pri btn-sm">
+              צור יום משימה
+            </Link>
+            <LuachXlsxImportButton
+              onImported={(mission) => {
+                window.location.assign(
+                  `/board?date=${mission.mission_date}&mission=${mission.id}`,
+                );
+              }}
+            />
+          </div>
         )}
       </div>
     );
@@ -738,6 +748,15 @@ export function BoardClient({
           >
             הורדה לאקסל
           </button>
+          {isAdminUser && (
+            <LuachXlsxImportButton
+              onImported={(mission) => {
+                window.location.assign(
+                  `/board?date=${mission.mission_date}&mission=${mission.id}`,
+                );
+              }}
+            />
+          )}
           <button
             type="button"
             className={`btn-sm ${showBurden ? "on" : ""}`}

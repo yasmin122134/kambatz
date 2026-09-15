@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
+import { LuachXlsxImportButton } from "@/components/LuachXlsxImportButton";
 import {
   MISSION_STATUS_LABELS,
   MISSION_TYPE_LABELS,
@@ -84,6 +85,11 @@ export default function AdminMissionsPage() {
             <Link href="/admin/missions/new?type=kitchen" className="btn-sm">
               + מטבח
             </Link>
+            <LuachXlsxImportButton
+              onImported={(mission) =>
+                router.push(`/board?date=${mission.mission_date}&mission=${mission.id}`)
+              }
+            />
           </div>
         </div>
 
@@ -92,9 +98,17 @@ export default function AdminMissionsPage() {
         ) : missions.length === 0 ? (
           <div className="card">
             <p className="hint mb-3">אין ימי משימה. צרו יום שמירות+עב״ס.</p>
-            <button type="button" className="btn-pri btn-sm" onClick={createGuardDayBundle}>
-              + יום שמירות+עב״ס
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" className="btn-pri btn-sm" onClick={createGuardDayBundle}>
+                + יום שמירות+עב״ס
+              </button>
+              <LuachXlsxImportButton
+                className="btn-sm"
+                onImported={(mission) =>
+                  router.push(`/board?date=${mission.mission_date}&mission=${mission.id}`)
+                }
+              />
+            </div>
           </div>
         ) : (
           <ul className="space-y-3">
