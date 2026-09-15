@@ -26,13 +26,13 @@ function sortRows(
     }
     const av =
       key === "history"
-        ? a.historyGuardPoints
+        ? a.historyPoints
         : key === "current"
           ? a.currentPoints
           : a.balancedTotal;
     const bv =
       key === "history"
-        ? b.historyGuardPoints
+        ? b.historyPoints
         : key === "current"
           ? b.currentPoints
           : b.balancedTotal;
@@ -114,7 +114,7 @@ export function MissionFairnessPanel({
 
   const historyChartRoster = sorted.map((r) => ({
     personName: r.personName,
-    fairnessPoints: r.historyGuardPoints,
+    fairnessPoints: r.historyPoints,
   }));
   const currentChartRoster = sorted.map((r) => ({
     personName: r.personName,
@@ -163,12 +163,11 @@ export function MissionFairnessPanel({
       </div>
 
       <p className="text-xs text-ink3 leading-relaxed">
-        <strong>היסטוריה</strong> — נקודות שמירה מימים מפורסמים אחרים (
+        <strong>היסטוריה</strong> — נקודות צדק מימים מפורסמים אחרים (
         {missionDayScopeLabel(data.historyMissionDayCount)}).{" "}
-        <strong>היום</strong> — נקודות צדק רק ב־{data.missionDate} (
+        <strong>היום</strong> — נקודות צדק ב־{data.missionDate} (
         {missionDayScopeLabel(data.currentMissionDayCount)}).{" "}
-        <strong>מצטבר</strong> — היום + היסטוריה + התאמת ניקוד קודם (ממוצע{" "}
-        {data.meanPrior}).
+        <strong>מצטבר</strong> — היסטוריה + היום.
       </p>
 
       <div className="burden-compare-charts burden-compare-charts--triple">
@@ -222,7 +221,6 @@ export function MissionFairnessPanel({
                   onClick={() => toggleSort("balanced")}
                 />
               </th>
-              <th className="text-ink3">התאמת ניקוד</th>
               <th aria-label="יחס למקסימום" />
             </tr>
           </thead>
@@ -235,7 +233,15 @@ export function MissionFairnessPanel({
               return (
                 <tr key={row.personName}>
                   <td>{row.personName}</td>
-                  <td className="mono">{row.historyGuardPoints.toFixed(1)}</td>
+                  <td className="mono">
+                    {row.historyPoints.toFixed(1)}
+                    {row.historyGuardPoints > 0 &&
+                    row.historyGuardPoints !== row.historyPoints ? (
+                      <span className="block text-[10px] text-ink3">
+                        שמירה {row.historyGuardPoints.toFixed(1)}
+                      </span>
+                    ) : null}
+                  </td>
                   <td className="mono">
                     {row.currentPoints.toFixed(1)}
                     {row.currentGuardPoints > 0 &&
@@ -247,10 +253,6 @@ export function MissionFairnessPanel({
                   </td>
                   <td className="mono font-medium">
                     {row.balancedTotal.toFixed(1)}
-                  </td>
-                  <td className="mono text-ink3 text-xs">
-                    {row.historicalAdjustment >= 0 ? "+" : ""}
-                    {row.historicalAdjustment.toFixed(1)}
                   </td>
                   <td>
                     <div className="burden-roster-bar">

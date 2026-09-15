@@ -73,8 +73,10 @@ describe("mission-editor-fairness", () => {
     );
 
     const row = result.rows[0];
-    expect(row.historyGuardPoints).toBeGreaterThan(0);
+    expect(row.historyPoints).toBeGreaterThan(0);
     expect(row.currentPoints).toBeGreaterThan(0);
-    expect(row.balancedTotal).toBeGreaterThanOrEqual(row.currentPoints);
+    expect(row.balancedTotal).toBe(
+      Math.round((row.historyPoints + row.currentPoints) * 10) / 10,
+    );
   });
 });
