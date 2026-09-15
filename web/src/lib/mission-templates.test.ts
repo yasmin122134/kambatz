@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import {
+  defaultMissionWindow,
+  defaultSchedulingForType,
   missionPositionsNeedTemplateFill,
   resolveMissionPositions,
   shouldRegenerateGuardStructure,
+  standardMissionPositions,
 } from "@/lib/mission-templates";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
@@ -110,5 +113,38 @@ describe("missionPositionsNeedTemplateFill", () => {
         : pos,
     );
     expect(missionPositionsNeedTemplateFill("guards", customized)).toBe(false);
+  });
+});
+
+describe("default guard day window", () => {
+  it("starts at 09:00 and ends at 09:00 the next calendar day", () => {
+    expect(defaultMissionWindow("guards", "2026-09-11")).toEqual({
+      missionDate: "2026-09-11",
+      startsAt: "2026-09-11T09:00",
+      endsAt: "2026-09-12T09:00",
+    });
+    expect(defaultMissionWindow("guards", "2026-09-30").endsAt).toBe("2026-10-01T09:00");
+  });
+
+  it("syncs front gate to six 4-hour shifts with two seats", () => {
+    const startsAt = "2026-09-11T09:00:00+03:00";
+    const endsAt = "2026-09-12T09:00:00+03:00";
+    const positions = standardMissionPositions({
+      missionType: "guards",
+      startsAt,
+      endsAt,
+      scheduling: defaultSchedulingForType("guards", startsAt),
+      missionDate: "2026-09-11",
+    });
+    const front = positions.find((p) => p.name.includes("רכב קדמי"));
+    expect(front?.slots.map((s) => `${s.start_time}–${s.end_time}`)).toEqual([
+      "09:00–13:00",
+      "13:00–17:00",
+      "17:00–21:00",
+      "21:00–01:00",
+      "01:00–05:00",
+      "05:00–09:00",
+    ]);
+    expect(front?.slots.every((s) => s.seat_count === 2)).toBe(true);
   });
 });

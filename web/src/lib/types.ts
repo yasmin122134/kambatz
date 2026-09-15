@@ -155,10 +155,12 @@ export function clampBaseWorkSeatsPerShift(raw: number | undefined | null): numb
 /** מאיישים בכל משמרת כוח עתודה */
 export const DEFAULT_RESERVE_FORCE_SEATS = 5;
 
+export const DEFAULT_GUARD_BOARD_START = "09:00";
+
 export const DEFAULT_MISSION_SCHEDULING_RULES: MissionSchedulingRules = {
   rest_hours: 7,
   guard_ratio: 2,
-  board_start: "20:00",
+  board_start: DEFAULT_GUARD_BOARD_START,
   shift_hours: 4,
   duty_guard_gap_minutes: 60,
   kitchen: DEFAULT_KITCHEN_SCHEDULING_RULES,

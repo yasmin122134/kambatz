@@ -8,6 +8,7 @@ import {
   BASE_WORK_SEATS_MIN,
   clampBaseWorkSeatsPerShift,
   DEFAULT_BASE_WORK_SCHEDULING_RULES,
+  DEFAULT_GUARD_BOARD_START,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
   MISSION_POSITION_KIND_LABELS,
@@ -23,10 +24,10 @@ import {
 import {
   defaultMissionWindow,
   defaultSchedulingForType,
-  missionTemplateComplete,
-  resolveMissionPositions,
   generateGuardMissionStructure,
   missionPositionsNeedTemplateFill,
+  missionTemplateComplete,
+  resolveMissionPositions,
   STANDARD_BASE_WORK_SUMMARY,
   STANDARD_GUARD_DAY_SUMMARY,
   STANDARD_HAMAGSHIYOT_SUMMARY,
@@ -202,7 +203,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     loadedTimesRef.current = { startsAt: m.starts_at, endsAt: m.ends_at };
     loadedSchedulingRef.current = {
       shift_hours: rules.shift_hours ?? 4,
-      board_start: rules.board_start ?? "20:00",
+      board_start: rules.board_start ?? DEFAULT_GUARD_BOARD_START,
       base_work_seats:
         rules.base_work?.seats_per_shift ?? DEFAULT_BASE_WORK_SCHEDULING_RULES.seats_per_shift,
     };
@@ -256,19 +257,18 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     if (missionType !== "guards") return;
     if (
       !confirm(
-        "ליצור מחדש את מבנה המשמרות לפי שעות יום המשימה? שיבוצים קיימים עלולים לא להתאים.",
+        "ליצור מחדש 6 משמרות של 4 שעות מ־09:00 עד 09:00? שיבוצים קיימים עלולים לא להתאים.",
       )
     ) {
       return;
     }
-    setPositions(
-      generateGuardMissionStructure(positions, {
-        missionDate,
-        startsAt: new Date(startsAt).toISOString(),
-        endsAt: new Date(endsAt).toISOString(),
-        scheduling: schedulingRules,
-      }),
-    );
+    const date = missionDate || new Date().toISOString().slice(0, 10);
+    const window = defaultMissionWindow("guards", date);
+    applyStandardTemplate("guards", window, {
+      ...schedulingRules,
+      shift_hours: 4,
+      board_start: DEFAULT_GUARD_BOARD_START,
+    });
     structureDirtyRef.current = true;
     setMsg("מבנה המשמרות עודכן — לחצו «שמור» כדי לשמור");
   }
@@ -294,7 +294,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       loadedSchedulingRef.current != null &&
       (loadedSchedulingRef.current.shift_hours !== (scheduling_rules.shift_hours ?? 4) ||
         normalizeTimeLabel(loadedSchedulingRef.current.board_start) !==
-          normalizeTimeLabel(scheduling_rules.board_start ?? "20:00"));
+          normalizeTimeLabel(scheduling_rules.board_start ?? DEFAULT_GUARD_BOARD_START));
 
     const regenerateOnSave =
       missionType === "guards" &&
@@ -334,7 +334,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     loadedTimesRef.current = { startsAt: isoStart, endsAt: isoEnd };
     loadedSchedulingRef.current = {
       shift_hours: scheduling_rules.shift_hours ?? 4,
-      board_start: scheduling_rules.board_start ?? "20:00",
+      board_start: scheduling_rules.board_start ?? DEFAULT_GUARD_BOARD_START,
       base_work_seats: clampBaseWorkSeatsPerShift(scheduling_rules.base_work?.seats_per_shift),
     };
     structureDirtyRef.current = false;

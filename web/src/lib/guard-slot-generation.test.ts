@@ -185,6 +185,25 @@ describe("rear gate slot generation", () => {
     expect(night?.seat_count).toBe(2);
   });
 
+  it("09:00 mission — front gate is six 4-hour shifts with two seats", () => {
+    const { startsAt, endsAt } = missionWindow("2026-08-21", 9);
+    const positions = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      shiftHours: 4,
+    });
+    const front = positions.find((p) => p.name.includes("רכב קדמי"))!;
+    expect(front.slots.map((s) => `${s.start_time}–${s.end_time}`)).toEqual([
+      "09:00–13:00",
+      "13:00–17:00",
+      "17:00–21:00",
+      "21:00–01:00",
+      "01:00–05:00",
+      "05:00–09:00",
+    ]);
+    expect(front.slots.every((s) => s.seat_count === 2)).toBe(true);
+  });
+
   it("standard 20:00 mission produces expected rear-gate slots", () => {
     const { startsAt, endsAt } = missionWindow("2026-08-21", 20);
     const interval = missionInterval(startsAt, endsAt)!;

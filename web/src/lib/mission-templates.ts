@@ -26,15 +26,22 @@ import { defaultKitchenDayPositions } from "@/lib/kitchen-day-template";
 import type { MissionPosition, MissionSchedulingRules, MissionType } from "@/lib/types";
 import {
   DEFAULT_BASE_WORK_SCHEDULING_RULES,
+  DEFAULT_GUARD_BOARD_START,
   DEFAULT_KITCHEN_SCHEDULING_RULES,
   DEFAULT_MISSION_SCHEDULING_RULES,
 } from "@/lib/types";
 
-import { fmtMissionTimeLabel, normalizeTimeLabel, parseIsoMs, sameMissionInstant } from "@/lib/time-interval";
+import {
+  addCalendarDays,
+  fmtMissionTimeLabel,
+  normalizeTimeLabel,
+  parseIsoMs,
+  sameMissionInstant,
+} from "@/lib/time-interval";
 
 export function boardStartFromMissionStart(startsAt: string): string {
   const ms = parseIsoMs(startsAt);
-  if (ms === null) return "20:00";
+  if (ms === null) return DEFAULT_GUARD_BOARD_START;
   return fmtMissionTimeLabel(ms);
 }
 
@@ -58,13 +65,11 @@ export function defaultMissionWindow(
       endsAt: `${date}T20:00`,
     };
   }
-  const next = new Date(`${date}T12:00:00`);
-  next.setDate(next.getDate() + 1);
-  const nextDate = next.toISOString().slice(0, 10);
+  const nextDate = addCalendarDays(date, 1);
   return {
     missionDate: date,
-    startsAt: `${date}T20:00`,
-    endsAt: `${nextDate}T20:00`,
+    startsAt: `${date}T${DEFAULT_GUARD_BOARD_START}`,
+    endsAt: `${nextDate}T${DEFAULT_GUARD_BOARD_START}`,
   };
 }
 
@@ -338,8 +343,8 @@ export function missionTemplateComplete(
     const rear = positions.find((p) => p.name.includes("רכב אחורי"));
     const foot = positions.find((p) => p.name.includes("רגלי"));
     const officer = positions.find((p) => p.kind === "officer_duty");
-    const startsAt = opts?.startsAt ?? "2026-01-01T20:00:00";
-    const endsAt = opts?.endsAt ?? "2026-01-02T20:00:00";
+    const startsAt = opts?.startsAt ?? "2026-01-01T09:00:00";
+    const endsAt = opts?.endsAt ?? "2026-01-02T09:00:00";
     return (
       guardDayHasRequiredPositions(positions) &&
       guardSlotIdsUnique(positions) &&
@@ -374,8 +379,7 @@ export function missionTemplateComplete(
 }
 
 export const STANDARD_GUARD_DAY_SUMMARY = [
-  "חילוף משמרות ~4 שעות מעוגן לתחילת יום המשימה (לא ל-08:00 גלובלי)",
-  "משמרת פתיחה/סגירה קצרה — מסנכרנת לרשת 08:00 (למשל 09:00–10:00, 06:00–08:00, 08:00–09:00)",
+  "חילוף משמרות 4 שעות מ־09:00 עד 09:00: 09–13, 13–17, 17–21, 21–01, 01–05, 05–09",
   "כרמל א׳/ב׳ — 3 צוערים, אותו מגדר, עדיפות אותו חדר, מתחילת יום המשימה עד סופה",
   "כרמל א׳ — מותר במקביל למטבח · כרמל ב׳ — מותר במקביל לעב״ס (רס״ר) ולמטבח",
   "ש״ג רכב אחורי — אותה רשת 4 שעות; 1 ביום / 2 מ־18:00 · משמרת 17:00–18:00 משלימה איוש",

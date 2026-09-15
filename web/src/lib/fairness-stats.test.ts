@@ -224,7 +224,7 @@ describe("fairness-stats", () => {
     const mission = guardMission({});
     const slots = flattenMissionSlots(mission);
     const obs = slots.find(
-      (s) => s.positionName.includes("תצפיתן") && s.timeLabel === "06:00–09:00",
+      (s) => s.positionName.includes("תצפיתן") && s.timeLabel === "05:00–09:00",
     );
     const pat = slots.find(
       (s) => s.positionName.includes("פטל") && s.timeLabel === "17:00–21:00",
@@ -248,12 +248,12 @@ describe("fairness-stats", () => {
     );
 
     const obsRow = stats.history.find((h) => h.slotId === obs.slotId);
-    expect(obsRow?.burdenBase).toBe(1.8);
+    expect(obsRow?.burdenBase).toBe(2.4);
     expect(obsRow?.burdenRest).toBe(0.7);
-    expect(obsRow?.points).toBe(2.5);
+    expect(obsRow?.points).toBe(3.1);
     expect(obsRow?.previousGuardLabel).toContain("פטל");
     expect(obsRow?.previousGuardLabel).toContain("17:00–21:00");
-    expect(obsRow?.restHoursBefore).toBeCloseTo(9, 1);
+    expect(obsRow?.restHoursBefore).toBeCloseTo(8, 1);
   });
 
   it("collectPersonBlocks respects reserve force not eating rest", () => {

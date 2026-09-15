@@ -9,7 +9,7 @@ import {
   materializeHamagshiyotPositions,
 } from "@/lib/hamagshiyot-template";
 import type { MissionPosition, MissionPositionKind, MissionSlot } from "@/lib/types";
-import { DEFAULT_RESERVE_FORCE_SEATS } from "@/lib/types";
+import { DEFAULT_GUARD_BOARD_START, DEFAULT_RESERVE_FORCE_SEATS } from "@/lib/types";
 import {
   defaultPatrolPositions,
   isPatrolPosition,
@@ -86,7 +86,7 @@ export function carmelSlotFromMission(
   boardStart?: string,
   seats = 3,
 ): MissionSlot {
-  const start = isoToTimeLabel(missionStartsAt) ?? boardStart ?? "20:00";
+  const start = isoToTimeLabel(missionStartsAt) ?? boardStart ?? DEFAULT_GUARD_BOARD_START;
   const end = isoToTimeLabel(missionEndsAt) ?? start;
   const slot: MissionSlot = { id: uid(), start_time: start, end_time: end, seat_count: seats };
   if (missionStartsAt && missionEndsAt) {
@@ -399,11 +399,11 @@ function resolveGuardDayContext(options?: BuildGuardDayOptions): GuardDayContext
     options?.missionStartsAt ??
     (options?.boardStart
       ? `2026-01-01T${options.boardStart}:00`
-      : "2026-01-01T20:00:00");
+      : `2026-01-01T${DEFAULT_GUARD_BOARD_START}:00`);
   const missionEndsAt =
     options?.missionEndsAt ??
     (() => {
-      const startMs = parseIsoMs(missionStartsAt) ?? Date.parse("2026-01-01T20:00:00");
+      const startMs = parseIsoMs(missionStartsAt) ?? Date.parse(`2026-01-01T${DEFAULT_GUARD_BOARD_START}:00`);
       return new Date(startMs + 86_400_000).toISOString();
     })();
 
@@ -413,7 +413,7 @@ function resolveGuardDayContext(options?: BuildGuardDayOptions): GuardDayContext
     interval?.endMs ?? missionStartMs + cycleMinutesFromMission(missionStartsAt, missionEndsAt) * 60_000;
 
   const shift = options?.shiftHours ?? 4;
-  const board = options?.boardStart ?? isoToTimeLabel(missionStartsAt) ?? "20:00";
+  const board = options?.boardStart ?? isoToTimeLabel(missionStartsAt) ?? DEFAULT_GUARD_BOARD_START;
   const season = options?.season ?? "summer";
 
   return {

@@ -58,6 +58,13 @@ export function staffingTransitionTimes(
 
   for (const wallMin of starts) {
     for (const t of wallClockTimesInMission(wallMin, missionStartMs, missionEndMs)) {
+      // Full-day 00:00–24:00 rules would otherwise cut every post at midnight.
+      // Keep midnight only when staffing actually changes there.
+      if (wallMin === 0) {
+        const before = getRequiredSeats(profile, t - 60_000);
+        const after = getRequiredSeats(profile, t);
+        if (before === after) continue;
+      }
       bounds.add(t);
     }
   }
@@ -107,6 +114,7 @@ export const FOOT_PATROL_STAFFING_WINTER: StaffingProfile = [
   { startTime: "17:00", endTime: "05:00", seats: 0 },
 ];
 
+/** Constant coverage all day — midnight is not a staffing boundary. */
 export function constantStaffingProfile(seats: number): StaffingProfile {
   return [{ startTime: "00:00", endTime: "24:00", seats }];
 }
