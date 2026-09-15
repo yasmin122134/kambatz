@@ -1022,7 +1022,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onToggleLock={setSeatLock}
+              onToggleLock={isAdminUser ? setSeatLock : undefined}
               onApplyReplacement={applyReplacement}
               onSwapCarmelRoom={handleSwapCarmelARoom}
               dormRooms={dormRooms}
@@ -1070,7 +1070,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onToggleLock={setSeatLock}
+              onToggleLock={isAdminUser ? setSeatLock : undefined}
               onSetBaseWorkLeader={setBaseWorkLeader}
               onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
@@ -1115,7 +1115,7 @@ export function BoardClient({
                 );
               }}
               onAdminSet={adminSetName}
-              onToggleLock={setSeatLock}
+              onToggleLock={isAdminUser ? setSeatLock : undefined}
               onApplyReplacement={applyReplacement}
               onCancelSwap={() => {
                 setSwapTarget(null);
@@ -2273,7 +2273,7 @@ function SlotCard({
         return (
           <li
             key={seatIndex}
-            className={`flex flex-wrap items-center gap-1 text-sm ${seatLocked ? "slot-seat-locked" : ""}`}
+            className={`flex flex-wrap items-center gap-1 text-sm ${isAdmin && seatLocked ? "slot-seat-locked" : ""}`}
           >
             {isAdmin ? (
               <>
@@ -2344,9 +2344,6 @@ function SlotCard({
                 )}
                 {isLeader && (
                   <span className="abas-leader-badge mr-1">★ אחראי/ת קבוצה</span>
-                )}
-                {seatLocked && (
-                  <span className="mr-1" title="נעול — לא יוחלף בשיבוץ מחדש">🔒</span>
                 )}
               </span>
             )}
