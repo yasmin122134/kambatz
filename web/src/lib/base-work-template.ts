@@ -28,7 +28,12 @@ function newSlot(start: string, end: string, seats = 1): MissionSlot {
 export function isBaseWorkPositionName(name: string): boolean {
   const n = name.trim();
   if (n.includes("עתודה")) return false;
-  return n.includes("עבודות בסיס") || n.includes("עב״ס");
+  return (
+    n.includes("עבודות בסיס") ||
+    n.includes("עב״ס") ||
+    n.includes('עב"ס') ||
+    n.includes("עבס")
+  );
 }
 
 export function isBaseWorkPosition(pos: Pick<MissionPosition, "name">): boolean {

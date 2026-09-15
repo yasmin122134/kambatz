@@ -1,9 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { linkedGuardDayAssignScope } from "@/lib/guard-day-bundle";
-import {
-  missionsForDateAssignScope,
-  omitLegacyLinkedBaseWorkMissions,
-} from "@/lib/guard-day-scope";
+import { missionsForDateAssignScope } from "@/lib/guard-day-scope";
 import { getFairnessRules } from "@/lib/fairness";
 import { runGlobalAssign, type SmartAssignStatus, type UnresolvedRequirement } from "@/lib/global-assign";
 import { hashStringsToSeed } from "@/lib/seeded-random";
@@ -527,8 +524,9 @@ export async function autoAssignDate(
 ): Promise<SmartAssignDayResult> {
   const keepExisting = options.keepExisting !== false;
   const loaded = await listMissionDays(false);
-  const allMissions = omitLegacyLinkedBaseWorkMissions(loaded);
-  const scopeMissions = missionsForDateAssignScope(allMissions, missionDate);
+  // משאירים משימות עב״ס מקושרות בקונטקסט — כדי שחפיפות מולן ייחסמו ויזוהו באזהרות.
+  const allMissions = loaded;
+  const scopeMissions = missionsForDateAssignScope(loaded, missionDate);
 
   if (!scopeMissions.length) {
     throw new Error("אין ימי משימה בתאריך זה");

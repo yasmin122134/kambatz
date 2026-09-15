@@ -944,19 +944,22 @@ function overlapsSlot(
     if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
-    if (
-      visibleTimeOverlap(labeledInterval({
-        startMs: slot.startAtMs,
-        endMs: slot.endAtMs,
-        startTime: slot.startTime,
-        endTime: slot.endTime,
-      }), labeledInterval({
-        startMs: b.startAtMs,
-        endMs: b.endAtMs,
-        startTime: b.startTime,
-        endTime: b.endTime,
-      }))
-    ) {
+    const sameMorningWall =
+      labeledMinutesOverlap(
+        labeledInterval({
+          startMs: slot.startAtMs,
+          endMs: slot.endAtMs,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+        }),
+        labeledInterval({
+          startMs: b.startAtMs,
+          endMs: b.endAtMs,
+          startTime: b.startTime,
+          endTime: b.endTime,
+        }),
+      ) && Math.abs(slot.startAtMs - b.startAtMs) < 16 * 60 * 60 * 1000;
+    if (assignmentIntervalsOverlap(slotIv, blockIv) || sameMorningWall) {
       return true;
     }
 
@@ -3188,7 +3191,7 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
 
   for (const mission of input.missions) {
     for (const slot of flattenMissionSlots(mission)) {
-      const names = (mission.assignments[slot.slotId] || []).filter(Boolean);
+      const names = slot.assignees.map((n) => String(n || "").trim()).filter(Boolean);
       if (!names.length) continue;
       entries.push({ mission, slot, names });
     }
@@ -3206,7 +3209,8 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
 
   for (const { mission, slot, names } of entries) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
-    const emitWarnings = !focusIds || focusIds.has(mission.id);
+    const emitWarnings =
+      !focusIds || focusIds.has(mission.id) || mission.mission_type === "base_work";
     for (let seatIndex = 0; seatIndex < names.length; seatIndex++) {
       const name = names[seatIndex];
       const person = peopleByName[name];
@@ -3397,8 +3401,7 @@ function collectTrackedAssignments(
   for (const mission of missions) {
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
     for (const slot of flattenMissionSlots(mission)) {
-      const seats = mission.assignments[slot.slotId] || [];
-      for (const raw of seats) {
+      for (const raw of slot.assignees) {
         const name = String(raw || "").trim();
         if (!name) continue;
         const list = byPerson.get(name) || [];
@@ -3467,7 +3470,7 @@ function visibleTimeOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
   const startGapMs = Math.abs(a.startMs - b.startMs);
   // אותו בוקר / ערב — תוויות שעון חופפות גם אם ISO ישן פיצל אותן.
   if (startGapMs < 16 * 60 * 60 * 1000) return true;
-  // ~יום אחד הפרש עם שעות התחלה שונות: כנראה ISO ישן הזיז משמרת ליום הבא.
+  // ~יום אחד הפרש עם שעות שונות: ISO ישן, או חפיפה ויזואלית בלוח המחזורי.
   if (startGapMs > 32 * 60 * 60 * 1000) return false;
   return a.startTime !== b.startTime;
 }
@@ -3697,7 +3700,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
           messages.push(issueBlockMessage(name, slot));
         }
         if (overlapsSlot(name, slot, tracker, scheduling)) {
-          messages.push(`${name}: illegal overlap at ${slot.positionName} ${slot.timeLabel}`);
+          messages.push(`חפיפה: ${name} — ${slot.positionName} ${slot.timeLabel}`);
         }
         if (
           isRestConstrainedGuardKind(slot.positionKind) &&

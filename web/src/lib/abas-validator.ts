@@ -121,7 +121,8 @@ function collectBlocks(mission: MissionDay): Map<string, Abs[]> {
       }
       if (!bounds) continue;
       const seats = mission.assignments[slot.id] || [];
-      for (const name of seats) {
+      for (const raw of seats) {
+        const name = String(raw || "").trim();
         if (!name) continue;
         const list = byPerson.get(name) || [];
         list.push({
@@ -254,13 +255,15 @@ export function validateAbasRosterIndependent(
         }
 
         if (overlap && !(a.kind === "patrol" && b.kind === "officer_duty") && !(b.kind === "patrol" && a.kind === "officer_duty")) {
-          violations.push(`${person}: overlap ${a.label} ∩ ${b.label}`);
+          violations.push(`חפיפה עב״ס: ${person} — ${a.label} ∩ ${b.label}`);
         }
 
         if ((a.isGuard && b.isAbas) || (b.isGuard && a.isAbas)) {
           if (overlap || idle + 1e-9 < minAbas) {
             violations.push(
-              `${person}: guard↔ABAS rest ${overlap ? "overlap" : `${Math.round(idle)} min`} < ${minAbas} (${a.label} / ${b.label})`,
+              overlap
+                ? `חפיפה עב״ס: ${person} — ${a.label} ∩ ${b.label}`
+                : `${person}: מרווח ${Math.round(idle)} דק׳ בין עב״ס לשמירה (${a.label} / ${b.label}, נדרש ${minAbas})`,
             );
           }
         }

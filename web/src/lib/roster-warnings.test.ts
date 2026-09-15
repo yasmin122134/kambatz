@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { defaultBaseWorkPositions } from "@/lib/base-work-template";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 import { collectRosterWarnings, auditAssignedRoster } from "@/lib/scheduling-engine";
@@ -461,5 +462,111 @@ describe("collectRosterWarnings", () => {
     expect(
       warnings.some((w) => w.includes("מנוחה") && w.includes("עב״ס") && w.includes("נדרש 8")),
     ).toBe(true);
+  });
+
+  it("warns leftover linked ABAS overlapping a 09:00 guard when focus is only the guards mission", () => {
+    const guards = guardMission();
+    const guard0900 = flattenMissionSlots(guards).find(
+      (s) => s.positionKind === "guard" && s.startTime === "09:00",
+    )!;
+    const leftover: MissionDay = {
+      id: "linked-abas",
+      title: "עב״ס",
+      mission_type: "base_work",
+      mission_date: guards.mission_date,
+      starts_at: "2026-03-01T08:30:00+03:00",
+      ends_at: "2026-03-01T20:00:00+03:00",
+      status: "published",
+      positions: defaultBaseWorkPositions({ seatsPerShift: 1 }),
+      assignments: {},
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const abasSlot = leftover.positions[0].slots.find((s) => s.start_time === "08:30")!;
+    leftover.assignments = { [abasSlot.id]: ["אלכס"] };
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...guards,
+          scheduling_rules: {
+            ...guards.scheduling_rules,
+            linked_mission_id: leftover.id,
+          },
+          assignments: { [guard0900.slotId]: [alex.name] },
+        },
+        leftover,
+      ],
+      peopleByName: { [alex.name]: alex },
+      focusMissionIds: [guards.id],
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
+  });
+
+  it("warns ABAS∩guard even when assignment names have surrounding spaces", () => {
+    const mission = guardMission();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const guard = slots.find((s) => s.positionKind === "guard" && s.startTime === "09:00")!;
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...mission,
+          assignments: {
+            [abas.slotId]: ["  אלכס  ", ...Array(Math.max(0, abas.seatCount - 1)).fill("")],
+            [guard.slotId]: ["אלכס "],
+          },
+        },
+      ],
+      peopleByName: { [alex.name]: alex },
+      focusMissionIds: [mission.id],
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
+  });
+
+  it("warns yesterday's overnight guard overlapping today's morning ABAS", () => {
+    const today = guardMission();
+    const yesterdayStartsAt = "2026-02-28T07:00:00.000Z";
+    const yesterdayEndsAt = "2026-03-01T07:00:00.000Z";
+    const yesterday: MissionDay = {
+      ...guardMission(),
+      id: "m0",
+      mission_date: "2026-02-28",
+      starts_at: yesterdayStartsAt,
+      ends_at: yesterdayEndsAt,
+      positions: buildGuardDayPositions({
+        missionStartsAt: yesterdayStartsAt,
+        missionEndsAt: yesterdayEndsAt,
+        boardStart: "09:00",
+        shiftHours: 4,
+      }),
+    };
+    const overnight = flattenMissionSlots(yesterday).find(
+      (s) => s.positionKind === "guard" && s.startTime === "05:00",
+    )!;
+    const abas = flattenMissionSlots(today).find(
+      (s) => s.missionType === "base_work" && s.startTime === "08:30",
+    )!;
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...yesterday,
+          assignments: { [overnight.slotId]: [alex.name] },
+        },
+        {
+          ...today,
+          assignments: {
+            [abas.slotId]: [alex.name, ...Array(Math.max(0, abas.seatCount - 1)).fill("")],
+          },
+        },
+      ],
+      peopleByName: { [alex.name]: alex },
+      focusMissionIds: [today.id],
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
   });
 });
