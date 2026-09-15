@@ -16,6 +16,8 @@ import {
 } from "@/lib/guard-burden";
 import {
   type FlatSlot,
+  coverageFillRank,
+  coverageFillTier,
   slotEatsRest,
   flattenMissionSlots,
   isBaseWorkAssignment,
@@ -44,7 +46,6 @@ import {
 } from "@/lib/time-interval";
 import {
   guardAbasRestOk,
-  missionIntervalsOverlap,
   toMissionTimelineInterval,
 } from "@/lib/mission-timeline";
 import { issueAbsoluteInterval } from "@/lib/issue-interval";
@@ -736,6 +737,81 @@ export function stripAbasTimeViolations(input: {
     assignments[slot.slotId] = seats;
   }
 
+  const sanitized = clearOverlappingAbasAssignments({
+    mission: input.mission,
+    assignments,
+  });
+  return { assignments: sanitized.assignments, removed: removed + sanitized.removed };
+}
+
+/**
+ * מסיר עב״ס שחופף בזמן כל שיבוץ אחר של אותו אדם, מלבד כרמל ב׳.
+ * שער אחרון אחרי חלוקה קשיחה — לא תלוי במדיניות מנוחה.
+ */
+export function clearOverlappingAbasAssignments(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+}): { assignments: Record<string, string[]>; removed: number } {
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+  let removed = 0;
+  const draft: MissionDay = { ...input.mission, assignments };
+  const slots = flattenMissionSlots(draft);
+
+  const byPerson = new Map<string, FlatSlot[]>();
+  for (const slot of slots) {
+    const seats = assignments[slot.slotId] || [];
+    for (const name of seats) {
+      if (!name) continue;
+      const list = byPerson.get(name) || [];
+      list.push(slot);
+      byPerson.set(name, list);
+    }
+  }
+
+  for (const [person, list] of byPerson) {
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        const a = list[i];
+        const b = list[j];
+        if (a.slotId === b.slotId) continue;
+        if (
+          allowsParallelAssignmentOverlap(
+            a.positionKind,
+            a.missionType,
+            b.positionKind,
+            b.missionType,
+            assignmentMeta(a),
+            assignmentMeta(b),
+          )
+        ) {
+          continue;
+        }
+        if (
+          !assignmentIntervalsOverlap(
+            { startMs: a.startAtMs, endMs: a.endAtMs },
+            { startMs: b.startAtMs, endMs: b.endAtMs },
+          )
+        ) {
+          continue;
+        }
+        const aAbas = isBaseWorkAssignment(a.positionKind, a.missionType, assignmentMeta(a));
+        const bAbas = isBaseWorkAssignment(b.positionKind, b.missionType, assignmentMeta(b));
+        const drop = aAbas ? a : bAbas ? b : null;
+        if (!drop) continue;
+        const seats = assignments[drop.slotId] || [];
+        for (let si = 0; si < seats.length; si++) {
+          if (seats[si] !== person) continue;
+          seats[si] = "";
+          removed += 1;
+        }
+        assignments[drop.slotId] = seats;
+      }
+    }
+  }
+
   return { assignments, removed };
 }
 
@@ -863,6 +939,8 @@ function overlapsSlot(
     if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
+    if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
+
     const dutyGuard = needsDutyGuardGap(
       slot.positionKind,
       slot.missionType,
@@ -875,13 +953,6 @@ function overlapsSlot(
       const slotTl = toMissionTimelineInterval(0, slotIv.startMs, slotIv.endMs);
       const blockTl = toMissionTimelineInterval(0, blockIv.startMs, blockIv.endMs);
       if (!guardAbasRestOk(slotTl, blockTl, gapMin)) return true;
-      continue;
-    }
-    if (missionIntervalsOverlap(
-      toMissionTimelineInterval(0, slotIv.startMs, slotIv.endMs),
-      toMissionTimelineInterval(0, blockIv.startMs, blockIv.endMs),
-    )) {
-      return true;
     }
   }
   return false;
@@ -1757,6 +1828,7 @@ export function pickRelaxedCandidate(
     ) {
       return false;
     }
+    if (!restOk(p.name, slot, tracker, scheduling.rest_hours)) return false;
     if (slot.sameRoom && !sameRoomOk(p, mates, peopleByName)) return false;
     if (slot.sameGender && !sameGenderOk(p, mates, peopleByName)) return false;
     return true;
@@ -1787,6 +1859,12 @@ export function pickRestRelaxedCandidate(
     if (!canAssignKind(p, slot.positionKind, assignKindContext(slot))) return false;
     if (blockedByIssue(p.name, slot, issues)) return false;
     if (overlapsSlot(p.name, slot, tracker, scheduling)) return false;
+    const slotIv = slotInterval(slot);
+    for (const b of tracker.busy[p.name] || []) {
+      if (b.slotId === slot.slotId) continue;
+      if (parallelOverlapAllowed(slot, b, tracker)) continue;
+      if (assignmentIntervalsOverlap(slotIv, blockInterval(b))) return false;
+    }
     if (
       isGuardKind(slot.positionKind) &&
       !guardOk(p.name, slot, tracker, effectiveGuardRatio(scheduling))
@@ -1802,7 +1880,7 @@ export function pickRestRelaxedCandidate(
   });
 }
 
-/** ממלא משבצות ריקות — ללא הפרת חפיפה */
+/** ממלא משבצות ריקות — חובה קודם, עתודה, חמגשיות אחרונות. בלי הפרת חפיפה. */
 export function forceFillEmptySeats(input: {
   mission: MissionDay;
   assignments: Record<string, string[]>;
@@ -1813,7 +1891,7 @@ export function forceFillEmptySeats(input: {
   rules: FairnessRules;
   meanPrior: number;
   randomSeed?: number;
-  /** strict_rest only: after hard rest/ABAS-gap fails, break those to fill the board. */
+  /** אחרי מילוי הוגן: שובר מנוחה רק בעמדות חובה שנשארו ריקות. */
   allowCoverageFill?: boolean;
 }): { assignments: Record<string, string[]>; filled: number; warnings: string[] } {
   const assignments = { ...input.assignments };
@@ -1831,11 +1909,37 @@ export function forceFillEmptySeats(input: {
       siblingDutyOfficerAssignee(input.mission, slot, assignments) ?? undefined,
     randomSeed: input.randomSeed,
   });
+  const orderedSlots = [...flattenMissionSlots(input.mission)].sort(
+    (a, b) =>
+      coverageFillRank(a) - coverageFillRank(b) ||
+      a.sortKey - b.sortKey ||
+      a.slotId.localeCompare(b.slotId),
+  );
 
-  for (const slot of flattenMissionSlots(input.mission)) {
+  const placeChosen = (slot: FlatSlot, seatIndex: number, chosen: Person) => {
+    const seats = assignments[slot.slotId];
+    seats[seatIndex] = chosen.name;
+    placePerson(
+      chosen.name,
+      slot,
+      input.mission.id,
+      input.tracker,
+      input.rules,
+      input.scheduling,
+      slot.seatCount,
+      input.mission.mission_type,
+    );
+    filled += 1;
+  };
+
+  for (const slot of orderedSlots) {
     if (slot.seatCount <= 0) continue;
-    const seats = assignments[slot.slotId] || [];
+    if (!assignments[slot.slotId]) {
+      assignments[slot.slotId] = Array.from({ length: slot.seatCount }, () => "");
+    }
+    const seats = assignments[slot.slotId];
     const inSlot = new Set(seats.filter(Boolean));
+    const mandatory = coverageFillTier(slot) === "mandatory";
 
     for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
       if (seats[seatIndex]) continue;
@@ -1864,47 +1968,28 @@ export function forceFillEmptySeats(input: {
       );
       let lastResort = false;
 
-      if (!chosen && policy === "standard") {
-        chosen =
-          pickRelaxedCandidate(
-            input.people,
-            slot,
-            input.tracker,
-            input.issues,
-            input.scheduling,
-            mates,
-            peopleByName,
-            input.rules,
-            input.meanPrior,
-            inSlot,
-            {
-              roster: input.people,
-              dutyOfficerAlreadyAssigned:
-                siblingDutyOfficerAssignee(input.mission, slot, assignments) ??
-                undefined,
-            },
-          ) ??
-          pickRestRelaxedCandidate(
-            input.people,
-            slot,
-            input.tracker,
-            input.issues,
-            input.scheduling,
-            mates,
-            peopleByName,
-            input.rules,
-            input.meanPrior,
-            inSlot,
-            {
-              roster: input.people,
-              dutyOfficerAlreadyAssigned:
-                siblingDutyOfficerAssignee(input.mission, slot, assignments) ??
-                undefined,
-            },
-          );
+      if (!chosen && mandatory && policy === "standard") {
+        chosen = pickRelaxedCandidate(
+          input.people,
+          slot,
+          input.tracker,
+          input.issues,
+          input.scheduling,
+          mates,
+          peopleByName,
+          input.rules,
+          input.meanPrior,
+          inSlot,
+          {
+            roster: input.people,
+            dutyOfficerAlreadyAssigned:
+              siblingDutyOfficerAssignee(input.mission, slot, assignments) ??
+              undefined,
+          },
+        );
       }
 
-      if (!chosen && policy === "strict_rest" && input.allowCoverageFill) {
+      if (!chosen && mandatory && input.allowCoverageFill) {
         const prevPolicy = input.tracker.constraintPolicy;
         input.tracker.constraintPolicy = "relaxed_rest";
         try {
@@ -1933,17 +2018,49 @@ export function forceFillEmptySeats(input: {
         } finally {
           input.tracker.constraintPolicy = prevPolicy;
         }
+        if (!chosen && !slot.sameRoom) {
+          chosen = pickRestRelaxedCandidate(
+            input.people,
+            slot,
+            input.tracker,
+            input.issues,
+            input.scheduling,
+            mates,
+            peopleByName,
+            input.rules,
+            input.meanPrior,
+            inSlot,
+            {
+              roster: input.people,
+              dutyOfficerAlreadyAssigned:
+                siblingDutyOfficerAssignee(input.mission, slot, assignments) ??
+                undefined,
+            },
+          );
+          lastResort = Boolean(chosen);
+        }
       }
 
       if (!chosen) {
-        warnings.push(
-          `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי`,
-        );
+        const tier = coverageFillTier(slot);
+        if (tier === "hamagshiyot") {
+          warnings.push(
+            `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1} נשארה פנויה (עדיפות נמוכה)`,
+          );
+        } else if (tier === "reserve") {
+          warnings.push(
+            `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1} נשארה פנויה (עדיפות נמוכה אחרי חמגשיות)`,
+          );
+        } else if (input.allowCoverageFill) {
+          warnings.push(
+            `${slot.positionName} ${slot.timeLabel} — משבצת ${seatIndex + 1}: אין צוער זכאי`,
+          );
+        }
         continue;
       }
 
       if (lastResort) {
-        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות בין שמירות — מרווח עב״ס, מנוחת עב״ס וחפיפה נשמרו`;
+        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות — לא נמצא צוער עם מנוחה מלאה. חפיפה ומרווח עב״ס נשמרו`;
         if (!warnings.includes(msg)) warnings.push(msg);
       }
 
@@ -1971,22 +2088,9 @@ export function forceFillEmptySeats(input: {
         }
       }
 
-      seats[seatIndex] = chosen.name;
       inSlot.add(chosen.name);
-      placePerson(
-        chosen.name,
-        slot,
-        input.mission.id,
-        input.tracker,
-        input.rules,
-        input.scheduling,
-        slot.seatCount,
-        input.mission.mission_type,
-      );
-      filled += 1;
+      placeChosen(slot, seatIndex, chosen);
     }
-
-    assignments[slot.slotId] = seats;
   }
 
   return { assignments, filled, warnings };

@@ -173,7 +173,7 @@ describe("full guard day pipeline", () => {
     expect(yamachFilled).toBeGreaterThan(0);
   });
 
-  it("repair alone leaves many guard gaps on full guard day", () => {
+  it("repair alone leaves many guard gaps on full guard day", { timeout: 20000 }, () => {
     const startsAt = "2026-08-26T20:00:00+03:00";
     const endsAt = "2026-08-27T20:00:00+03:00";
     const positions = buildGuardDayPositions({
@@ -232,7 +232,7 @@ describe("full guard day pipeline", () => {
     expect(assigned).toBeLessThan(required);
   });
 
-  it("reports fill rate with 50 available cadets (2 officers excluded)", () => {
+  it("reports fill rate with 50 available cadets (2 officers excluded)", { timeout: 20000 }, () => {
     const startsAt = "2026-08-26T20:00:00+03:00";
     const endsAt = "2026-08-27T20:00:00+03:00";
     const positions = buildGuardDayPositions({

@@ -212,6 +212,35 @@ export function isReserveForceBlock(
   return isReserveForceSlot(block);
 }
 
+export type CoverageFillTier = "mandatory" | "reserve" | "hamagshiyot";
+
+/** חמגשיות נשארות ריקות ראשונות, אחר כך עתודה; כל השאר חייב איוש. */
+export function coverageFillTier(
+  slot: Pick<FlatSlot, "positionKind" | "missionType" | "positionName">,
+): CoverageFillTier {
+  if (
+    slot.missionType === "guards" &&
+    isHamagshiyotPositionName(slot.positionName ?? "")
+  ) {
+    return "hamagshiyot";
+  }
+  if (isReserveForceSlot(slot)) return "reserve";
+  return "mandatory";
+}
+
+export function coverageFillRank(
+  slot: Pick<FlatSlot, "positionKind" | "missionType" | "positionName">,
+): number {
+  switch (coverageFillTier(slot)) {
+    case "mandatory":
+      return 0;
+    case "reserve":
+      return 1;
+    case "hamagshiyot":
+      return 2;
+  }
+}
+
 /** תורנות מטבח (משימת kitchen) — לא צורכת מנוחת יומית; מותרות משמרות רצופות */
 export function isKitchenMissionSlot(
   slot: Pick<FlatSlot, "positionKind" | "missionType"> & { positionName?: string },

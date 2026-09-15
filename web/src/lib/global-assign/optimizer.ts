@@ -23,6 +23,7 @@ import {
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
 import {
+  coverageFillRank,
   flattenMissionSlots,
   isGuardKind,
   isStandbyKind,
@@ -654,6 +655,7 @@ function unitDifficulty(
   rules: FairnessRules,
   meanPrior: number,
 ): number {
+  const fillRank = coverageFillRank(unit.slot);
   const candidates =
     unit.kind === "carmel"
       ? countCarmelCandidates(unit, state, people, issues, peopleByName)
@@ -664,6 +666,13 @@ function unitDifficulty(
           : unit.kind === "guard_pair"
           ? countGuardPairCandidates(unit, state, people, issues, peopleByName, rules, meanPrior)
           : countSeatCandidates(unit, state, people, issues, peopleByName);
+
+  if (fillRank === 2) {
+    return 40 + 4 / Math.max(1, candidates);
+  }
+  if (fillRank === 1) {
+    return 120 + 12 / Math.max(1, candidates);
+  }
 
   if (unit.kind === "carmel") {
     return 100_000 + 10_000 / Math.max(1, candidates);

@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
-import { flattenMissionSlots, syncAssignmentSeats } from "@/lib/mission-utils";
+import { flattenMissionSlots, syncAssignmentSeats, coverageFillRank } from "@/lib/mission-utils";
 import {
   buildTrackerFromMissions,
+  clearOverlappingAbasAssignments,
   explainFitsPersonFailure,
   fitsPerson,
   forceFillEmptySeats,
   placePerson,
   stripAbasTimeViolations,
+  validateNoPersonOverlaps,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -255,7 +257,7 @@ describe("strict_rest constraint policy", () => {
     expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 
-  it("strict last-resort still keeps ABAS rest_hours and will not fill a 3.5h ABAS→guard gap", () => {
+  it("strict last-resort may break rest_hours for a 3.5h ABAS→guard gap, with a warning", () => {
     const mission = missionWithSlots([
       { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
       { id: "g", name: "פטל", kind: "guard", start: "15:00", end: "16:00", seats: 1 },
@@ -283,8 +285,9 @@ describe("strict_rest constraint policy", () => {
       meanPrior: 0,
       allowCoverageFill: true,
     });
-    expect((lastResort.assignments[guardSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
-    expect(lastResort.filled).toBe(0);
+    expect(lastResort.assignments[guardSlot.slotId]?.[0]).toBe(p.name);
+    expect(lastResort.filled).toBe(1);
+    expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 
   it("never fills ABAS↔guard under the defined minute-gap, even as last resort", () => {
@@ -524,5 +527,159 @@ describe("strict_rest constraint policy", () => {
     expect(removed).toBe(1);
     expect((assignments[abasSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
     expect(assignments[guardSlot.slotId]?.[0]).toBe(p.name);
+  });
+
+  it("clearOverlappingAbasAssignments removes ABAS that overlaps a 09:00 guard", () => {
+    const mission = missionWithSlots([
+      { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
+      { id: "g", name: "פטל", kind: "guard", start: "09:00", end: "13:00", seats: 1 },
+    ]);
+    const abasSlot = slotByName(mission, "עבודות");
+    const guardSlot = slotByName(mission, "פטל");
+    const seeded = syncAssignmentSeats(mission.positions, {
+      [abasSlot.slotId]: [p.name],
+      [guardSlot.slotId]: [p.name],
+    });
+    const { assignments, removed } = clearOverlappingAbasAssignments({
+      mission: { ...mission, assignments: seeded },
+      assignments: seeded,
+    });
+    expect(removed).toBe(1);
+    expect((assignments[abasSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect(assignments[guardSlot.slotId]?.[0]).toBe(p.name);
+    expect(validateNoPersonOverlaps([{ ...mission, assignments }])).toHaveLength(0);
+  });
+});
+
+describe("coverage fill priority", () => {
+  const alex = person("Alex");
+  const blair = person("Blair");
+
+  function overlappingEveningMission(): MissionDay {
+    return missionWithSlots([
+      {
+        id: "ham",
+        name: "חמגשיות",
+        kind: "kitchen",
+        start: "18:00",
+        end: "19:00",
+        seats: 1,
+      },
+      {
+        id: "res",
+        name: "כוח עתודה",
+        kind: "duty",
+        start: "18:00",
+        end: "21:00",
+        seats: 1,
+      },
+      {
+        id: "g",
+        name: "פטל",
+        kind: "guard",
+        start: "18:00",
+        end: "21:00",
+        seats: 1,
+      },
+    ]);
+  }
+
+  it("ranks hamagshiyot last and reserve after mandatory", () => {
+    const mission = overlappingEveningMission();
+    const slots = flattenMissionSlots(mission);
+    const ham = slots.find((s) => s.positionName === "חמגשיות")!;
+    const reserve = slots.find((s) => s.positionName.includes("עתודה"))!;
+    const guard = slots.find((s) => s.positionKind === "guard")!;
+    expect(coverageFillRank(ham)).toBe(2);
+    expect(coverageFillRank(reserve)).toBe(1);
+    expect(coverageFillRank(guard)).toBe(0);
+  });
+
+  it("fills the guard and leaves hamagshiyot empty when only one person is available", () => {
+    const mission = overlappingEveningMission();
+    const slots = flattenMissionSlots(mission);
+    const ham = slots.find((s) => s.positionName === "חמגשיות")!;
+    const reserve = slots.find((s) => s.positionName.includes("עתודה"))!;
+    const guard = slots.find((s) => s.positionKind === "guard")!;
+    const seeded = syncAssignmentSeats(mission.positions, mission.assignments);
+    const filled = forceFillEmptySeats({
+      mission,
+      assignments: seeded,
+      people: [alex],
+      tracker: buildTrackerFromMissions([{ ...mission, assignments: seeded }], rules),
+      issues: [],
+      scheduling,
+      rules,
+      meanPrior: 0,
+      allowCoverageFill: false,
+    });
+    expect(filled.assignments[guard.slotId]?.[0]).toBe(alex.name);
+    expect((filled.assignments[reserve.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect((filled.assignments[ham.slotId] || []).filter(Boolean)).toHaveLength(0);
+  });
+
+  it("fills reserve before hamagshiyot when two people can cover only two overlapping posts", () => {
+    const mission = overlappingEveningMission();
+    const slots = flattenMissionSlots(mission);
+    const ham = slots.find((s) => s.positionName === "חמגשיות")!;
+    const reserve = slots.find((s) => s.positionName.includes("עתודה"))!;
+    const guard = slots.find((s) => s.positionKind === "guard")!;
+    const seeded = syncAssignmentSeats(mission.positions, mission.assignments);
+    const filled = forceFillEmptySeats({
+      mission,
+      assignments: seeded,
+      people: [alex, blair],
+      tracker: buildTrackerFromMissions([{ ...mission, assignments: seeded }], rules),
+      issues: [],
+      scheduling,
+      rules,
+      meanPrior: 0,
+      allowCoverageFill: false,
+    });
+    expect((filled.assignments[guard.slotId] || []).filter(Boolean)).toHaveLength(1);
+    expect((filled.assignments[reserve.slotId] || []).filter(Boolean)).toHaveLength(1);
+    expect((filled.assignments[ham.slotId] || []).filter(Boolean)).toHaveLength(0);
+  });
+
+  it("breaks rest to fill a guard, but not to fill hamagshiyot", () => {
+    const mission = missionWithSlots([
+      { id: "g1", name: "שער אחורי", kind: "guard", start: "08:00", end: "09:00", seats: 1 },
+      { id: "g2", name: "שער קדמי", kind: "guard", start: "12:00", end: "13:00", seats: 1 },
+      {
+        id: "ham",
+        name: "חמגשיות",
+        kind: "kitchen",
+        start: "12:00",
+        end: "13:00",
+        seats: 1,
+      },
+    ]);
+    const first = slotByName(mission, "אחורי");
+    const second = slotByName(mission, "קדמי");
+    const ham = flattenMissionSlots(mission).find((s) => s.positionName === "חמגשיות")!;
+    const seeded = syncAssignmentSeats(mission.positions, {
+      [first.slotId]: [alex.name],
+      [second.slotId]: [""],
+      [ham.slotId]: [""],
+    });
+    const lastResort = forceFillEmptySeats({
+      mission,
+      assignments: seeded,
+      people: [alex],
+      tracker: buildTrackerFromMissions(
+        [{ ...mission, assignments: seeded }],
+        rules,
+        new Set(),
+        "strict_rest",
+      ),
+      issues: [],
+      scheduling,
+      rules,
+      meanPrior: 0,
+      allowCoverageFill: true,
+    });
+    expect(lastResort.assignments[second.slotId]?.[0]).toBe(alex.name);
+    expect((lastResort.assignments[ham.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 });

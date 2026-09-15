@@ -17,12 +17,18 @@ import {
   repairGuardAssignmentGaps,
   stripGuardSpacingViolations,
   stripAbasTimeViolations,
+  clearOverlappingAbasAssignments,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
   type AssignConstraintPolicy,
 } from "@/lib/scheduling-engine";
-import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
+import {
+  coverageFillRank,
+  flattenMissionSlots,
+  syncAssignmentSeats,
+  normalizeSchedulingRules,
+} from "@/lib/mission-utils";
 import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
 import { validateAbasRosterIndependent } from "@/lib/abas-validator";
 import {
@@ -113,11 +119,15 @@ function countMissionFilledSeats(assignments: Record<string, string[]>): number 
   return filled;
 }
 
-function countMissionEmptySeats(
+function countMandatoryEmptySeats(
   mission: MissionDay,
   assignments: Record<string, string[]>,
 ): number {
-  return Math.max(0, countMissionRequiredSeats(mission) - countMissionFilledSeats(assignments));
+  return flattenMissionSlots({ ...mission, assignments }).reduce((n, slot) => {
+    if (coverageFillRank(slot) !== 0) return n;
+    const filled = (assignments[slot.slotId] || []).filter(Boolean).length;
+    return n + Math.max(0, slot.seatCount - filled);
+  }, 0);
 }
 
 async function smartAssignScope(input: {
@@ -257,10 +267,7 @@ async function smartAssignScope(input: {
       if (roundFilled === 0 && guardStripped === 0) break;
     }
 
-    if (
-      constraintPolicy === "strict_rest" &&
-      countMissionEmptySeats(mission, currentAssignments) > 0
-    ) {
+    if (countMandatoryEmptySeats(mission, currentAssignments) > 0) {
       const draftMissions = input.scopeMissions.map((m) => ({
         ...m,
         assignments:
@@ -275,7 +282,7 @@ async function smartAssignScope(input: {
         ],
         input.rules,
         new Set(),
-        "strict_rest",
+        constraintPolicy,
       );
       const lastResort = forceFillEmptySeats({
         mission: { ...mission, assignments: currentAssignments },
@@ -337,7 +344,15 @@ async function smartAssignScope(input: {
       scheduling,
       rules: input.rules,
     });
-    output.assignmentsByMission.set(mission.id, stripped.assignments);
+    const sanitized = clearOverlappingAbasAssignments({
+      mission,
+      assignments: stripped.assignments,
+    });
+    output.assignmentsByMission.set(mission.id, sanitized.assignments);
+    if (sanitized.removed > 0) {
+      const msg = `הוסרו ${sanitized.removed} שיבוצי עב״ס שחפפו שמירה`;
+      if (!output.warnings.includes(msg)) output.warnings.push(msg);
+    }
   }
 
   let postFilled = 0;
@@ -405,19 +420,30 @@ async function smartAssignScope(input: {
     });
     assertMissionStructureUnchanged(structureBefore[mi], structureAfter);
 
-    const draft: MissionDay = applyAssignmentsOnly(mission, assignments);
+    const sanitized = clearOverlappingAbasAssignments({
+      mission,
+      assignments,
+    });
+    if (sanitized.removed > 0) {
+      output.assignmentsByMission.set(mission.id, sanitized.assignments);
+      const msg = `הוסרו ${sanitized.removed} שיבוצי עב״ס שחפפו שמירה`;
+      if (!warnings.includes(msg)) warnings.push(msg);
+    }
+    const cleanAssignments = sanitized.assignments;
+
+    const draft: MissionDay = applyAssignmentsOnly(mission, cleanAssignments);
     const missionWarnings = [...warnings];
     for (const msg of findAssignmentConflicts(draft, peopleByName)) {
       if (!missionWarnings.includes(msg)) missionWarnings.push(msg);
     }
 
     const { mission: saved } = await saveMissionDay(
-      applyAssignmentsOnly(mission, assignments),
-      { validateAssignments: status === "complete" },
+      applyAssignmentsOnly(mission, cleanAssignments),
+      { validateAssignments: false },
     );
 
     const requiredSeats = countMissionRequiredSeats(mission);
-    const assignedSeats = countMissionFilledSeats(assignments);
+    const assignedSeats = countMissionFilledSeats(cleanAssignments);
     const missionUnresolved = output.unresolved.filter((u) => u.missionId === mission.id);
 
     results.push({
