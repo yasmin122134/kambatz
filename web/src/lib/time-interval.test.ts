@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { baseWorkWallClockInterval } from "@/lib/base-work-template";
+import { flattenMissionSlots } from "@/lib/mission-utils";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
 import { buildGuardDayPositions, carmelSlotFromMission } from "@/lib/guard-day-template";
 import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval, sameMissionInstant } from "@/lib/time-interval";
@@ -178,15 +179,15 @@ describe("resolveSlotAbsoluteInterval — 09:00 mission day", () => {
   });
 });
 
-describe("base work fixed wall-clock on mission_date", () => {
-  it("always anchors 08:30–11:30 to mission_date regardless of guard window", () => {
+describe("base work aligned to the guard board window", () => {
+  it("wall-clock helper still labels 08:30–11:30 on the given date", () => {
     const iv = baseWorkWallClockInterval("2026-08-21", "08:30", "11:30");
     expect(iv).not.toBeNull();
     expect(new Date(iv!.startMs).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe("08:30");
     expect(new Date(iv!.endMs).toLocaleString("en-GB", { timeZone: "Asia/Jerusalem", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })).toBe("11:30");
   });
 
-  it("validates all standard windows on a 20:00 guard day", () => {
+  it("on a 20:00 board, morning ABAS is the next morning inside the window", () => {
     const mission: MissionDay = {
       id: "g1",
       title: "שמירות",
@@ -214,6 +215,17 @@ describe("base work fixed wall-clock on mission_date", () => {
       updated_at: "",
     };
     expect(validateMissionStructureForAssignment(mission)).toEqual([]);
+    const morning = flattenMissionSlots(mission).find((s) => s.startTime === "08:30")!;
+    expect(
+      new Date(morning.startAtMs).toLocaleString("en-GB", {
+        timeZone: "Asia/Jerusalem",
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      }),
+    ).toBe("22/08, 08:30");
   });
 });
 

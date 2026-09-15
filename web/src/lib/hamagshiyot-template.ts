@@ -59,19 +59,19 @@ export function hamagshiyotWallClockInterval(
   return { startMs, endMs };
 }
 
-/** חמגשיות — תמיד שעון קיר על mission_date (כמו עב״ס), לא חלון גלגול השמירות. */
+/** חמגשיות על ציר יום השמירות (כמו הלוח ועב״ס). */
 export function resolveHamagshiyotSlotInterval(
   missionDate: string,
   missionStartsAt: string,
   missionEndsAt: string,
   slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
 ): TimeInterval | null {
-  const fixed = hamagshiyotWallClockInterval(missionDate, slot.start_time, slot.end_time);
-  if (fixed) return fixed;
-  return resolveCanonicalSlotInterval(
+  const canonical = resolveCanonicalSlotInterval(
     { starts_at: missionStartsAt, ends_at: missionEndsAt },
     slot,
   );
+  if (canonical) return canonical;
+  return hamagshiyotWallClockInterval(missionDate, slot.start_time, slot.end_time);
 }
 
 function materializeHamagshiyotSlot(
@@ -79,6 +79,7 @@ function materializeHamagshiyotSlot(
   shift: HamagshiyotShiftDef,
   seats: number,
   existing?: MissionSlot,
+  missionWindow?: { startsAt: string; endsAt: string },
 ): MissionSlot {
   const slot: MissionSlot = {
     id: existing?.id ?? uid(),
@@ -86,7 +87,14 @@ function materializeHamagshiyotSlot(
     end_time: shift.end,
     seat_count: existing?.seat_count ?? seats,
   };
-  const abs = hamagshiyotWallClockInterval(missionDate, shift.start, shift.end);
+  const abs = missionWindow
+    ? resolveHamagshiyotSlotInterval(
+        missionDate,
+        missionWindow.startsAt,
+        missionWindow.endsAt,
+        slot,
+      )
+    : hamagshiyotWallClockInterval(missionDate, shift.start, shift.end);
   if (abs) {
     Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
   }
@@ -97,6 +105,7 @@ export function materializeHamagshiyotPositions(
   positions: MissionPosition[],
   missionDate?: string,
   seatsPerShift = DEFAULT_HAMAGSHIYOT_SEATS,
+  missionWindow?: { startsAt: string; endsAt: string },
 ): MissionPosition[] {
   const date = missionDate ?? new Date().toISOString().slice(0, 10);
   return positions.map((pos) =>
@@ -112,7 +121,7 @@ export function materializeHamagshiyotPositions(
                   normalizeTimeLabel(s.end) === normalizeTimeLabel(slot.end_time),
               ) ?? DEFAULT_HAMAGSHIYOT_SHIFTS[i];
             return shift
-              ? materializeHamagshiyotSlot(date, shift, seatsPerShift, slot)
+              ? materializeHamagshiyotSlot(date, shift, seatsPerShift, slot, missionWindow)
               : slot;
           }),
         }
@@ -124,16 +133,24 @@ export function defaultHamagshiyotPositions(options?: {
   seatsPerShift?: number;
   shifts?: HamagshiyotShiftDef[];
   missionDate?: string;
+  missionStartsAt?: string;
+  missionEndsAt?: string;
 }): MissionPosition[] {
   const seats = options?.seatsPerShift ?? DEFAULT_HAMAGSHIYOT_SEATS;
   const shifts = options?.shifts ?? DEFAULT_HAMAGSHIYOT_SHIFTS;
   const missionDate = options?.missionDate ?? new Date().toISOString().slice(0, 10);
+  const missionWindow =
+    options?.missionStartsAt && options?.missionEndsAt
+      ? { startsAt: options.missionStartsAt, endsAt: options.missionEndsAt }
+      : undefined;
   return [
     {
       id: uid(),
       name: "חמגשיות",
       kind: "kitchen",
-      slots: shifts.map((s) => materializeHamagshiyotSlot(missionDate, s, seats)),
+      slots: shifts.map((s) =>
+        materializeHamagshiyotSlot(missionDate, s, seats, undefined, missionWindow),
+      ),
     },
   ];
 }

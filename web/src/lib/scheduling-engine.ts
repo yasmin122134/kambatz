@@ -172,9 +172,9 @@ export function createEmptyScheduleTracker(
 }
 
 export function trackerConstraintPolicy(
-  tracker: ScheduleTracker,
+  tracker?: Pick<ScheduleTracker, "constraintPolicy"> | null,
 ): AssignConstraintPolicy {
-  return tracker.constraintPolicy ?? "standard";
+  return tracker?.constraintPolicy ?? "standard";
 }
 
 export type ReplacementOption = {
@@ -285,8 +285,9 @@ export function allowsParallelAssignmentOverlap(
 function parallelOverlapAllowed(
   slot: FlatSlot,
   block: BusyBlock,
+  tracker?: ScheduleTracker,
 ): boolean {
-  return allowsParallelAssignmentOverlap(
+  const allowed = allowsParallelAssignmentOverlap(
     slot.positionKind,
     slot.missionType,
     block.positionKind,
@@ -302,6 +303,22 @@ function parallelOverlapAllowed(
       endTime: block.endTime,
     },
   );
+  if (!allowed) return false;
+  const policy = trackerConstraintPolicy(tracker);
+  if (policy === "standard") return true;
+  const slotAbas = isBaseWorkAssignment(
+    slot.positionKind,
+    slot.missionType,
+    assignmentMeta(slot),
+  );
+  const blockAbas = isBaseWorkAssignment(
+    block.positionKind,
+    block.missionType,
+    assignmentMeta(block),
+  );
+  // חלוקה קשיחה: עב״ס לא חולק זמן עם כרמל ב׳ / עתודה (ולא עם שום מקביל אחר).
+  if (slotAbas || blockAbas) return false;
+  return true;
 }
 
 export function blockedByIssue(
@@ -624,6 +641,101 @@ export function stripGuardSpacingViolations(input: {
   return { assignments, removed };
 }
 
+/** מסיר שיבוצי עב״ס שחופפים שמירה/מפרים מרווח — ביטחון אחרי חלוקה קשיחה. */
+export function stripAbasTimeViolations(input: {
+  mission: MissionDay;
+  assignments: Record<string, string[]>;
+  scheduling: MissionSchedulingRules;
+  rules: FairnessRules;
+  constraintPolicy?: AssignConstraintPolicy;
+}): { assignments: Record<string, string[]>; removed: number } {
+  const assignments = { ...input.assignments };
+  for (const key of Object.keys(assignments)) {
+    assignments[key] = [...assignments[key]];
+  }
+
+  const slots = flattenMissionSlots(input.mission);
+  const isAbas = (s: FlatSlot) =>
+    isBaseWorkAssignment(s.positionKind, s.missionType, assignmentMeta(s));
+  const others = slots.filter((s) => !isAbas(s));
+  const abasSlots = slots
+    .filter((s) => isAbas(s) && s.seatCount > 0)
+    .sort((a, b) => a.sortKey - b.sortKey || a.slotId.localeCompare(b.slotId));
+
+  const tracker = createEmptyScheduleTracker();
+  tracker.constraintPolicy = input.constraintPolicy ?? "standard";
+  let removed = 0;
+
+  for (const slot of others) {
+    const seats = assignments[slot.slotId] || [];
+    for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+      const name = seats[seatIndex];
+      if (!name) continue;
+      placePerson(
+        name,
+        slot,
+        input.mission.id,
+        tracker,
+        input.rules,
+        input.scheduling,
+        slot.seatCount,
+        input.mission.mission_type,
+      );
+    }
+  }
+
+  for (const slot of abasSlots) {
+    const seats = assignments[slot.slotId] || [];
+    for (let seatIndex = 0; seatIndex < slot.seatCount; seatIndex++) {
+      const name = seats[seatIndex];
+      if (!name) continue;
+      if (isSeatLocked(input.mission, slot.slotId, seatIndex)) {
+        placePerson(
+          name,
+          slot,
+          input.mission.id,
+          tracker,
+          input.rules,
+          input.scheduling,
+          slot.seatCount,
+          input.mission.mission_type,
+        );
+        continue;
+      }
+      const restMode =
+        input.constraintPolicy === "relaxed_rest" ? "abas_guard" : "all";
+      const restBroken =
+        (input.constraintPolicy === "strict_rest" ||
+          input.constraintPolicy === "relaxed_rest") &&
+        !strictRestGapOk(
+          name,
+          slot,
+          tracker,
+          input.scheduling.rest_hours,
+          restMode,
+        );
+      if (overlapsSlot(name, slot, tracker, input.scheduling) || restBroken) {
+        seats[seatIndex] = "";
+        removed += 1;
+        continue;
+      }
+      placePerson(
+        name,
+        slot,
+        input.mission.id,
+        tracker,
+        input.rules,
+        input.scheduling,
+        slot.seatCount,
+        input.mission.mission_type,
+      );
+    }
+    assignments[slot.slotId] = seats;
+  }
+
+  return { assignments, removed };
+}
+
 function restOk(
   personName: string,
   slot: FlatSlot,
@@ -642,6 +754,7 @@ function strictRestGapOk(
   slot: FlatSlot,
   tracker: ScheduleTracker,
   restHours: number,
+  mode: "all" | "abas_guard" = "all",
 ): boolean {
   const restMin = Math.max(0, restHours) * 60;
   if (restMin <= 0) return true;
@@ -662,10 +775,12 @@ function strictRestGapOk(
       b.missionType,
       assignmentMeta(b),
     );
+    const abasGuardPair =
+      (slotIsGuard && blockIsAbas) || (slotIsAbas && blockIsGuard);
     const pairNeedsRest =
-      (slotIsGuard && blockIsGuard) ||
-      (slotIsGuard && blockIsAbas) ||
-      (slotIsAbas && blockIsGuard);
+      mode === "abas_guard"
+        ? abasGuardPair
+        : (slotIsGuard && blockIsGuard) || abasGuardPair;
     if (!pairNeedsRest) continue;
     const blockIv = blockInterval(b);
     if (assignmentIntervalsOverlap(slotIv, blockIv)) continue;
@@ -730,7 +845,7 @@ function overlapsSlot(
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
     if (b.slotId === slot.slotId) continue;
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
-    if (parallelOverlapAllowed(slot, b)) continue;
+    if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
     const extraGap =
@@ -1127,12 +1242,19 @@ export function explainFitsPersonFailure(
   if (overlapsSlot(person.name, slot, tracker, scheduling, ignoreSlotId)) return "overlapsSlot";
   if (!guardOk(person.name, slot, tracker, effectiveGuardRatio(scheduling), ignoreSlotId)) return "guardOk";
   if (policy !== "coverage") {
-    const skipRestHours = policy === "relaxed_rest";
-    if (!skipRestHours) {
+    const skipGuardGuardRest = policy === "relaxed_rest";
+    if (!skipGuardGuardRest) {
       if (!restOk(person.name, slot, tracker, scheduling.rest_hours)) return "restOk";
+    }
+    if (policy === "strict_rest" || policy === "relaxed_rest") {
       if (
-        policy === "strict_rest" &&
-        !strictRestGapOk(person.name, slot, tracker, scheduling.rest_hours)
+        !strictRestGapOk(
+          person.name,
+          slot,
+          tracker,
+          scheduling.rest_hours,
+          skipGuardGuardRest ? "abas_guard" : "all",
+        )
       ) {
         return "guardRestGap";
       }
@@ -1499,7 +1621,7 @@ function collectSpacingAndRestWarnings(
   for (const b of tracker.busy[personName] || []) {
     if (b.slotId === slot.slotId) continue;
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
-    if (parallelOverlapAllowed(slot, b)) continue;
+    if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
     const dutyGuard = needsDutyGuardGap(
@@ -1788,7 +1910,7 @@ export function forceFillEmptySeats(input: {
       }
 
       if (lastResort) {
-        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות — מרווח עב״ס וחפיפה נשמרו`;
+        const msg = `${chosen.name}: שובץ ב-${slot.positionName} ${slot.timeLabel} תוך שבירת מנוחה של ${input.scheduling.rest_hours} שעות בין שמירות — מרווח עב״ס, מנוחת עב״ס וחפיפה נשמרו`;
         if (!warnings.includes(msg)) warnings.push(msg);
       }
 

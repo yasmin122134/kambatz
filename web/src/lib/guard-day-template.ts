@@ -599,12 +599,18 @@ export function syncGuardShiftSlots(
       }
 
       if (isPatrolPosition(pos)) {
-        const [patrol] = materializePatrolPositions([pos], ctx.missionDate);
+        const [patrol] = materializePatrolPositions([pos], ctx.missionDate, {
+          startsAt: ctx.missionStartsAt,
+          endsAt: ctx.missionEndsAt,
+        });
         return patrol ?? pos;
       }
 
       if (isHamagshiyotPosition(pos)) {
-        const [ham] = materializeHamagshiyotPositions([pos], ctx.missionDate);
+        const [ham] = materializeHamagshiyotPositions([pos], ctx.missionDate, undefined, {
+          startsAt: ctx.missionStartsAt,
+          endsAt: ctx.missionEndsAt,
+        });
         return ham ?? pos;
       }
 
@@ -667,10 +673,22 @@ export function buildGuardDayPositions(options?: BuildGuardDayOptions): MissionP
     );
   }
   if (!hasPatrol) {
-    extras.push(...defaultPatrolPositions({ missionDate }));
+    extras.push(
+      ...defaultPatrolPositions({
+        missionDate,
+        missionStartsAt: ctx.missionStartsAt,
+        missionEndsAt: ctx.missionEndsAt,
+      }),
+    );
   }
   if (!hasHamagshiyot) {
-    extras.push(...defaultHamagshiyotPositions({ missionDate }));
+    extras.push(
+      ...defaultHamagshiyotPositions({
+        missionDate,
+        missionStartsAt: ctx.missionStartsAt,
+        missionEndsAt: ctx.missionEndsAt,
+      }),
+    );
   }
 
   return [...synced, ...extras];

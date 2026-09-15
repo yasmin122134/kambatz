@@ -172,11 +172,17 @@ export function finalizeGuardMissionPositions(
         );
   const patrol =
     patrolPositions.length > 0
-      ? materializePatrolPositions(patrolPositions, input.missionDate)
+      ? materializePatrolPositions(patrolPositions, input.missionDate, {
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+        })
       : [];
   const hamagshiyot =
     hamagshiyotPositions.length > 0
-      ? materializeHamagshiyotPositions(hamagshiyotPositions, input.missionDate)
+      ? materializeHamagshiyotPositions(hamagshiyotPositions, input.missionDate, undefined, {
+          startsAt: input.startsAt,
+          endsAt: input.endsAt,
+        })
       : [];
   return [...synced, ...baseWork, ...patrol, ...hamagshiyot];
 }

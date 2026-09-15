@@ -117,25 +117,26 @@ export function patrolWallClockInterval(
   return { startMs, endMs };
 }
 
-/** פטרולים — שעון קיר על mission_date (כמו עב״ס וחמגשיות). */
+/** פטרולים על ציר יום השמירות (כמו הלוח, עב״ס וחמגשיות). */
 export function resolvePatrolSlotInterval(
   missionDate: string,
   missionStartsAt: string,
   missionEndsAt: string,
   slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
 ): TimeInterval | null {
-  const fixed = patrolWallClockInterval(missionDate, slot.start_time, slot.end_time);
-  if (fixed) return fixed;
-  return resolveCanonicalSlotInterval(
+  const canonical = resolveCanonicalSlotInterval(
     { starts_at: missionStartsAt, ends_at: missionEndsAt },
     slot,
   );
+  if (canonical) return canonical;
+  return patrolWallClockInterval(missionDate, slot.start_time, slot.end_time);
 }
 
 function materializePatrolSlot(
   missionDate: string,
   tour: PatrolTourDef,
   existing?: MissionSlot,
+  missionWindow?: { startsAt: string; endsAt: string },
 ): MissionSlot {
   const slot: MissionSlot = {
     id: existing?.id ?? uid(),
@@ -144,7 +145,14 @@ function materializePatrolSlot(
     seat_count: existing?.seat_count ?? 1,
     label: tour.label,
   };
-  const abs = patrolWallClockInterval(missionDate, tour.start, tour.end);
+  const abs = missionWindow
+    ? resolvePatrolSlotInterval(
+        missionDate,
+        missionWindow.startsAt,
+        missionWindow.endsAt,
+        slot,
+      )
+    : patrolWallClockInterval(missionDate, tour.start, tour.end);
   if (abs) {
     Object.assign(slot, materializeSlotAbsoluteBounds(slot, abs));
   }
@@ -154,6 +162,7 @@ function materializePatrolSlot(
 export function materializePatrolPositions(
   positions: MissionPosition[],
   missionDate?: string,
+  missionWindow?: { startsAt: string; endsAt: string },
 ): MissionPosition[] {
   const date = missionDate ?? new Date().toISOString().slice(0, 10);
   return positions.map((pos) =>
@@ -168,7 +177,7 @@ export function materializePatrolPositions(
                   patrolWindowKey(t.start, t.end) ===
                   patrolWindowKey(slot.start_time, slot.end_time),
               ) ?? DEFAULT_PATROL_TOURS[i];
-            return tour ? materializePatrolSlot(date, tour, slot) : slot;
+            return tour ? materializePatrolSlot(date, tour, slot, missionWindow) : slot;
           }),
         }
       : pos,
@@ -178,15 +187,21 @@ export function materializePatrolPositions(
 export function defaultPatrolPositions(options?: {
   tours?: PatrolTourDef[];
   missionDate?: string;
+  missionStartsAt?: string;
+  missionEndsAt?: string;
 }): MissionPosition[] {
   const tours = options?.tours ?? DEFAULT_PATROL_TOURS;
   const missionDate = options?.missionDate ?? new Date().toISOString().slice(0, 10);
+  const missionWindow =
+    options?.missionStartsAt && options?.missionEndsAt
+      ? { startsAt: options.missionStartsAt, endsAt: options.missionEndsAt }
+      : undefined;
   return [
     {
       id: uid(),
       name: "פטרולים",
       kind: "patrol",
-      slots: tours.map((t) => materializePatrolSlot(missionDate, t)),
+      slots: tours.map((t) => materializePatrolSlot(missionDate, t, undefined, missionWindow)),
     },
   ];
 }

@@ -7,6 +7,7 @@ import {
   fitsPerson,
   forceFillEmptySeats,
   placePerson,
+  stripAbasTimeViolations,
 } from "@/lib/scheduling-engine";
 import type { MissionDay, Person } from "@/lib/types";
 import { DEFAULT_FAIRNESS_RULES, DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
@@ -254,7 +255,7 @@ describe("strict_rest constraint policy", () => {
     expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה"))).toBe(true);
   });
 
-  it("strict last-resort keeps the ABAS minute-gap until coverage", () => {
+  it("strict last-resort still keeps ABAS rest_hours and will not fill a 3.5h ABAS→guard gap", () => {
     const mission = missionWithSlots([
       { id: "a", name: "עבודות בסיס", kind: "duty", start: "08:30", end: "11:30", seats: 1 },
       { id: "g", name: "פטל", kind: "guard", start: "15:00", end: "16:00", seats: 1 },
@@ -282,11 +283,8 @@ describe("strict_rest constraint policy", () => {
       meanPrior: 0,
       allowCoverageFill: true,
     });
-    expect(lastResort.assignments[guardSlot.slotId]?.[0]).toBe(p.name);
-    expect(lastResort.warnings.some((w) => w.includes("מרווח עב״ס"))).toBe(true);
-    expect(lastResort.warnings.some((w) => w.includes("שבירת מנוחה בין שמירות או מרווח עב״ס"))).toBe(
-      false,
-    );
+    expect((lastResort.assignments[guardSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect(lastResort.filled).toBe(0);
   });
 
   it("never fills ABAS↔guard under the defined minute-gap, even as last resort", () => {
@@ -349,7 +347,7 @@ describe("strict_rest constraint policy", () => {
     expect((filled.assignments[guardSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
   });
 
-  it("rejects evening ABAS then a 20:00 board-start guard (0 idle, 60 min required)", () => {
+  it("on a 20:00 board, evening ABAS sits at the end of the cycle and overlaps late guards", () => {
     const startsAt = "2026-08-21T20:00:00+03:00";
     const endsAt = "2026-08-22T20:00:00+03:00";
     const positions = buildGuardDayPositions({
@@ -376,18 +374,127 @@ describe("strict_rest constraint policy", () => {
     const slots = flattenMissionSlots(mission);
     const abas = slots.find(
       (s) => s.missionType === "base_work" && s.startTime === "18:30",
-    );
-    const guard = slots.find(
+    )!;
+    const opening = slots.find(
       (s) => s.positionKind === "guard" && s.startTime === "20:00",
+    )!;
+    const late = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < abas.endAtMs &&
+        s.endAtMs > abas.startAtMs,
     );
-    expect(abas).toBeTruthy();
-    expect(guard).toBeTruthy();
+    expect(abas.startAtMs).toBeGreaterThan(Date.parse(startsAt));
+    expect(late).toBeTruthy();
 
     const tracker = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
-    placePerson(p.name, abas!, mission.id, tracker, rules, scheduling, abas!.seatCount, "guards");
-    expect(fitsPerson(p, guard!, tracker, [], scheduling, [], peopleByName)).toBe(false);
+    placePerson(p.name, abas, mission.id, tracker, rules, scheduling, abas.seatCount, "guards");
+    expect(fitsPerson(p, late!, tracker, [], scheduling, [], peopleByName)).toBe(false);
     expect(
-      explainFitsPersonFailure(p, guard!, tracker, [], scheduling, [], peopleByName),
+      explainFitsPersonFailure(p, late!, tracker, [], scheduling, [], peopleByName),
     ).toBe("overlapsSlot");
+    expect(fitsPerson(p, opening, tracker, [], scheduling, [], peopleByName)).toBe(true);
+  });
+
+  it("on a 20:00 board, morning ABAS is during the board and cannot overlap morning guards", () => {
+    const startsAt = "2026-08-21T20:00:00+03:00";
+    const endsAt = "2026-08-22T20:00:00+03:00";
+    const positions = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      missionDate: "2026-08-21",
+      boardStart: "20:00",
+    });
+    const mission: MissionDay = {
+      id: "g-morn",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: startsAt,
+      ends_at: endsAt,
+      status: "draft",
+      positions,
+      assignments: {},
+      scheduling_rules: scheduling,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find(
+      (s) => s.missionType === "base_work" && s.startTime === "08:30",
+    )!;
+    const morningGuard = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < abas.endAtMs &&
+        s.endAtMs > abas.startAtMs,
+    );
+    expect(abas.startAtMs).toBeGreaterThan(Date.parse(startsAt));
+    expect(morningGuard).toBeTruthy();
+
+    const tracker = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
+    placePerson(p.name, abas, mission.id, tracker, rules, scheduling, abas.seatCount, "guards");
+    expect(fitsPerson(p, morningGuard!, tracker, [], scheduling, [], peopleByName)).toBe(false);
+  });
+
+  it("strict_rest forbids Carmel B in parallel with ABAS", () => {
+    const startsAt = "2026-08-21T20:00:00+03:00";
+    const endsAt = "2026-08-22T20:00:00+03:00";
+    const positions = buildGuardDayPositions({
+      missionStartsAt: startsAt,
+      missionEndsAt: endsAt,
+      missionDate: "2026-08-21",
+      boardStart: "20:00",
+    });
+    const mission: MissionDay = {
+      id: "g-carmel",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-08-21",
+      starts_at: startsAt,
+      ends_at: endsAt,
+      status: "draft",
+      positions,
+      assignments: {},
+      scheduling_rules: scheduling,
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const slots = flattenMissionSlots(mission);
+    const carmel = slots.find((s) => s.positionKind === "standby_carmel_b")!;
+    const abas = slots.find(
+      (s) => s.missionType === "base_work" && s.startTime === "08:30",
+    )!;
+    const tracker = buildTrackerFromMissions([], rules, new Set(), "strict_rest");
+    placePerson(p.name, carmel, mission.id, tracker, rules, scheduling, carmel.seatCount, "guards");
+    expect(fitsPerson(p, abas, tracker, [], scheduling, [], peopleByName)).toBe(false);
+    expect(
+      explainFitsPersonFailure(p, abas, tracker, [], scheduling, [], peopleByName),
+    ).toBe("overlapsSlot");
+  });
+
+  it("stripAbasTimeViolations removes an ABAS seat that overlaps a guard", () => {
+    const mission = missionWithSlots([
+      { id: "a", name: "עבודות בסיס", kind: "duty", start: "13:30", end: "17:30", seats: 1 },
+      { id: "g", name: "פטל", kind: "guard", start: "16:00", end: "20:00", seats: 1 },
+    ]);
+    const abasSlot = slotByName(mission, "עבודות");
+    const guardSlot = slotByName(mission, "פטל");
+    const seeded = syncAssignmentSeats(mission.positions, {
+      [abasSlot.slotId]: [p.name],
+      [guardSlot.slotId]: [p.name],
+    });
+    const { assignments, removed } = stripAbasTimeViolations({
+      mission,
+      assignments: seeded,
+      scheduling,
+      rules,
+      constraintPolicy: "strict_rest",
+    });
+    expect(removed).toBe(1);
+    expect((assignments[abasSlot.slotId] || []).filter(Boolean)).toHaveLength(0);
+    expect(assignments[guardSlot.slotId]?.[0]).toBe(p.name);
   });
 });

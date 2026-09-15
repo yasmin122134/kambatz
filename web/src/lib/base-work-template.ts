@@ -67,21 +67,19 @@ export function baseWorkWallClockInterval(
   return { startMs, endMs };
 }
 
-/** עב״ס — תמיד mission_date + שעות הקיר מהמשמרת (08:30, 13:30, 18:30…). */
+/** עב״ס על ציר יום השמירות (כמו הלוח) — לא שעון קיר של mission_date. */
 export function resolveBaseWorkSlotInterval(
   missionDate: string,
   missionStartsAt: string,
   missionEndsAt: string,
   slot: { start_time: string; end_time: string; starts_at?: string; ends_at?: string },
 ): TimeInterval | null {
-  const fixed = baseWorkWallClockInterval(missionDate, slot.start_time, slot.end_time);
-  if (fixed) return fixed;
-
-  // legacy standalone base_work mission — fall back to mission window
-  return resolveCanonicalSlotInterval(
+  const canonical = resolveCanonicalSlotInterval(
     { starts_at: missionStartsAt, ends_at: missionEndsAt },
     slot,
   );
+  if (canonical) return canonical;
+  return baseWorkWallClockInterval(missionDate, slot.start_time, slot.end_time);
 }
 export function materializeBaseWorkSlots(
   slots: MissionSlot[],

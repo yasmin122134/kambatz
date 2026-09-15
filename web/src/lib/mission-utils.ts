@@ -179,7 +179,7 @@ export function slotEatsRest(slot: FlatSlot): boolean {
   return eatsRest(slot.positionKind);
 }
 
-/** Patrol, hamagshiyot, and ABAS use fixed wall-clock times on mission_date — not the guard cycle window. */
+/** Patrol, hamagshiyot, and ABAS keep dedicated resolvers (board-aligned, with wall-clock fallback). */
 export function slotUsesWallClockSchedule(
   slot: Pick<
     FlatSlot,

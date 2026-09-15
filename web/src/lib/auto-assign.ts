@@ -12,6 +12,7 @@ import {
   forceFillEmptySeats,
   repairGuardAssignmentGaps,
   stripGuardSpacingViolations,
+  stripAbasTimeViolations,
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
@@ -288,6 +289,19 @@ async function smartAssignScope(input: {
           if (!output.warnings.includes(w)) output.warnings.push(w);
         }
       }
+    }
+
+    const abasStripped = stripAbasTimeViolations({
+      mission,
+      assignments: currentAssignments,
+      scheduling,
+      rules: input.rules,
+      constraintPolicy,
+    });
+    currentAssignments = abasStripped.assignments;
+    if (abasStripped.removed > 0) {
+      const msg = `הוסרו ${abasStripped.removed} שיבוצי עב״ס שחפפו שמירה או הפרו מרווח מנוחה`;
+      if (!output.warnings.includes(msg)) output.warnings.push(msg);
     }
 
     currentAssignments = restoreLockedAssignments(mission, currentAssignments);
