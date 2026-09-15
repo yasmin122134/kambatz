@@ -12,7 +12,8 @@ import { writeXlsx } from "@/lib/xlsx-writer";
 import { readXlsxSheets } from "@/lib/xlsx-reader";
 import { guardDayHasRequiredPositions } from "@/lib/mission-templates";
 
-const REAL_FILE = "C:/Users/yasmi/Downloads/luach_shmirot_11-09_validated_v2.xlsx";
+const MATRIX_FILE = "C:/Users/yasmi/Downloads/luach_shmirot_11-09_validated_v2.xlsx";
+const FULL_FILE = "C:/Users/yasmi/Downloads/luach_shmirot_11-09_full_valid.xlsx";
 
 function sampleWorkbook(): Uint8Array {
   return writeXlsx([
@@ -40,6 +41,60 @@ function sampleWorkbook(): Uint8Array {
         [{ v: "" }],
         [{ v: "שעות" }, { v: "כמות" }, { v: "משובצים" }],
         [{ v: "08:30–11:30" }, { v: "2" }, { v: "אביב פרידמן · אוהד בר-און" }],
+      ],
+    },
+  ]);
+}
+
+function fullBoardWorkbook(): Uint8Array {
+  return writeXlsx([
+    {
+      name: "לוח מלא 11.9",
+      rows: [
+        [{ v: "לוח תורנויות מלא — יום שישי 11.9.2026" }],
+        [{ v: "" }],
+        [
+          { v: "שעות" },
+          { v: "סוג" },
+          { v: "עמדה" },
+          { v: "משובצים" },
+          { v: "כמות" },
+        ],
+        [
+          { v: "08:30–11:30" },
+          { v: "עב״ס" },
+          { v: "עבודות בסיס" },
+          { v: "אביב פרידמן · אוהד בר-און" },
+          { v: "2" },
+        ],
+        [
+          { v: "09:00–13:00" },
+          { v: "שמירה" },
+          { v: "ש״ג רכב אחורי" },
+          { v: "אורי מרקוביץ" },
+          { v: "1" },
+        ],
+        [
+          { v: "09:00–09:00" },
+          { v: "כרמל א׳ (כוננות)" },
+          { v: "כרמל א׳ (כוננות)" },
+          { v: "אדר קדוש · גפן פרומקס · עמית בן סימון" },
+          { v: "3" },
+        ],
+        [
+          { v: "09:00–09:00" },
+          { v: "קצין תורן" },
+          { v: "קצין תורן" },
+          { v: "רני פלג · יסמין חדד" },
+          { v: "2" },
+        ],
+        [
+          { v: "09:30–10:00" },
+          { v: "פטרולים" },
+          { v: "פטרולים (סיור פנים גדר)" },
+          { v: "רני פלג" },
+          { v: "1" },
+        ],
       ],
     },
   ]);
@@ -89,9 +144,29 @@ describe("luach xlsx import", () => {
     expect(draft.assignedSeatCount).toBeGreaterThanOrEqual(6);
   });
 
+  it("imports a long-form full board without treating 08:30 ABAS as board start", () => {
+    const draft = parseLuachXlsx(fullBoardWorkbook());
+    expect(draft.mission_date).toBe("2026-09-11");
+    expect(draft.scheduling_rules.board_start).toBe("09:00");
+
+    const rear = draft.positions.find((p) => p.name.includes("רכב אחורי"))!;
+    expect(draft.assignments[rear.slots[0].id]).toEqual(["אורי מרקוביץ"]);
+
+    const carmel = draft.positions.find((p) => p.kind === "standby_carmel_a")!;
+    expect((draft.assignments[carmel.slots[0].id] || []).filter(Boolean)).toEqual([
+      "אדר קדוש",
+      "גפן פרומקס",
+      "עמית בן סימון",
+    ]);
+
+    const patrol = draft.positions.find((p) => p.name.includes("פטרול"))!;
+    const firstTour = patrol.slots.find((s) => s.start_time === "09:30");
+    expect((draft.assignments[firstTour!.id] || []).filter(Boolean)).toEqual(["רני פלג"]);
+  });
+
   it("imports the validated 11-09 workbook when present", () => {
-    if (!existsSync(REAL_FILE)) return;
-    const bytes = new Uint8Array(readFileSync(REAL_FILE));
+    if (!existsSync(MATRIX_FILE)) return;
+    const bytes = new Uint8Array(readFileSync(MATRIX_FILE));
     const draft = parseLuachXlsx(bytes);
     expect(draft.mission_date).toBe("2026-09-11");
     expect(draft.scheduling_rules.board_start).toBe("09:00");
@@ -122,6 +197,41 @@ describe("luach xlsx import", () => {
       updated_at: "",
     });
     expect(flat.some((s) => s.assignees.includes("אדר קדוש"))).toBe(true);
+  });
+
+  it("imports the full-valid 11-09 workbook when present", () => {
+    if (!existsSync(FULL_FILE)) return;
+    const bytes = new Uint8Array(readFileSync(FULL_FILE));
+    const draft = parseLuachXlsx(bytes);
+    expect(draft.mission_date).toBe("2026-09-11");
+    expect(draft.scheduling_rules.board_start).toBe("09:00");
+
+    const carmelA = draft.positions.find((p) => p.kind === "standby_carmel_a")!;
+    expect((draft.assignments[carmelA.slots[0].id] || []).filter(Boolean)).toEqual([
+      "אדר קדוש",
+      "גפן פרומקס",
+      "עמית בן סימון",
+    ]);
+
+    const carmelB = draft.positions.find((p) => p.kind === "standby_carmel_b")!;
+    expect((draft.assignments[carmelB.slots[0].id] || []).filter(Boolean)).toContain("אייקו שלו");
+
+    const rear = draft.positions.find((p) => p.name.includes("רכב אחורי"))!;
+    const morning = rear.slots.find((s) => s.start_time === "09:00" && s.end_time === "13:00");
+    expect(draft.assignments[morning!.id]).toEqual(["אורי מרקוביץ"]);
+
+    const abas = draft.positions.find((p) => p.name.includes("עבודות בסיס"))!;
+    const first = abas.slots.find((s) => s.start_time === "08:30")!;
+    expect((draft.assignments[first.id] || []).filter(Boolean)).toHaveLength(20);
+
+    const ham = draft.positions.find((p) => p.name.includes("חמגש"))!;
+    const breakfast = ham.slots.find((s) => s.start_time === "07:00")!;
+    expect((draft.assignments[breakfast.id] || []).filter(Boolean)).toHaveLength(5);
+
+    const officer = draft.positions.find((p) => p.kind === "officer_duty")!;
+    expect(draft.assignments[officer.slots[0].id]).toEqual(["רני פלג", "יסמין חדד"]);
+
+    expect(draft.assignedSeatCount).toBeGreaterThan(120);
   });
 });
 

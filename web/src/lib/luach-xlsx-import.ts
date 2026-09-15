@@ -1,10 +1,12 @@
 import { lockFilledSeats } from "@/lib/assignment-lock";
 import { isBaseWorkPosition, isBaseWorkShiftSlot } from "@/lib/base-work-template";
+import { isHamagshiyotPosition } from "@/lib/hamagshiyot-template";
 import {
   defaultSchedulingForType,
   standardMissionPositions,
 } from "@/lib/mission-templates";
 import { defaultPositionKind, syncAssignmentSeats } from "@/lib/mission-utils";
+import { isPatrolPosition } from "@/lib/patrol-day-template";
 import {
   addCalendarDays,
   materializeSlotAbsoluteBounds,
@@ -100,6 +102,15 @@ type ExcelSlot = {
   start: string;
   end: string;
   names: string[];
+  seats?: number;
+  label?: string;
+};
+
+type ParsedLuachSheet = {
+  title: string;
+  date: string | null;
+  boardStart: string;
+  positions: { name: string; slots: ExcelSlot[] }[];
 };
 
 function pickSheet(sheets: XlsxSheetGrid[], re: RegExp): XlsxSheetGrid | undefined {
@@ -110,17 +121,96 @@ function headerRowIndex(rows: string[][], required: string[]): number {
   return rows.findIndex((row) => required.every((k) => row.some((c) => String(c).includes(k))));
 }
 
-function parseRosterSheet(sheet: XlsxSheetGrid): {
-  title: string;
-  date: string | null;
-  positions: { name: string; slots: ExcelSlot[] }[];
-  boardStart: string;
-} {
+function colIndex(header: string[], ...needles: string[]): number {
+  return header.findIndex((c) => needles.some((n) => String(c).includes(n)));
+}
+
+function isLongFormHeader(header: string[]): boolean {
+  const joined = header.join(" ");
+  return joined.includes("עמדה") && /משובצ/.test(joined);
+}
+
+function parsePositionCell(raw: string): { name: string; label?: string } {
+  const n = normalizeHeName(raw);
+  const m = n.match(/^(.*?)\s*\((.+)\)\s*$/);
+  if (m && /פטרול/.test(m[1])) return { name: m[1], label: m[2] };
+  return { name: n };
+}
+
+function skipForBoardStart(name: string): boolean {
+  return /עבודות בסיס|חמגש/.test(name);
+}
+
+function inferBoardStart(entries: { start: string; end: string; name: string }[]): string {
+  const fullDay = entries.find(
+    (e) => e.start === e.end && (/כרמל/.test(e.name) || /קצין\s*תורן/.test(e.name)),
+  );
+  if (fullDay) return fullDay.start;
+  if (entries.some((e) => e.start === "09:00" && !skipForBoardStart(e.name))) return "09:00";
+  if (entries.some((e) => e.start === "20:00" && !skipForBoardStart(e.name))) return "20:00";
+  const first = entries.find((e) => !skipForBoardStart(e.name));
+  return first?.start || "09:00";
+}
+
+function parseLongFormSheet(sheet: XlsxSheetGrid): ParsedLuachSheet {
+  const rows = sheet.rows;
+  const title = rows[0]?.[0] || sheet.name;
+  const date =
+    parseHebrewMissionDate(title) ??
+    parseHebrewMissionDate(sheet.name) ??
+    parseHebrewMissionDate(rows.flat().join(" "));
+  const hi = headerRowIndex(rows, ["עמדה"]);
+  if (hi < 0) throw new Error("לא נמצאה שורת כותרת עם עמודת עמדה");
+
+  const header = rows[hi] || [];
+  const timeCol = Math.max(0, colIndex(header, "שעות", "התחלה"));
+  const posCol = colIndex(header, "עמדה");
+  const namesCol = colIndex(header, "משובצים");
+  const namesColAlt = namesCol >= 0 ? namesCol : colIndex(header, "משובץ");
+  const seatsCol = colIndex(header, "כמות", "קיבולת");
+  if (posCol < 0 || namesColAlt < 0) {
+    throw new Error("גיליון הלוח המלא חסר עמודות עמדה/משובצים");
+  }
+
+  const byName = new Map<string, ExcelSlot[]>();
+  const boardEntries: { start: string; end: string; name: string }[] = [];
+
+  for (let r = hi + 1; r < rows.length; r++) {
+    const row = rows[r] || [];
+    const range = parseTimeRange(row[timeCol] || "");
+    const parsedPos = parsePositionCell(row[posCol] || "");
+    if (!range || !parsedPos.name) continue;
+    const names = splitAssigneeNames(row[namesColAlt] || "");
+    if (!names.length) continue;
+    const seatsRaw = seatsCol >= 0 ? Number(row[seatsCol]) : NaN;
+    const list = byName.get(parsedPos.name) ?? [];
+    list.push({
+      start: range.start,
+      end: range.end,
+      names,
+      seats: Number.isFinite(seatsRaw) && seatsRaw > 0 ? seatsRaw : names.length,
+      label: parsedPos.label,
+    });
+    byName.set(parsedPos.name, list);
+    boardEntries.push({ start: range.start, end: range.end, name: parsedPos.name });
+  }
+
+  if (!byName.size) throw new Error("לא נמצאו שיבוצים בגיליון הלוח המלא");
+
+  return {
+    title,
+    date,
+    boardStart: inferBoardStart(boardEntries),
+    positions: [...byName.entries()].map(([name, slots]) => ({ name, slots })),
+  };
+}
+
+function parseMatrixRosterSheet(sheet: XlsxSheetGrid): ParsedLuachSheet {
   const rows = sheet.rows;
   const title = rows[0]?.[0] || sheet.name;
   const date = parseHebrewMissionDate(title) ?? parseHebrewMissionDate(rows.flat().join(" "));
   const hi = headerRowIndex(rows, ["שעות"]);
-  if (hi < 0) throw new Error('לא נמצאה שורת כותרת «שעות» בגיליון גלגולי שמירה');
+  if (hi < 0) throw new Error("לא נמצאה שורת כותרת «שעות» בגיליון השמירות");
 
   const header = [...(rows[hi] || [])];
   const next = rows[hi + 1] || [];
@@ -132,10 +222,11 @@ function parseRosterSheet(sheet: XlsxSheetGrid): {
   const positionCols: { index: number; name: string }[] = [];
   for (let i = 1; i < header.length; i++) {
     const name = normalizeHeName(header[i]);
-    if (!name || name === "עולים לשמירה") continue;
+    if (!name || name === "עולים לשמירה" || name === "סוג" || name === "עמדה") continue;
+    if (/משובצ/.test(name) || name === "כמות" || name === "הערה") continue;
     positionCols.push({ index: i, name });
   }
-  if (!positionCols.length) throw new Error("לא נמצאו עמדות בגיליון גלגולי שמירה");
+  if (!positionCols.length) throw new Error("לא נמצאו עמדות בגיליון השמירות");
 
   const byName = new Map<string, ExcelSlot[]>();
   let boardStart = "09:00";
@@ -168,11 +259,19 @@ function parseRosterSheet(sheet: XlsxSheetGrid): {
   };
 }
 
+function parseLuachSheet(sheet: XlsxSheetGrid): ParsedLuachSheet {
+  const hi = Math.max(headerRowIndex(sheet.rows, ["שעות"]), headerRowIndex(sheet.rows, ["עמדה"]));
+  const header = hi >= 0 ? sheet.rows[hi] || [] : [];
+  if (isLongFormHeader(header)) return parseLongFormSheet(sheet);
+  return parseMatrixRosterSheet(sheet);
+}
+
 function parseBaseWorkSheet(sheet: XlsxSheetGrid | undefined): ExcelSlot[] {
   if (!sheet) return [];
   const hi = headerRowIndex(sheet.rows, ["שעות"]);
   if (hi < 0) return [];
   const header = sheet.rows[hi] || [];
+  if (isLongFormHeader(header)) return [];
   const namesCol = header.findIndex((c) => String(c).includes("משובץ"));
   const out: ExcelSlot[] = [];
   for (let r = hi + 1; r < sheet.rows.length; r++) {
@@ -204,6 +303,7 @@ function materializeImportedSlot(
   startsAt: string,
   endsAt: string,
   missionDate: string,
+  label?: string,
 ): MissionSlot {
   const slot: MissionSlot = {
     id: uid(),
@@ -211,6 +311,7 @@ function materializeImportedSlot(
     end_time: end,
     seat_count: seats,
   };
+  if (label) slot.label = label;
   const abs =
     resolveSlotAbsoluteInterval(startsAt, endsAt, start, end) ??
     wallClockIntervalOnCalendarDate(missionDate, start, end);
@@ -227,6 +328,28 @@ function findNamedPosition(positions: MissionPosition[], name: string): MissionP
         normalizeHeName(p.name).includes(wanted) || wanted.includes(normalizeHeName(p.name)),
     )
   );
+}
+
+function keepTemplateSlots(pos: MissionPosition): boolean {
+  if (pos.kind === "officer_duty") return true;
+  if (pos.kind === "standby_carmel_a" || pos.kind === "standby_carmel_b") return true;
+  if (isPatrolPosition(pos) || isHamagshiyotPosition(pos) || isBaseWorkPosition(pos)) return true;
+  return false;
+}
+
+function slotMatchesExcel(
+  slot: MissionSlot,
+  excel: ExcelSlot,
+  boardStart: string,
+): boolean {
+  const start = normalizeTimeLabel(slot.start_time);
+  const end = normalizeTimeLabel(slot.end_time);
+  if (start === excel.start && end === excel.end) return true;
+  if (excel.start === excel.end && start === end) {
+    return start === excel.start || start === boardStart;
+  }
+  if (excel.label && slot.label && excel.label === slot.label) return true;
+  return false;
 }
 
 export type LuachImportDraft = Pick<
@@ -251,12 +374,14 @@ export function buildLuachImportDraft(
   rosterNames: string[] = [],
 ): LuachImportDraft {
   const rosterSheet =
+    pickSheet(sheets, /לוח\s*מלא/) ||
+    pickSheet(sheets, /פירוט שיבוץ/) ||
     pickSheet(sheets, /גלגול/) ||
     pickSheet(sheets, /שמיר/) ||
     sheets[0];
   if (!rosterSheet) throw new Error("הקובץ ריק");
 
-  const parsed = parseRosterSheet(rosterSheet);
+  const parsed = parseLuachSheet(rosterSheet);
   const missionDate = parsed.date;
   if (!missionDate) throw new Error("לא הצלחתי לקרוא תאריך מגיליון השמירות");
 
@@ -289,11 +414,10 @@ export function buildLuachImportDraft(
   };
 
   for (const excelPos of parsed.positions) {
-    const isOfficer = /קצין\s*תורן/.test(excelPos.name);
     const target = findNamedPosition(positions, excelPos.name);
     if (!target) continue;
 
-    if (isOfficer && target.kind === "officer_duty") {
+    if (target.kind === "officer_duty") {
       const names: string[] = [];
       for (const slot of excelPos.slots) {
         for (const n of slot.names) {
@@ -309,35 +433,62 @@ export function buildLuachImportDraft(
       continue;
     }
 
+    if (keepTemplateSlots(target)) {
+      for (const excelSlot of excelPos.slots) {
+        const slot =
+          target.slots.find((s) => slotMatchesExcel(s, excelSlot, boardStart)) ||
+          target.slots.find(
+            (s) =>
+              isBaseWorkPosition(target) &&
+              isBaseWorkShiftSlot(excelSlot.start, excelSlot.end) &&
+              normalizeTimeLabel(s.start_time) === excelSlot.start,
+          );
+        if (!slot) continue;
+        slot.seat_count = Math.max(
+          slot.seat_count,
+          excelSlot.names.length,
+          excelSlot.seats ?? 0,
+        );
+        assignments[slot.id] = excelSlot.names.map(resolve);
+      }
+      continue;
+    }
+
     target.kind = defaultPositionKind("guards", target.name);
     target.slots = excelPos.slots.map((slot) => {
       const built = materializeImportedSlot(
         slot.start,
         slot.end,
-        Math.max(1, slot.names.length),
+        Math.max(1, slot.names.length, slot.seats ?? 0),
         startsAt,
         endsAt,
         missionDate,
+        slot.label,
       );
       assignments[built.id] = slot.names.map(resolve);
       return built;
     });
   }
 
-  const abasSlots = parseBaseWorkSheet(pickSheet(sheets, /עב/));
-  const abas = positions.find((p) => isBaseWorkPosition(p));
-  if (abas && abasSlots.length) {
-    for (const excel of abasSlots) {
-      const slot =
-        abas.slots.find(
-          (s) =>
-            normalizeTimeLabel(s.start_time) === excel.start &&
-            normalizeTimeLabel(s.end_time) === excel.end,
-        ) ||
-        abas.slots.find((s) => isBaseWorkShiftSlot(excel.start, excel.end) && s.start_time === excel.start);
-      if (!slot) continue;
-      slot.seat_count = Math.max(slot.seat_count, excel.names.length);
-      assignments[slot.id] = excel.names.map(resolve);
+  const alreadyHasAbas = parsed.positions.some((p) => isBaseWorkPosition({ name: p.name }));
+  if (!alreadyHasAbas) {
+    const abasSlots = parseBaseWorkSheet(pickSheet(sheets, /עב/));
+    const abas = positions.find((p) => isBaseWorkPosition(p));
+    if (abas && abasSlots.length) {
+      for (const excel of abasSlots) {
+        const slot =
+          abas.slots.find(
+            (s) =>
+              normalizeTimeLabel(s.start_time) === excel.start &&
+              normalizeTimeLabel(s.end_time) === excel.end,
+          ) ||
+          abas.slots.find(
+            (s) => isBaseWorkShiftSlot(excel.start, excel.end) && s.start_time === excel.start,
+          );
+        if (!slot) continue;
+        slot.seat_count = Math.max(slot.seat_count, excel.names.length);
+        assignments[slot.id] = excel.names.map(resolve);
+      }
     }
   }
 
