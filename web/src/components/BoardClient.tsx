@@ -27,7 +27,6 @@ import { DUTY_OFFICER_NAMES } from "@/lib/officers";
 import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
-import { omitLegacyLinkedBaseWorkMissions } from "@/lib/guard-day-scope";
 import { pickTypedDayMission, resolveBoardDate } from "@/lib/board-day-mission";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
 import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
@@ -76,7 +75,8 @@ function resolveInitialDate(
 type SwapMode = "take" | "swap" | null;
 
 function missionsForRosterWarnings(missions: MissionDay[]): MissionDay[] {
-  return omitLegacyLinkedBaseWorkMissions(missions);
+  // כולל משימות עב״ס מקושרות שהוסתרו מהלוח — אחרת חפיפות שם נעלמות מהאזהרות.
+  return missions;
 }
 
 function isoDateOffset(date: string, days: number): string {

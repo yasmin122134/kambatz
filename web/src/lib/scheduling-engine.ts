@@ -910,6 +910,7 @@ function overlapsSlot(
   scheduling: MissionSchedulingRules,
   ignoreSlotId?: string,
 ): boolean {
+  const person = personName.trim();
   const gapMin =
     scheduling.duty_guard_gap_minutes ??
     DEFAULT_MISSION_SCHEDULING_RULES.duty_guard_gap_minutes ??
@@ -917,9 +918,16 @@ function overlapsSlot(
   const skipDutyGuardGap = trackerConstraintPolicy(tracker) === "coverage";
   const slotIv = slotInterval(slot);
 
-  for (const b of tracker.busy[personName] || []) {
+  for (const b of tracker.busy[person] || []) {
     if (ignoreSlotId && b.slotId === ignoreSlotId) continue;
-    if (b.slotId === slot.slotId) continue;
+    if (
+      b.slotId === slot.slotId &&
+      b.startTime === slot.startTime &&
+      b.endTime === slot.endTime &&
+      (b.positionName ?? "") === slot.positionName
+    ) {
+      continue;
+    }
     if (isKitchenMissionSlot(slot) && isKitchenMissionSlot(b)) continue;
     if (
       carmelBlocksAbas(
@@ -936,7 +944,21 @@ function overlapsSlot(
     if (parallelOverlapAllowed(slot, b, tracker)) continue;
 
     const blockIv = blockInterval(b);
-    if (assignmentIntervalsOverlap(slotIv, blockIv)) return true;
+    if (
+      visibleTimeOverlap(labeledInterval({
+        startMs: slot.startAtMs,
+        endMs: slot.endAtMs,
+        startTime: slot.startTime,
+        endTime: slot.endTime,
+      }), labeledInterval({
+        startMs: b.startAtMs,
+        endMs: b.endAtMs,
+        startTime: b.startTime,
+        endTime: b.endTime,
+      }))
+    ) {
+      return true;
+    }
 
     const dutyGuard = needsDutyGuardGap(
       slot.positionKind,
@@ -1389,6 +1411,8 @@ export function placePerson(
   seatCount: number,
   _missionType?: MissionType,
 ) {
+  const name = personName.trim();
+  if (!name) return;
   const block: BusyBlock = {
     cyclicStart: slot.cyclicStart,
     wallStartMin: slot.wallStartMin,
@@ -1406,14 +1430,14 @@ export function placePerson(
     endAtMs: slot.endAtMs,
     positionName: slot.positionName,
   };
-  tracker.busy[personName] = [...(tracker.busy[personName] || []), block];
+  tracker.busy[name] = [...(tracker.busy[name] || []), block];
   if (isGuardKind(slot.positionKind)) {
-    tracker.guardShifts[personName] = [
-      ...(tracker.guardShifts[personName] || []),
+    tracker.guardShifts[name] = [
+      ...(tracker.guardShifts[name] || []),
       { start: slot.cyclicStart, duration: slot.durationMinutes },
     ];
   }
-  syncPersonPeriodPoints(personName, tracker, rules, scheduling);
+  syncPersonPeriodPoints(name, tracker, rules, scheduling);
 }
 
 function rebuildGuardShiftsForPerson(personName: string, tracker: ScheduleTracker) {
@@ -3322,20 +3346,37 @@ export function findAssignmentConflicts(
   return prioritizeGapWarnings(messages);
 }
 
-type TrackedAssignment = {
-  label: string;
+type LabeledInterval = {
   startMs: number;
   endMs: number;
+  startTime: string;
+  endTime: string;
+};
+
+type TrackedAssignment = LabeledInterval & {
+  label: string;
   slotId: string;
   missionId: string;
   positionKind: MissionPositionKind;
   missionType: MissionType;
   positionName: string;
-  startTime: string;
-  endTime: string;
   restHours: number;
   dutyGuardGapMin: number;
 };
+
+function labeledInterval(block: {
+  startMs: number;
+  endMs: number;
+  startTime: string;
+  endTime: string;
+}): LabeledInterval {
+  return {
+    startMs: block.startMs,
+    endMs: block.endMs,
+    startTime: block.startTime,
+    endTime: block.endTime,
+  };
+}
 
 function assignmentMetaOf(a: TrackedAssignment): AssignmentOverlapMeta {
   return {
@@ -3357,7 +3398,8 @@ function collectTrackedAssignments(
     const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
     for (const slot of flattenMissionSlots(mission)) {
       const seats = mission.assignments[slot.slotId] || [];
-      for (const name of seats) {
+      for (const raw of seats) {
+        const name = String(raw || "").trim();
         if (!name) continue;
         const list = byPerson.get(name) || [];
         list.push({
@@ -3387,6 +3429,8 @@ function pairInFocus(
   focusMissionIds?: Set<string>,
 ): boolean {
   if (!focusMissionIds) return true;
+  // חפיפת עב״ס תמיד מדווחת — גם אם המשימה המקושרת הוסתרה מהלוח.
+  if (trackedIsAbas(a) || trackedIsAbas(b)) return true;
   return focusMissionIds.has(a.missionId) || focusMissionIds.has(b.missionId);
 }
 
@@ -3401,7 +3445,7 @@ function wallMinuteRanges(startTime: string, endTime: string): Array<[number, nu
   ];
 }
 
-function labeledMinutesOverlap(a: TrackedAssignment, b: TrackedAssignment): boolean {
+function labeledMinutesOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
   for (const [a0, a1] of wallMinuteRanges(a.startTime, a.endTime)) {
     for (const [b0, b1] of wallMinuteRanges(b.startTime, b.endTime)) {
       if (a0 < b1 && b0 < a1) return true;
@@ -3410,7 +3454,7 @@ function labeledMinutesOverlap(a: TrackedAssignment, b: TrackedAssignment): bool
   return false;
 }
 
-function visibleTimeOverlap(a: TrackedAssignment, b: TrackedAssignment): boolean {
+function visibleTimeOverlap(a: LabeledInterval, b: LabeledInterval): boolean {
   if (
     assignmentIntervalsOverlap(
       { startMs: a.startMs, endMs: a.endMs },
@@ -3428,7 +3472,7 @@ function visibleTimeOverlap(a: TrackedAssignment, b: TrackedAssignment): boolean
   return a.startTime !== b.startTime;
 }
 
-function labeledIdleMinutes(a: TrackedAssignment, b: TrackedAssignment): number | null {
+function labeledIdleMinutes(a: LabeledInterval, b: LabeledInterval): number | null {
   if (labeledMinutesOverlap(a, b)) return null;
   const a0 = parseTimeMinutes(a.startTime);
   const b0 = parseTimeMinutes(b.startTime);
@@ -3442,7 +3486,7 @@ function labeledIdleMinutes(a: TrackedAssignment, b: TrackedAssignment): number 
   return a0 - b1;
 }
 
-function visibleIdleMinutes(a: TrackedAssignment, b: TrackedAssignment): number | null {
+function visibleIdleMinutes(a: LabeledInterval, b: LabeledInterval): number | null {
   if (visibleTimeOverlap(a, b)) return null;
   const abs = idleGapMinutes(
     { startMs: a.startMs, endMs: a.endMs },
