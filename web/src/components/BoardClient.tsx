@@ -220,22 +220,28 @@ export function BoardClient({
   }, [dayMissions, personName]);
 
   const loadMissions = useCallback(async () => {
-    const url =
-      focusMissionId && isAdminUser
-        ? `/api/missions?missionId=${encodeURIComponent(focusMissionId)}`
-        : "/api/missions";
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      setMissions(data);
-      const nextDates = [...new Set(data.map((m: MissionDay) => m.mission_date))].sort();
-      if (activeDate && !nextDates.includes(activeDate)) {
-        const fallback = resolveInitialDate(data, initialDate, focusMissionId);
-        if (fallback) setActiveDate(fallback);
-        else if (nextDates[0]) setActiveDate(String(nextDates[0]));
-      }
-    }
-  }, [activeDate, focusMissionId, initialDate, isAdminUser]);
+    const url = isAdminUser ? "/api/missions?includeDrafts=1" : "/api/missions";
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!Array.isArray(data)) return;
+    setMissions(data);
+    setActiveDate((current) => {
+      const nextDates = [
+        ...new Set(data.map((m: MissionDay) => m.mission_date)),
+      ].sort() as string[];
+      if (current && nextDates.includes(current)) return current;
+      return (
+        resolveInitialDate(data, initialDate, focusMissionId) ||
+        nextDates[0] ||
+        current
+      );
+    });
+  }, [focusMissionId, initialDate, isAdminUser]);
+
+  useEffect(() => {
+    void loadMissions();
+  }, [loadMissions]);
 
   const loadAdminData = useCallback(async () => {
     if (!isAdminUser) return;

@@ -9,31 +9,28 @@ import {
   emptyAssignments,
   filterPublishedMissionDays,
   listMissionDays,
-  listMissionDaysForBoardFocus,
   normalizeSchedulingRules,
   saveMissionDay,
 } from "@/lib/missions";
 import type { MissionType } from "@/lib/types";
 
-export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
+export const dynamic = "force-dynamic";
+
+const NO_STORE = { "Cache-Control": "private, no-store" } as const;
+
+export async function GET() {
   const admin = await isAdmin();
-  const includeDrafts = admin && searchParams.get("includeDrafts") === "1";
-  const focusMissionId = admin ? searchParams.get("missionId")?.trim() : undefined;
 
   try {
-    if (focusMissionId) {
-      return NextResponse.json(await listMissionDaysForBoardFocus(focusMissionId));
-    }
     const all = await listMissionDays(false);
-    if (includeDrafts) {
-      return NextResponse.json(all);
+    if (admin) {
+      return NextResponse.json(all, { headers: NO_STORE });
     }
-    return NextResponse.json(filterPublishedMissionDays(all));
+    return NextResponse.json(filterPublishedMissionDays(all), { headers: NO_STORE });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "שגיאה";
-    if (msg.includes("mission_days")) return NextResponse.json([]);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    if (msg.includes("mission_days")) return NextResponse.json([], { headers: NO_STORE });
+    return NextResponse.json({ error: msg }, { status: 500, headers: NO_STORE });
   }
 }
 

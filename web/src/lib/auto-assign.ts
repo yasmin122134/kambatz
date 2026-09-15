@@ -34,7 +34,7 @@ import {
 } from "@/lib/mission-slot-structure";
 import {
   getMissionDay,
-  listMissionDaysForBoardFocus,
+  listMissionDays,
   listMissionDaysForContext,
   listVisibleMissionDays,
   saveMissionDay,
@@ -479,9 +479,7 @@ export async function autoAssignDate(
   } = {},
 ): Promise<SmartAssignDayResult> {
   const keepExisting = options.keepExisting !== false;
-  const loaded = options.focusMissionId
-    ? await listMissionDaysForBoardFocus(options.focusMissionId)
-    : await listVisibleMissionDays();
+  const loaded = await listMissionDays(false);
   const allMissions = omitLegacyLinkedBaseWorkMissions(loaded);
   const scopeMissions = missionsForDateAssignScope(allMissions, missionDate);
 
