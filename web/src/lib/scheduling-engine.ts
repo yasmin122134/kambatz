@@ -42,6 +42,8 @@ import { isSeatLocked } from "@/lib/assignment-lock";
 import { apportionSeats, groupPeopleBySquad } from "@/lib/squad-utils";
 import {
   intervalsOverlap,
+  parseTimeMinutes,
+  slotDurationMinutes,
   type TimeInterval,
 } from "@/lib/time-interval";
 import {
@@ -1768,6 +1770,28 @@ function collectSpacingAndRestWarnings(
       );
     }
 
+    const slotIsAbas = isBaseWorkAssignment(
+      slot.positionKind,
+      slot.missionType,
+      assignmentMeta(slot),
+    );
+    const blockIsAbas = isBaseWorkAssignment(
+      b.positionKind,
+      b.missionType,
+      assignmentMeta(b),
+    );
+    if (
+      restMin > 0 &&
+      idle < restMin &&
+      ((slotIsAbas && blockIsGuardPost) || (blockIsAbas && slotIsGuardPost))
+    ) {
+      msgs.push(
+        slotIsGuardPost
+          ? `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס ${b.startTime}–${b.endTime} לשמירה ${slot.timeLabel} (נדרש ${scheduling.rest_hours})`
+          : `${personName}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירה ${b.startTime}–${b.endTime} לעב״ס ${slot.timeLabel} (נדרש ${scheduling.rest_hours})`,
+      );
+    }
+
     if (
       isRestConstrainedGuardKind(slot.positionKind) &&
       isRestConstrainedGuardKind(b.positionKind) &&
@@ -3129,6 +3153,7 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
   const issues = (input.issues ?? []).filter((row) => row.status === "approved");
   const messages: string[] = [
     ...validateNoPersonOverlaps(input.missions, focusIds ?? undefined),
+    ...validateShortRestGaps(input.missions, focusIds ?? undefined),
   ];
 
   for (const mission of input.missions) {
@@ -3200,7 +3225,22 @@ export function collectRosterWarnings(input: CollectRosterWarningsInput): string
     }
   }
 
-  return [...new Set(messages)];
+  return prioritizeGapWarnings(messages);
+}
+
+/** בדיקה אחרי כל חלוקה — כל חפיפה וכל מנוחה קצרה מהרגיל, בלי לפספס פער קטן. */
+export function auditAssignedRoster(input: CollectRosterWarningsInput): string[] {
+  return collectRosterWarnings(input);
+}
+
+function prioritizeGapWarnings(messages: string[]): string[] {
+  const unique = [...new Set(messages)];
+  const overlap = unique.filter((m) => m.includes("חפיפה"));
+  const rest = unique.filter(
+    (m) => !m.includes("חפיפה") && (m.includes("מנוחה") || m.includes("מרווח")),
+  );
+  const other = unique.filter((m) => !overlap.includes(m) && !rest.includes(m));
+  return [...overlap, ...rest, ...other];
 }
 
 /** מוצא שיבוצים סותרים (חפיפות, מזהה משמרת כפול, כרמל א׳/ב׳ זהים, זכאות לתפקיד, אילוצים) */
@@ -3243,6 +3283,9 @@ export function findAssignmentConflicts(
     (a, b) => a.sortKey - b.sortKey || a.slotId.localeCompare(b.slotId),
   );
 
+  messages.push(...validateNoPersonOverlaps([mission]));
+  messages.push(...validateShortRestGaps([mission]));
+
   for (const slot of orderedSlots) {
     const seats = mission.assignments[slot.slotId] || [];
     for (let seatIndex = 0; seatIndex < seats.length; seatIndex++) {
@@ -3281,7 +3324,7 @@ export function findAssignmentConflicts(
     }
   }
 
-  return [...new Set(messages)];
+  return prioritizeGapWarnings(messages);
 }
 
 type TrackedAssignment = {
@@ -3295,16 +3338,28 @@ type TrackedAssignment = {
   positionName: string;
   startTime: string;
   endTime: string;
+  restHours: number;
+  dutyGuardGapMin: number;
 };
 
-/** Global validator — every person must have zero overlapping assignment pairs. */
-export function validateNoPersonOverlaps(
-  missions: MissionDay[],
-  focusMissionIds?: Set<string>,
-): string[] {
-  const byPerson = new Map<string, TrackedAssignment[]>();
+function assignmentMetaOf(a: TrackedAssignment): AssignmentOverlapMeta {
+  return {
+    positionName: a.positionName,
+    startTime: a.startTime,
+    endTime: a.endTime,
+  };
+}
 
+function trackedIsAbas(a: TrackedAssignment): boolean {
+  return isBaseWorkAssignment(a.positionKind, a.missionType, assignmentMetaOf(a));
+}
+
+function collectTrackedAssignments(
+  missions: MissionDay[],
+): Map<string, TrackedAssignment[]> {
+  const byPerson = new Map<string, TrackedAssignment[]>();
   for (const mission of missions) {
+    const scheduling = normalizeSchedulingRules(mission.scheduling_rules);
     for (const slot of flattenMissionSlots(mission)) {
       const seats = mission.assignments[slot.slotId] || [];
       for (const name of seats) {
@@ -3321,12 +3376,122 @@ export function validateNoPersonOverlaps(
           positionName: slot.positionName,
           startTime: slot.startTime,
           endTime: slot.endTime,
+          restHours: scheduling.rest_hours,
+          dutyGuardGapMin: dutyGuardGapMinutes(scheduling),
         });
         byPerson.set(name, list);
       }
     }
   }
+  return byPerson;
+}
 
+function pairInFocus(
+  a: TrackedAssignment,
+  b: TrackedAssignment,
+  focusMissionIds?: Set<string>,
+): boolean {
+  if (!focusMissionIds) return true;
+  return focusMissionIds.has(a.missionId) || focusMissionIds.has(b.missionId);
+}
+
+function wallMinuteRanges(startTime: string, endTime: string): Array<[number, number]> {
+  const start = parseTimeMinutes(startTime);
+  const dur = slotDurationMinutes(startTime, endTime);
+  if (start === null || dur <= 0) return [];
+  return [
+    [start - 1440, start + dur - 1440],
+    [start, start + dur],
+    [start + 1440, start + dur + 1440],
+  ];
+}
+
+function labeledMinutesOverlap(a: TrackedAssignment, b: TrackedAssignment): boolean {
+  for (const [a0, a1] of wallMinuteRanges(a.startTime, a.endTime)) {
+    for (const [b0, b1] of wallMinuteRanges(b.startTime, b.endTime)) {
+      if (a0 < b1 && b0 < a1) return true;
+    }
+  }
+  return false;
+}
+
+function visibleTimeOverlap(a: TrackedAssignment, b: TrackedAssignment): boolean {
+  if (
+    assignmentIntervalsOverlap(
+      { startMs: a.startMs, endMs: a.endMs },
+      { startMs: b.startMs, endMs: b.endMs },
+    )
+  ) {
+    return true;
+  }
+  if (!labeledMinutesOverlap(a, b)) return false;
+  const startGapMs = Math.abs(a.startMs - b.startMs);
+  // אותו בוקר / ערב — תוויות שעון חופפות גם אם ISO ישן פיצל אותן.
+  if (startGapMs < 16 * 60 * 60 * 1000) return true;
+  // ~יום אחד הפרש עם שעות התחלה שונות: כנראה ISO ישן הזיז משמרת ליום הבא.
+  if (startGapMs > 32 * 60 * 60 * 1000) return false;
+  return a.startTime !== b.startTime;
+}
+
+function labeledIdleMinutes(a: TrackedAssignment, b: TrackedAssignment): number | null {
+  if (labeledMinutesOverlap(a, b)) return null;
+  const a0 = parseTimeMinutes(a.startTime);
+  const b0 = parseTimeMinutes(b.startTime);
+  const aDur = slotDurationMinutes(a.startTime, a.endTime);
+  const bDur = slotDurationMinutes(b.startTime, b.endTime);
+  if (a0 === null || b0 === null || aDur <= 0 || bDur <= 0) return null;
+  const a1 = a0 + aDur;
+  const b1 = b0 + bDur;
+  if (a0 < b1 && b0 < a1) return null;
+  if (a1 <= b0) return b0 - a1;
+  return a0 - b1;
+}
+
+function visibleIdleMinutes(a: TrackedAssignment, b: TrackedAssignment): number | null {
+  if (visibleTimeOverlap(a, b)) return null;
+  const abs = idleGapMinutes(
+    { startMs: a.startMs, endMs: a.endMs },
+    { startMs: b.startMs, endMs: b.endMs },
+  );
+  const startGapMs = Math.abs(a.startMs - b.startMs);
+  if (startGapMs >= 16 * 60 * 60 * 1000) return abs;
+  const wall = labeledIdleMinutes(a, b);
+  if (wall == null) return abs;
+  if (abs == null) return wall;
+  return Math.min(abs, wall);
+}
+
+function sameAssignmentRow(a: TrackedAssignment, b: TrackedAssignment): boolean {
+  return (
+    a.slotId === b.slotId &&
+    a.missionId === b.missionId &&
+    a.positionName === b.positionName &&
+    a.startTime === b.startTime &&
+    a.endTime === b.endTime
+  );
+}
+
+function overlapWarningText(person: string, a: TrackedAssignment, b: TrackedAssignment): string {
+  const aAbas = isBaseWorkAssignment(a.positionKind, a.missionType, {
+    positionName: a.positionName,
+    startTime: a.startTime,
+    endTime: a.endTime,
+  });
+  const bAbas = isBaseWorkAssignment(b.positionKind, b.missionType, {
+    positionName: b.positionName,
+    startTime: b.startTime,
+    endTime: b.endTime,
+  });
+  const kind = aAbas || bAbas ? "חפיפה עב״ס" : "חפיפה";
+  return `${kind}: ${person} — ${a.label} ∩ ${b.label}`;
+}
+
+/** Global validator — every person must have zero overlapping assignment pairs. */
+export function validateNoPersonOverlaps(
+  missions: MissionDay[],
+  focusMissionIds?: Set<string>,
+): string[] {
+  const byPerson = collectTrackedAssignments(missions);
   const messages: string[] = [];
   for (const [person, blocks] of byPerson) {
     const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
@@ -3334,40 +3499,20 @@ export function validateNoPersonOverlaps(
       for (let j = i + 1; j < sorted.length; j++) {
         const a = sorted[i];
         const b = sorted[j];
-        if (a.slotId === b.slotId && a.missionId === b.missionId) continue;
-        if (
-          focusMissionIds &&
-          !focusMissionIds.has(a.missionId) &&
-          !focusMissionIds.has(b.missionId)
-        ) {
-          continue;
-        }
+        if (sameAssignmentRow(a, b)) continue;
+        if (!pairInFocus(a, b, focusMissionIds)) continue;
         if (
           carmelBlocksAbas(
             a.positionKind,
             a.missionType,
             b.positionKind,
             b.missionType,
-            {
-              positionName: a.positionName,
-              startTime: a.startTime,
-              endTime: a.endTime,
-            },
-            {
-              positionName: b.positionName,
-              startTime: b.startTime,
-              endTime: b.endTime,
-            },
+            assignmentMetaOf(a),
+            assignmentMetaOf(b),
           )
         ) {
           messages.push(
-            [
-              "Overlap detected:",
-              `Person: ${person}`,
-              `Assignment A: ${a.label}`,
-              `Assignment B: ${b.label}`,
-              `(כרמל full-day vs עב״ס)`,
-            ].join("\n"),
+            `חפיפה עב״ס: ${person} — ${a.label} ∩ ${b.label} (כרמל א׳ חוסם עב״ס לכל היום)`,
           );
           continue;
         }
@@ -3377,33 +3522,77 @@ export function validateNoPersonOverlaps(
             a.missionType,
             b.positionKind,
             b.missionType,
-            {
-              positionName: a.positionName,
-              startTime: a.startTime,
-              endTime: a.endTime,
-            },
-            {
-              positionName: b.positionName,
-              startTime: b.startTime,
-              endTime: b.endTime,
-            },
+            assignmentMetaOf(a),
+            assignmentMetaOf(b),
           )
         ) {
           continue;
         }
+        if (visibleTimeOverlap(a, b)) {
+          messages.push(overlapWarningText(person, a, b));
+        }
+      }
+    }
+  }
+  return messages;
+}
+
+/** Pairwise rest/gap audit — לא תלוי בסדר שיבוץ. גם דקה אחת מתחת לנדרש. */
+export function validateShortRestGaps(
+  missions: MissionDay[],
+  focusMissionIds?: Set<string>,
+): string[] {
+  const byPerson = collectTrackedAssignments(missions);
+  const messages: string[] = [];
+  for (const [person, blocks] of byPerson) {
+    const sorted = [...blocks].sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = i + 1; j < sorted.length; j++) {
+        const a = sorted[i];
+        const b = sorted[j];
+        if (sameAssignmentRow(a, b)) continue;
+        if (!pairInFocus(a, b, focusMissionIds)) continue;
         if (
-          assignmentIntervalsOverlap(
-            { startMs: a.startMs, endMs: a.endMs },
-            { startMs: b.startMs, endMs: b.endMs },
+          allowsParallelAssignmentOverlap(
+            a.positionKind,
+            a.missionType,
+            b.positionKind,
+            b.missionType,
+            assignmentMetaOf(a),
+            assignmentMetaOf(b),
           )
         ) {
+          continue;
+        }
+        if (visibleTimeOverlap(a, b)) continue;
+        const idle = visibleIdleMinutes(a, b);
+        if (idle == null) continue;
+        const restHours = Math.max(a.restHours, b.restHours);
+        const restMin = Math.max(0, restHours) * 60;
+        const gapMin = Math.max(a.dutyGuardGapMin, b.dutyGuardGapMin);
+        const aGuard = isRestConstrainedGuardKind(a.positionKind);
+        const bGuard = isRestConstrainedGuardKind(b.positionKind);
+        const aAbas = trackedIsAbas(a);
+        const bAbas = trackedIsAbas(b);
+        const abasGuard = (aAbas && bGuard) || (bAbas && aGuard);
+
+        if (aGuard && bGuard && restMin > 0 && idle < restMin) {
           messages.push(
-            [
-              "Overlap detected:",
-              `Person: ${person}`,
-              `Assignment A: ${a.label}`,
-              `Assignment B: ${b.label}`,
-            ].join("\n"),
+            `${person}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין שמירות ${a.startTime}–${a.endTime} ו-${b.startTime}–${b.endTime} (נדרש ${restHours})`,
+          );
+        }
+        if (abasGuard && restMin > 0 && idle < restMin) {
+          const abas = aAbas ? a : b;
+          const guard = aGuard ? a : b;
+          messages.push(
+            `${person}: מנוחה ${formatHoursFromMinutes(idle)} שעות בין עב״ס ${abas.startTime}–${abas.endTime} לשמירה ${guard.startTime}–${guard.endTime} (נדרש ${restHours})`,
+          );
+        }
+        if (abasGuard && idle < gapMin) {
+          const abas = aAbas ? a : b;
+          const guard = aGuard ? a : b;
+          messages.push(
+            `${person}: מרווח ${Math.round(idle)} דק׳ בין עב״ס ${abas.startTime}–${abas.endTime} לשמירה ${guard.startTime}–${guard.endTime} (נדרש ${gapMin})`,
           );
         }
       }
@@ -3420,10 +3609,11 @@ export type ValidateGeneratedRosterInput = {
 
 /** Final validation before accepting an auto-generated roster. */
 export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): string[] {
-  const overlapMessages = validateNoPersonOverlaps(input.missions);
-  if (overlapMessages.length) return overlapMessages;
+  const messages: string[] = [
+    ...validateNoPersonOverlaps(input.missions),
+    ...validateShortRestGaps(input.missions),
+  ];
 
-  const messages: string[] = [];
   const issues = input.issues ?? [];
   const peopleByName = input.peopleByName ?? {};
   const rules = VALIDATION_FAIRNESS_RULES;
@@ -3481,7 +3671,7 @@ export function validateGeneratedRoster(input: ValidateGeneratedRosterInput): st
     }
   }
 
-  return [...new Set(messages)];
+  return prioritizeGapWarnings(messages);
 }
 
 export { guardSlotDifficultyRank, type PersonBurdenBreakdown } from "@/lib/guard-burden";

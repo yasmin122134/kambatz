@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import { flattenMissionSlots } from "@/lib/mission-utils";
-import { collectRosterWarnings } from "@/lib/scheduling-engine";
+import { collectRosterWarnings, auditAssignedRoster } from "@/lib/scheduling-engine";
 import type { Issue, MissionDay, Person } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
@@ -290,5 +290,176 @@ describe("collectRosterWarnings", () => {
     });
     expect(warnings.some((w) => w.includes("מנוחה"))).toBe(false);
     expect(warnings.some((w) => w.includes("יחס שמירות"))).toBe(false);
+  });
+
+  it("always warns when the same person is on overlapping ABAS and a guard post", () => {
+    const mission = guardMission();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const guard = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...mission,
+          assignments: {
+            [abas.slotId]: [alex.name, ...Array(Math.max(0, abas.seatCount - 1)).fill("")],
+            [guard.slotId]: [alex.name],
+          },
+        },
+      ],
+      peopleByName: { [alex.name]: alex },
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
+    expect(warnings.some((w) => w.includes("עב״ס") && w.includes("אלכס"))).toBe(true);
+  });
+
+  it("warns even when ABAS and a guard share a slot id but have different times", () => {
+    const mission = guardMission();
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const guard = slots.find((s) => s.positionKind === "guard" && s.startTime === "09:00")!;
+    const sharedId = abas.slotId;
+    const positions = mission.positions.map((pos) => ({
+      ...pos,
+      slots: pos.slots.map((slot) =>
+        slot.id === guard.slotId ? { ...slot, id: sharedId } : slot,
+      ),
+    }));
+    const alex = person("אלכס");
+    const warnings = collectRosterWarnings({
+      missions: [
+        {
+          ...mission,
+          positions,
+          assignments: {
+            [sharedId]: [alex.name],
+          },
+        },
+      ],
+      peopleByName: { [alex.name]: alex },
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("אלכס"))).toBe(true);
+  });
+
+  it("warns a one-minute ABAS∩guard overlap", () => {
+    const mission: MissionDay = {
+      id: "m-1min",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-03-01",
+      starts_at: "2026-03-01T07:00:00+03:00",
+      ends_at: "2026-03-02T07:00:00+03:00",
+      status: "draft",
+      positions: [
+        {
+          id: "abas",
+          name: "עבודות בסיס",
+          kind: "duty",
+          slots: [{ id: "b1", start_time: "08:30", end_time: "11:30", seat_count: 1 }],
+        },
+        {
+          id: "pg",
+          name: "פטל",
+          kind: "guard",
+          slots: [{ id: "g1", start_time: "11:29", end_time: "15:29", seat_count: 1 }],
+        },
+      ],
+      assignments: { b1: ["Alex"], g1: ["Alex"] },
+      scheduling_rules: { ...DEFAULT_MISSION_SCHEDULING_RULES, rest_hours: 8 },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const warnings = auditAssignedRoster({
+      missions: [mission],
+      peopleByName: { Alex: person("Alex") },
+    });
+    expect(warnings.some((w) => w.includes("חפיפה") && w.includes("Alex"))).toBe(true);
+  });
+
+  it("warns when rest is one minute under rest_hours", () => {
+    const mission: MissionDay = {
+      id: "m-rest-1",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-03-01",
+      starts_at: "2026-03-01T07:00:00+03:00",
+      ends_at: "2026-03-02T07:00:00+03:00",
+      status: "draft",
+      positions: [
+        {
+          id: "pg",
+          name: "פטל",
+          kind: "guard",
+          slots: [
+            { id: "g1", start_time: "09:00", end_time: "13:00", seat_count: 1 },
+            { id: "g2", start_time: "20:59", end_time: "00:59", seat_count: 1 },
+          ],
+        },
+      ],
+      assignments: { g1: ["Alex"], g2: ["Alex"] },
+      scheduling_rules: {
+        ...DEFAULT_MISSION_SCHEDULING_RULES,
+        rest_hours: 8,
+        guard_ratio: 0,
+      },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const warnings = auditAssignedRoster({
+      missions: [mission],
+      peopleByName: { Alex: person("Alex") },
+    });
+    expect(warnings.some((w) => w.includes("מנוחה") && w.includes("נדרש 8"))).toBe(true);
+  });
+
+  it("warns short rest between ABAS and a later guard even when the minute-gap is ok", () => {
+    const mission: MissionDay = {
+      id: "m-abas-rest",
+      title: "שמירות",
+      mission_type: "guards",
+      mission_date: "2026-03-01",
+      starts_at: "2026-03-01T07:00:00+03:00",
+      ends_at: "2026-03-02T07:00:00+03:00",
+      status: "draft",
+      positions: [
+        {
+          id: "abas",
+          name: "עבודות בסיס",
+          kind: "duty",
+          slots: [{ id: "b1", start_time: "08:30", end_time: "11:30", seat_count: 1 }],
+        },
+        {
+          id: "pg",
+          name: "פטל",
+          kind: "guard",
+          slots: [{ id: "g1", start_time: "16:00", end_time: "20:00", seat_count: 1 }],
+        },
+      ],
+      assignments: { b1: ["Alex"], g1: ["Alex"] },
+      scheduling_rules: {
+        ...DEFAULT_MISSION_SCHEDULING_RULES,
+        rest_hours: 8,
+        duty_guard_gap_minutes: 60,
+      },
+      notes: null,
+      created_at: "",
+      updated_at: "",
+    };
+    const warnings = auditAssignedRoster({
+      missions: [mission],
+      peopleByName: { Alex: person("Alex") },
+    });
+    expect(warnings.some((w) => w.includes("חפיפה"))).toBe(false);
+    expect(
+      warnings.some((w) => w.includes("מנוחה") && w.includes("עב״ס") && w.includes("נדרש 8")),
+    ).toBe(true);
   });
 });

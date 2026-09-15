@@ -391,7 +391,7 @@ describe("validateNoPersonOverlaps", () => {
     const broken = { ...timed, assignments };
     const messages = validateNoPersonOverlaps([broken]);
     expect(messages.length).toBeGreaterThan(0);
-    expect(messages[0]).toContain("Overlap detected");
+    expect(messages[0]).toContain("חפיפה");
     expect(messages[0]).toContain("Alex");
 
     const rosterErrors = validateGeneratedRoster({
@@ -399,6 +399,97 @@ describe("validateNoPersonOverlaps", () => {
       peopleByName: { Alex: person("Alex", 1) },
     });
     expect(rosterErrors.length).toBeGreaterThan(0);
+  });
+
+  it("ABAS ∩ overlapping guard always appears first in roster warnings", () => {
+    const guard = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
+    const slots = flattenMissionSlots(guard);
+    const abas = slots.find((s) => s.missionType === "base_work" && s.startTime === "08:30")!;
+    const post = slots.find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startAtMs < abas.endAtMs &&
+        abas.startAtMs < s.endAtMs,
+    )!;
+    const assignments = { ...guard.assignments };
+    const abasSeats = Array(abas.seatCount).fill("");
+    abasSeats[0] = "Alex";
+    assignments[abas.slotId] = abasSeats;
+    assignments[post.slotId] = ["Alex"];
+    const mission = { ...guard, assignments };
+    const warnings = collectRosterWarnings({
+      missions: [mission],
+      peopleByName: { Alex: person("Alex", 1) },
+    });
+    expect(warnings[0]).toContain("חפיפה");
+    expect(warnings.some((w) => w.includes("חפיפה עב״ס") && w.includes("Alex"))).toBe(true);
+  });
+
+  it("warns when wall labels overlap even if stored ISO is ~24h later", () => {
+    const startsAt = "2026-03-01T07:00:00.000Z";
+    const endsAt = "2026-03-03T07:00:00.000Z";
+    const abasId = "abas-stale";
+    const guardId = "guard-stale";
+    const mission = missionDay(
+      "g-stale",
+      "guards",
+      [
+        {
+          id: "p-abas",
+          name: "עבודות בסיס",
+          kind: "duty",
+          slots: [{ id: abasId, start_time: "08:30", end_time: "11:30", seat_count: 1 }],
+        },
+        {
+          id: "p-guard",
+          name: "פטל",
+          kind: "guard",
+          slots: [
+            {
+              id: guardId,
+              start_time: "09:00",
+              end_time: "13:00",
+              seat_count: 1,
+              starts_at: "2026-03-02T07:00:00.000Z",
+              ends_at: "2026-03-02T11:00:00.000Z",
+            },
+          ],
+        },
+      ],
+      { [abasId]: ["Alex"], [guardId]: ["Alex"] },
+      startsAt,
+      endsAt,
+    );
+    const slots = flattenMissionSlots(mission);
+    const abas = slots.find((s) => s.slotId === abasId)!;
+    const post = slots.find((s) => s.slotId === guardId)!;
+    expect(assignmentIntervalsOverlap(
+      { startMs: abas.startAtMs, endMs: abas.endAtMs },
+      { startMs: post.startAtMs, endMs: post.endAtMs },
+    )).toBe(false);
+    const messages = validateNoPersonOverlaps([mission]);
+    expect(messages.some((m) => m.includes("חפיפה") && m.includes("Alex"))).toBe(true);
+  });
+
+  it("does not warn identical wall times on consecutive days", () => {
+    const day1 = guardBundleMission("2026-08-21T08:00:00", "2026-08-22T08:00:00");
+    const day2 = {
+      ...guardBundleMission("2026-08-22T08:00:00", "2026-08-23T08:00:00"),
+      id: "guard-2",
+      mission_date: "2026-08-22",
+    };
+    const slot1 = flattenMissionSlots(day1).find((s) => s.positionKind === "guard")!;
+    const slot2 = flattenMissionSlots(day2).find(
+      (s) =>
+        s.positionKind === "guard" &&
+        s.startTime === slot1.startTime &&
+        s.positionName === slot1.positionName,
+    )!;
+    const warnings = validateNoPersonOverlaps([
+      { ...day1, assignments: { ...day1.assignments, [slot1.slotId]: ["Alex"] } },
+      { ...day2, assignments: { ...day2.assignments, [slot2.slotId]: ["Alex"] } },
+    ]);
+    expect(warnings.filter((w) => w.includes("חפיפה"))).toEqual([]);
   });
 });
 

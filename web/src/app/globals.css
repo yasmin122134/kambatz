@@ -228,6 +228,16 @@ button:hover,
   margin-top: 4px;
 }
 
+.roster-warnings li.overlap-warning {
+  color: #8b1a1a;
+  font-weight: 700;
+}
+
+.roster-warnings li.rest-warning {
+  color: #8a4b12;
+  font-weight: 600;
+}
+
 .tag {
   font-family: var(--font-mono);
   font-size: 10px;

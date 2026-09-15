@@ -12,14 +12,12 @@ import {
   formatUnresolvedSummary,
 } from "@/lib/global-assign/diagnostics";
 import {
-  findAssignmentConflicts,
   forceFillEmptySeats,
   repairGuardAssignmentGaps,
   stripGuardSpacingViolations,
   stripAbasTimeViolations,
   clearOverlappingAbasAssignments,
-  validateGeneratedRoster,
-  validateNoPersonOverlaps,
+  auditAssignedRoster,
   buildTrackerFromMissions,
   type AssignConstraintPolicy,
 } from "@/lib/scheduling-engine";
@@ -29,6 +27,7 @@ import {
   syncAssignmentSeats,
   normalizeSchedulingRules,
 } from "@/lib/mission-utils";
+import { addCalendarDays } from "@/lib/time-interval";
 import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
 import { validateAbasRosterIndependent } from "@/lib/abas-validator";
 import {
@@ -86,6 +85,27 @@ async function loadPeople(): Promise<Person[]> {
 function sameDayMissionScope(mission: MissionDay, allMissions: MissionDay[]): MissionDay[] {
   const date = mission.mission_date.slice(0, 10);
   return allMissions.filter((m) => m.mission_date.slice(0, 10) === date);
+}
+
+function missionsForAssignAudit(
+  drafts: MissionDay[],
+  allMissions: MissionDay[],
+): MissionDay[] {
+  const byId = new Map<string, MissionDay>();
+  const dates = new Set<string>();
+  for (const mission of drafts) {
+    byId.set(mission.id, mission);
+    const date = mission.mission_date.slice(0, 10);
+    dates.add(date);
+    dates.add(addCalendarDays(date, -1));
+    dates.add(addCalendarDays(date, 1));
+  }
+  for (const mission of allMissions) {
+    if (byId.has(mission.id)) continue;
+    if (!dates.has(mission.mission_date.slice(0, 10))) continue;
+    byId.set(mission.id, mission);
+  }
+  return [...byId.values()];
 }
 
 function countSkippedSeats(mission: MissionDay, keepExisting: boolean): number {
@@ -378,13 +398,14 @@ async function smartAssignScope(input: {
     assignments: output.assignmentsByMission.get(mission.id) ?? mission.assignments,
   }));
 
+  const auditMissions = missionsForAssignAudit(draftMissions, input.allMissions);
   const validationErrors = [
-    ...validateGeneratedRoster({
-      missions: draftMissions,
+    ...auditAssignedRoster({
+      missions: auditMissions,
       issues: input.issues,
       peopleByName,
+      focusMissionIds: draftMissions.map((m) => m.id),
     }),
-    ...validateNoPersonOverlaps(draftMissions).map((msg) => `⚠ ${msg}`),
   ];
   for (const mission of draftMissions) {
     const original = input.scopeMissions.find((m) => m.id === mission.id);
@@ -420,37 +441,20 @@ async function smartAssignScope(input: {
     });
     assertMissionStructureUnchanged(structureBefore[mi], structureAfter);
 
-    const sanitized = clearOverlappingAbasAssignments({
-      mission,
-      assignments,
-    });
-    if (sanitized.removed > 0) {
-      output.assignmentsByMission.set(mission.id, sanitized.assignments);
-      const msg = `הוסרו ${sanitized.removed} שיבוצי עב״ס שחפפו שמירה`;
-      if (!warnings.includes(msg)) warnings.push(msg);
-    }
-    const cleanAssignments = sanitized.assignments;
-
-    const draft: MissionDay = applyAssignmentsOnly(mission, cleanAssignments);
-    const missionWarnings = [...warnings];
-    for (const msg of findAssignmentConflicts(draft, peopleByName)) {
-      if (!missionWarnings.includes(msg)) missionWarnings.push(msg);
-    }
-
     const { mission: saved } = await saveMissionDay(
-      applyAssignmentsOnly(mission, cleanAssignments),
+      applyAssignmentsOnly(mission, assignments),
       { validateAssignments: false },
     );
 
     const requiredSeats = countMissionRequiredSeats(mission);
-    const assignedSeats = countMissionFilledSeats(cleanAssignments);
+    const assignedSeats = countMissionFilledSeats(assignments);
     const missionUnresolved = output.unresolved.filter((u) => u.missionId === mission.id);
 
     results.push({
       mission: saved,
       filled: Math.max(0, assignedSeats - countSkippedSeats(mission, input.keepExisting)),
       skipped: countSkippedSeats(mission, input.keepExisting),
-      warnings: missionWarnings,
+      warnings,
       status,
       assignedSeats,
       requiredSeats,

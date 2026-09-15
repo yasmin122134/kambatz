@@ -670,9 +670,16 @@ export function BoardClient({
             ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
             : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
       if (warnings.length) {
-        const preview = warnings.slice(0, 4).join(" · ");
-        const more = warnings.length > 4 ? ` · …ועוד ${warnings.length - 4}` : "";
-        setMsg(`${statusLine}. ${preview}${more}`);
+        const gaps = warnings.filter(
+          (w) => w.includes("חפיפה") || w.includes("מנוחה") || w.includes("מרווח"),
+        );
+        const gapLine =
+          gaps.length > 0
+            ? ` נמצאו ${gaps.length} פערי שיבוץ (חפיפה/מנוחה/מרווח) — פירוט באזהרות שיבוץ.`
+            : "";
+        const preview = warnings.slice(0, 3).join(" · ");
+        const more = warnings.length > 3 ? ` · …ועוד ${warnings.length - 3}` : "";
+        setMsg(`${statusLine}.${gapLine} ${preview}${more}`);
       } else {
         setMsg(statusLine);
       }
@@ -887,7 +894,18 @@ export function BoardClient({
           <h3>אזהרות שיבוץ — {formatDate(activeDate)}</h3>
           <ul>
             {rosterWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+              <li
+                key={warning}
+                className={
+                  warning.includes("חפיפה")
+                    ? "overlap-warning"
+                    : warning.includes("מנוחה") || warning.includes("מרווח")
+                      ? "rest-warning"
+                      : undefined
+                }
+              >
+                {warning}
+              </li>
             ))}
           </ul>
         </section>
