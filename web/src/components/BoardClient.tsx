@@ -50,6 +50,7 @@ import {
 import { hourlyAbsenceViews } from "@/lib/hourly-absence";
 import { downloadMissionsExcel } from "@/lib/mission-export";
 import { LuachXlsxImportButton } from "@/components/LuachXlsxImportButton";
+import { publishBoardConfirmMessage } from "@/lib/mission-publish";
 import type { Person } from "@/lib/types";
 
 type Props = {
@@ -127,6 +128,7 @@ export function BoardClient({
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [locksBusy, setLocksBusy] = useState(false);
   const [clearingBoard, setClearingBoard] = useState(false);
+  const [publishingBoard, setPublishingBoard] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
   const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
@@ -672,6 +674,34 @@ export function BoardClient({
     }
   }
 
+  async function publishDayBoard() {
+    const missionIds = draftMissionsOnDay.map((m) => m.id);
+    if (!missionIds.length) return;
+    if (!confirm(publishBoardConfirmMessage(rosterWarnings.length))) return;
+
+    setPublishingBoard(true);
+    setMsg("");
+    try {
+      const res = await fetch("/api/missions/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mission_ids: missionIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה בפרסום");
+        return;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg("הלוח פורסם — גלוי למשתמשים");
+    } catch {
+      setMsg("שגיאה בפרסום");
+    } finally {
+      setPublishingBoard(false);
+    }
+  }
+
   async function setFairnessStatus(id: string, status: "approved" | "rejected") {
     await fetch("/api/fairness/requests", {
       method: "PATCH",
@@ -832,7 +862,8 @@ export function BoardClient({
           msg.includes("הושלם") ||
           msg.includes("ננעלו") ||
           msg.includes("שוחררו") ||
-          msg.includes("נשמר")
+          msg.includes("נשמר") ||
+          msg.includes("פורסם")
             ? "msg-ok"
             : "msg-err"
         }`}>{msg}</p>
@@ -843,16 +874,33 @@ export function BoardClient({
           className="mb-4 rounded border px-3 py-2 text-sm"
           style={{ borderColor: "var(--color-line2)", background: "var(--color-accent-bg)" }}
         >
-          <b>טיוטה</b>
-          <span className="hint mr-2">
-            {" "}
-            — {draftMissionsOnDay.map((m) => m.title).join(" · ")} לא גלויים למשתמשים הרגילים.
-          </span>
-          {focusMissionId && (
-            <Link href={`/admin/missions/${focusMissionId}`} className="text-brick hover:underline">
-              עריכה בעורך
-            </Link>
-          )}
+          <div className="bar spread flex-wrap gap-2">
+            <div>
+              <b>טיוטה</b>
+              <span className="hint mr-2">
+                {" "}
+                — {draftMissionsOnDay.map((m) => m.title).join(" · ")} לא גלויים למשתמשים הרגילים.
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="btn-pri btn-sm"
+                disabled={
+                  publishingBoard || autoAssigning || clearingBoard || locksBusy
+                }
+                onClick={publishDayBoard}
+                title="מפרסם את הלוח למשתמשים הרגילים, גם אם יש אזהרות שיבוץ"
+              >
+                {publishingBoard ? "מפרסם…" : "פרסם לוח"}
+              </button>
+              {focusMissionId && (
+                <Link href={`/admin/missions/${focusMissionId}`} className="text-brick hover:underline">
+                  עריכה בעורך
+                </Link>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

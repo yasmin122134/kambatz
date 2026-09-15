@@ -17,6 +17,7 @@ import {
 } from "@/lib/mission-utils";
 import { ensureBaseWorkLeaders } from "@/lib/base-work-template";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
+import { collectDraftPublishIds } from "@/lib/mission-publish";
 
 export {
   flattenMissionSlots,
@@ -241,6 +242,38 @@ async function afterMissionSave(mission: MissionDay): Promise<void> {
   } catch {
     // טבלת fairness_assignment_points עדיין לא קיימת — לא חוסם שמירה
   }
+}
+
+/** Publish missions as-is — assignment conflicts do not block visibility. */
+export async function publishMissionDays(requestedIds: string[]): Promise<MissionDay[]> {
+  const unique = [...new Set(requestedIds.map((id) => id.trim()).filter(Boolean))];
+  const loaded: MissionDay[] = [];
+  const seen = new Set<string>();
+  const queue = [...unique];
+
+  while (queue.length) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const existing = await getMissionDay(id);
+    if (!existing) continue;
+    loaded.push(existing);
+    const linkedId = existing.scheduling_rules?.linked_mission_id?.trim();
+    if (linkedId && !seen.has(linkedId)) queue.push(linkedId);
+  }
+
+  const draftIds = collectDraftPublishIds(loaded, unique);
+  const published: MissionDay[] = [];
+  for (const id of draftIds) {
+    const existing = loaded.find((m) => m.id === id);
+    if (!existing) continue;
+    const { mission } = await saveMissionDay(
+      { ...existing, status: "published" },
+      { validateAssignments: false },
+    );
+    published.push(mission);
+  }
+  return published;
 }
 
 export async function deleteMissionDay(id: string) {

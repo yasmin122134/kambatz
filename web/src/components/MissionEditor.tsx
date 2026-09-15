@@ -41,6 +41,7 @@ import { isBaseWorkPosition, effectiveBoardStartLabel } from "@/lib/mission-util
 import { sameMissionInstant, normalizeTimeLabel } from "@/lib/time-interval";
 import { KitchenOutListsEditor } from "@/components/KitchenOutListsEditor";
 import { MissionFairnessPanel } from "@/components/MissionFairnessPanel";
+import { PUBLISH_BOARD_ANYWAY_CONFIRM } from "@/lib/mission-publish";
 
 function uid() {
   return crypto.randomUUID();
@@ -115,6 +116,8 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   const [startsAt, setStartsAt] = useState("");
   const [endsAt, setEndsAt] = useState("");
   const [status, setStatus] = useState<"draft" | "published">("draft");
+  const [persistedStatus, setPersistedStatus] = useState<"draft" | "published">("draft");
+  const [publishing, setPublishing] = useState(false);
   const [positions, setPositions] = useState<MissionPosition[]>([]);
   const [notes, setNotes] = useState("");
   const [schedulingRules, setSchedulingRules] = useState<MissionSchedulingRules>(
@@ -198,6 +201,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setTitle(m.title);
     setMissionType(m.mission_type);
     setMissionDate(m.mission_date);
+    setPersistedStatus(m.status);
     setStartsAt(formatDatetimeLocal(m.starts_at));
     setEndsAt(formatDatetimeLocal(m.ends_at));
     loadedTimesRef.current = { startsAt: m.starts_at, endsAt: m.ends_at };
@@ -338,6 +342,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       base_work_seats: clampBaseWorkSeatsPerShift(scheduling_rules.base_work?.seats_per_shift),
     };
     structureDirtyRef.current = false;
+    setPersistedStatus(data.status ?? status);
     setMsg(
       regenerateOnSave
         ? "נשמר — מבנה המשמרות עודכן; שיבוצים שלא תואמים נוקו"
@@ -346,6 +351,34 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setFairnessRefreshKey((k) => k + 1);
     if (!missionId) {
       window.location.href = `/admin/missions/${data.id}`;
+    }
+  }
+
+  async function publishBoard() {
+    if (!missionId || persistedStatus !== "draft") return;
+    if (!confirm(PUBLISH_BOARD_ANYWAY_CONFIRM)) return;
+    setPublishing(true);
+    setErr("");
+    setMsg("");
+    try {
+      const res = await fetch("/api/missions/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mission_ids: [missionId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setErr((data as { error?: string }).error || "שגיאה בפרסום");
+        return;
+      }
+      setStatus("published");
+      setPersistedStatus("published");
+      setFairnessRefreshKey((k) => k + 1);
+      setMsg("הלוח פורסם — גלוי למשתמשים");
+    } catch {
+      setErr("שגיאה בפרסום");
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -1056,14 +1089,25 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       {msg && <p className="msg-ok">{msg}</p>}
 
       <div className="bar flex-wrap gap-2">
-        <button type="submit" className="btn-pri" disabled={saving}>
+        <button type="submit" className="btn-pri" disabled={saving || publishing}>
           {saving ? "שומר…" : "שמור"}
         </button>
+        {missionId && persistedStatus === "draft" && (
+          <button
+            type="button"
+            className="btn-pri"
+            disabled={saving || publishing || autoAssigning}
+            onClick={publishBoard}
+            title="מפרסם את הלוח למשתמשים הרגילים, גם אם יש בעיות בשיבוץ"
+          >
+            {publishing ? "מפרסם…" : "פרסם לוח"}
+          </button>
+        )}
         {missionType === "guards" && (
           <button
             type="button"
             className="btn"
-            disabled={saving || autoAssigning}
+            disabled={saving || publishing || autoAssigning}
             onClick={regenerateGuardStructure}
           >
             סנכרן מבנה משמרות
@@ -1074,7 +1118,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             <button
               type="button"
               className="btn-pri"
-              disabled={autoAssigning || saving}
+              disabled={autoAssigning || saving || publishing}
               onClick={() => runAutoAssign("standard")}
             >
               {autoAssigning ? "משבץ…" : "שיבוץ חכם"}
@@ -1082,7 +1126,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
             <button
               type="button"
               className="btn"
-              disabled={autoAssigning || saving}
+              disabled={autoAssigning || saving || publishing}
               onClick={() => runAutoAssign("strict_rest")}
               title="שומר מנוחה בין שמירות ומרווח עב״ס כאילוץ קשיח. צדק פחות חשוב. שובר מנוחה רק אם אין דרך אחרת למלא."
             >

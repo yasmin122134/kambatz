@@ -10,12 +10,14 @@ import {
   MISSION_TYPE_LABELS,
   type MissionDay,
 } from "@/lib/types";
+import { PUBLISH_BOARD_ANYWAY_CONFIRM } from "@/lib/mission-publish";
 
 export default function AdminMissionsPage() {
   const router = useRouter();
   const [missions, setMissions] = useState<MissionDay[]>([]);
   const [loading, setLoading] = useState(true);
   const [creatingBundle, setCreatingBundle] = useState(false);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/missions?includeDrafts=1");
@@ -31,6 +33,26 @@ export default function AdminMissionsPage() {
     if (!confirm("למחוק יום משימה?")) return;
     await fetch(`/api/missions/${id}`, { method: "DELETE" });
     load();
+  }
+
+  async function publish(id: string) {
+    if (!confirm(PUBLISH_BOARD_ANYWAY_CONFIRM)) return;
+    setPublishingId(id);
+    try {
+      const res = await fetch("/api/missions/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mission_ids: [id] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert((data as { error?: string }).error || "שגיאה בפרסום");
+        return;
+      }
+      await load();
+    } finally {
+      setPublishingId(null);
+    }
   }
 
   async function createGuardDayBundle() {
@@ -125,6 +147,17 @@ export default function AdminMissionsPage() {
                   </p>
                 </div>
                 <div className="flex gap-2">
+                  {m.status === "draft" && (
+                    <button
+                      type="button"
+                      className="btn-pri btn-sm"
+                      disabled={publishingId === m.id}
+                      onClick={() => publish(m.id)}
+                      title="מפרסם למשתמשים הרגילים, גם אם יש בעיות בשיבוץ"
+                    >
+                      {publishingId === m.id ? "מפרסם…" : "פרסם לוח"}
+                    </button>
+                  )}
                   <Link href={`/admin/missions/${m.id}`} className="btn-sm">
                     ערוך
                   </Link>
