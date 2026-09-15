@@ -12,15 +12,21 @@ export async function POST(request: Request) {
   const missionDate = body.mission_date ? String(body.mission_date).slice(0, 10) : "";
   const keepExisting = body.keep_existing !== false;
   const includeSameDay = body.include_same_day !== false;
+  const constraintPolicy =
+    body.constraint_policy === "strict_rest" ? "strict_rest" : "standard";
 
   try {
     if (missionId) {
-      const result = await autoAssignMission(missionId, { keepExisting, includeSameDay });
+      const result = await autoAssignMission(missionId, {
+        keepExisting,
+        includeSameDay,
+        constraintPolicy,
+      });
       return NextResponse.json(result);
     }
 
     if (missionDate) {
-      const result = await autoAssignDate(missionDate, { keepExisting });
+      const result = await autoAssignDate(missionDate, { keepExisting, constraintPolicy });
       return NextResponse.json(result);
     }
 

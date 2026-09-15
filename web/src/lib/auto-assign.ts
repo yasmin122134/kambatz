@@ -15,6 +15,7 @@ import {
   validateGeneratedRoster,
   validateNoPersonOverlaps,
   buildTrackerFromMissions,
+  type AssignConstraintPolicy,
 } from "@/lib/scheduling-engine";
 import { syncAssignmentSeats, normalizeSchedulingRules } from "@/lib/mission-utils";
 import { restoreLockedAssignments, shouldKeepSeatOnAssign } from "@/lib/assignment-lock";
@@ -105,6 +106,13 @@ function countMissionFilledSeats(assignments: Record<string, string[]>): number 
   return filled;
 }
 
+function countMissionEmptySeats(
+  mission: MissionDay,
+  assignments: Record<string, string[]>,
+): number {
+  return Math.max(0, countMissionRequiredSeats(mission) - countMissionFilledSeats(assignments));
+}
+
 async function smartAssignScope(input: {
   scopeMissions: MissionDay[];
   allMissions: MissionDay[];
@@ -113,11 +121,14 @@ async function smartAssignScope(input: {
   rules: Awaited<ReturnType<typeof getFairnessRules>>;
   keepExisting: boolean;
   preWarnings?: string[];
+  constraintPolicy?: AssignConstraintPolicy;
 }): Promise<SmartAssignDayResult> {
   const meanPrior =
     input.people.reduce((sum, p) => sum + (p.prior_score || 0), 0) /
     (input.people.length || 1);
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
+  const constraintPolicy: AssignConstraintPolicy =
+    input.constraintPolicy === "strict_rest" ? "strict_rest" : "standard";
 
   const structureBefore = input.scopeMissions.map((m) => snapshotMissionStructure(m));
   for (const mission of input.scopeMissions) {
@@ -147,6 +158,7 @@ async function smartAssignScope(input: {
       (m) => !input.scopeMissions.some((s) => s.id === m.id),
     ),
     randomSeed,
+    constraintPolicy,
   });
 
   for (const mission of input.scopeMissions) {
@@ -172,6 +184,7 @@ async function smartAssignScope(input: {
         ],
         input.rules,
         new Set(),
+        constraintPolicy,
       );
 
       const { assignments: repaired } = repairGuardAssignmentGaps({
@@ -196,6 +209,7 @@ async function smartAssignScope(input: {
         ],
         input.rules,
         new Set(),
+        constraintPolicy,
       );
       const { assignments: forceFilled, warnings: fillWarnings, filled: roundFilled } =
         forceFillEmptySeats({
@@ -208,6 +222,7 @@ async function smartAssignScope(input: {
           rules: input.rules,
           meanPrior,
           randomSeed,
+          allowCoverageFill: false,
         });
       currentAssignments = forceFilled;
       if (fillWarnings.length) {
@@ -216,19 +231,63 @@ async function smartAssignScope(input: {
         }
       }
 
-      const { assignments: stripped, removed: guardStripped } = stripGuardSpacingViolations({
-        mission,
-        assignments: currentAssignments,
-        scheduling,
-        rules: input.rules,
-      });
-      currentAssignments = stripped;
-      if (guardStripped > 0) {
-        const msg = `הוסרו ${guardStripped} שיבוצי שמירה רצופים/צמודים (יחס ${scheduling.guard_ratio ?? 2}:1)`;
-        if (!output.warnings.includes(msg)) output.warnings.push(msg);
+      let guardStripped = 0;
+      if (constraintPolicy !== "strict_rest") {
+        const stripped = stripGuardSpacingViolations({
+          mission,
+          assignments: currentAssignments,
+          scheduling,
+          rules: input.rules,
+        });
+        currentAssignments = stripped.assignments;
+        guardStripped = stripped.removed;
+        if (guardStripped > 0) {
+          const msg = `הוסרו ${guardStripped} שיבוצי שמירה רצופים/צמודים (יחס ${scheduling.guard_ratio ?? 2}:1)`;
+          if (!output.warnings.includes(msg)) output.warnings.push(msg);
+        }
       }
 
       if (roundFilled === 0 && guardStripped === 0) break;
+    }
+
+    if (
+      constraintPolicy === "strict_rest" &&
+      countMissionEmptySeats(mission, currentAssignments) > 0
+    ) {
+      const draftMissions = input.scopeMissions.map((m) => ({
+        ...m,
+        assignments:
+          m.id === mission.id
+            ? currentAssignments
+            : output.assignmentsByMission.get(m.id) ?? m.assignments,
+      }));
+      const lastResortTracker = buildTrackerFromMissions(
+        [
+          ...input.allMissions.filter((m) => !draftMissions.some((d) => d.id === m.id)),
+          ...draftMissions,
+        ],
+        input.rules,
+        new Set(),
+        "strict_rest",
+      );
+      const lastResort = forceFillEmptySeats({
+        mission: { ...mission, assignments: currentAssignments },
+        assignments: currentAssignments,
+        people: input.people,
+        tracker: lastResortTracker,
+        issues: input.issues,
+        scheduling,
+        rules: input.rules,
+        meanPrior,
+        randomSeed,
+        allowCoverageFill: true,
+      });
+      currentAssignments = lastResort.assignments;
+      if (lastResort.warnings.length) {
+        for (const w of lastResort.warnings) {
+          if (!output.warnings.includes(w)) output.warnings.push(w);
+        }
+      }
     }
 
     currentAssignments = restoreLockedAssignments(mission, currentAssignments);
@@ -336,7 +395,11 @@ async function smartAssignScope(input: {
 
 export async function autoAssignMission(
   missionId: string,
-  options: { keepExisting?: boolean; includeSameDay?: boolean } = {},
+  options: {
+    keepExisting?: boolean;
+    includeSameDay?: boolean;
+    constraintPolicy?: AssignConstraintPolicy;
+  } = {},
 ): Promise<AutoAssignResult> {
   const keepExisting = options.keepExisting !== false;
   const includeSameDay = options.includeSameDay !== false;
@@ -364,6 +427,7 @@ export async function autoAssignMission(
     issues,
     rules,
     keepExisting,
+    constraintPolicy: options.constraintPolicy,
   });
 
   const focus = dayResult.results.find((r) => r.mission.id === missionId);
@@ -375,7 +439,7 @@ export async function autoAssignMission(
 
 export async function autoAssignDate(
   missionDate: string,
-  options: { keepExisting?: boolean } = {},
+  options: { keepExisting?: boolean; constraintPolicy?: AssignConstraintPolicy } = {},
 ): Promise<SmartAssignDayResult> {
   const keepExisting = options.keepExisting !== false;
   const allMissions = await listVisibleMissionDays();
@@ -413,5 +477,6 @@ export async function autoAssignDate(
     issues,
     rules,
     keepExisting,
+    constraintPolicy: options.constraintPolicy,
   });
 }

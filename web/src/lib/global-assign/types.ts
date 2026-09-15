@@ -106,6 +106,8 @@ export type GlobalAssignInput = {
   deadlineMs?: number;
   /** Seed for guard-position randomness; omit for a fresh seed each run. */
   randomSeed?: number;
+  /** Hard rest_hours between guards (+ defined ABAS gap). Default standard. */
+  constraintPolicy?: import("@/lib/scheduling-engine").AssignConstraintPolicy;
 };
 
 export type GlobalAssignOutput = {

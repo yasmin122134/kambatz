@@ -1,5 +1,5 @@
 import type { MissionDay, MissionPosition, MissionSlot } from "@/lib/types";
-import { syncAssignmentSeats } from "@/lib/mission-utils";
+import { emptyAssignments, syncAssignmentSeats } from "@/lib/mission-utils";
 
 export function emptyLockedSeats(positions: MissionPosition[]): Record<string, boolean[]> {
   const out: Record<string, boolean[]> = {};
@@ -9,6 +9,17 @@ export function emptyLockedSeats(positions: MissionPosition[]): Record<string, b
     }
   }
   return out;
+}
+
+/** Wipe every seat and lock on a mission — structure stays. */
+export function clearMissionRoster(positions: MissionPosition[]): {
+  assignments: Record<string, string[]>;
+  locked_seats: Record<string, boolean[]>;
+} {
+  return {
+    assignments: emptyAssignments(positions),
+    locked_seats: emptyLockedSeats(positions),
+  };
 }
 
 export function syncLockedSeats(

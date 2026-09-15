@@ -8,6 +8,7 @@ import {
   syncLockedSeats,
   syncLockedSeatsWithAssignments,
   withSeatLock,
+  clearMissionRoster,
 } from "@/lib/assignment-lock";
 import { runGlobalAssign } from "@/lib/global-assign";
 import { stripGuardSpacingViolations } from "@/lib/scheduling-engine";
@@ -144,6 +145,16 @@ describe("assignment lock helpers", () => {
   it("emptyLockedSeats matches seat counts", () => {
     const mission = twoSlotMission({ s1: ["Alice"], s2: ["Bob"] });
     expect(emptyLockedSeats(mission.positions)).toEqual({ s1: [false], s2: [false] });
+  });
+
+  it("clearMissionRoster empties names and locks", () => {
+    const mission = twoSlotMission(
+      { s1: ["Alice"], s2: ["Bob"] },
+      { s1: [true], s2: [true] },
+    );
+    const cleared = clearMissionRoster(mission.positions);
+    expect(cleared.assignments).toEqual({ s1: [""], s2: [""] });
+    expect(cleared.locked_seats).toEqual({ s1: [false], s2: [false] });
   });
 });
 

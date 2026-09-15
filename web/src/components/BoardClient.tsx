@@ -28,7 +28,7 @@ import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isBaseWorkPosition } from "@/lib/mission-utils";
-import { emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
+import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
 import { patrolAssigneeRole, patrolAssigneeRoleLabel } from "@/lib/patrol-day-template";
@@ -91,6 +91,23 @@ function missionsForRosterWarnings(missions: MissionDay[]): MissionDay[] {
   return missions.filter((m) => m.id !== linkedId);
 }
 
+function isoDateOffset(date: string, days: number): string {
+  const d = new Date(`${date.slice(0, 10)}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function rosterWarningContextDates(activeDate: string): Set<string> {
+  return new Set([
+    isoDateOffset(activeDate, -1),
+    activeDate.slice(0, 10),
+    isoDateOffset(activeDate, 1),
+  ]);
+}
+
 function peopleByNameFromList(people: Person[]): Record<string, Person> {
   return Object.fromEntries(people.map((person) => [person.name, person]));
 }
@@ -134,6 +151,7 @@ export function BoardClient({
   const [msg, setMsg] = useState("");
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [locksBusy, setLocksBusy] = useState(false);
+  const [clearingBoard, setClearingBoard] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
   const [burdenRoster, setBurdenRoster] = useState<BurdenRosterRow[]>([]);
@@ -189,13 +207,17 @@ export function BoardClient({
 
   const rosterWarnings = useMemo(() => {
     if (!isAdminUser || !dayMissions.length) return [];
-    if (Object.keys(peopleByName).length === 0) return [];
+    const contextDates = rosterWarningContextDates(activeDate);
+    const contextMissions = missionsForRosterWarnings(
+      missions.filter((m) => contextDates.has(m.mission_date.slice(0, 10))),
+    );
     return collectRosterWarnings({
-      missions: missionsForRosterWarnings(dayMissions),
+      missions: contextMissions,
       peopleByName,
       issues: approvedIssues,
+      focusMissionIds: dayMissions.map((m) => m.id),
     });
-  }, [isAdminUser, dayMissions, peopleByName, approvedIssues]);
+  }, [isAdminUser, missions, dayMissions, activeDate, peopleByName, approvedIssues]);
 
   const mySlots = useMemo(() => {
     return dayMissions.flatMap((m) =>
@@ -345,6 +367,15 @@ export function BoardClient({
                 ? lockFilledSeats(mission.positions, mission.assignments)
                 : emptyLockedSeats(mission.positions),
           };
+        }),
+      );
+    }
+
+    if (body.action === "clear_all") {
+      setMissions((prev) =>
+        prev.map((mission) => {
+          if (mission.id !== missionId) return mission;
+          return { ...mission, ...clearMissionRoster(mission.positions) };
         }),
       );
     }
@@ -545,14 +576,57 @@ export function BoardClient({
     }
   }
 
-  async function runAutoAssign(keepExisting: boolean) {
+  async function clearDayBoard() {
+    const ids = [...new Set(dayMissions.map((m) => m.id))];
+    if (!ids.length) return;
+    const confirmed = confirm(
+      "לנקות את כל הלוח ביום זה?\n\n" +
+        "כל השמות יוסרו מכל המשבצות, כולל נעולות. מבנה המשמרות יישאר.",
+    );
+    if (!confirmed) return;
+    setClearingBoard(true);
+    setMsg("");
+    try {
+      for (const missionId of ids) {
+        const res = await fetch(`/api/missions/${missionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "clear_all" }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setMsg(data.error || "שגיאה בניקוי הלוח");
+          await loadMissions();
+          return;
+        }
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg("הלוח נוקה");
+    } finally {
+      setClearingBoard(false);
+    }
+  }
+
+  async function runAutoAssign(
+    keepExisting: boolean,
+    constraintPolicy: "standard" | "strict_rest" = "standard",
+  ) {
     if (!activeDate) return;
-    const confirmed = keepExisting
-      ? confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")
-      : confirm(
-          "לשבץ מחדש את כל היום?\n\n" +
-            "משבצות נעולות יישארו. כל השאר יימחקו ויחולקו מחדש לפי האלגוריתם.",
-        );
+    const confirmed =
+      constraintPolicy === "strict_rest"
+        ? confirm(
+            "חלוקה קשיחה ליום זה?\n\n" +
+              "יישמרו מנוחה בין שמירות (כפי שהוגדר, בדרך כלל 8 שעות) ומרווח עב״ס כאילוץ קשיח — גם במחיר חלוקה פחות מאוזנת.\n" +
+              "המנוחה תישבר רק אם אין דרך אחרת למלא את כל הלוח.\n\n" +
+              "משבצות נעולות יישארו. שאר השיבוצים יימחקו ויחולקו מחדש.",
+          )
+        : keepExisting
+          ? confirm("ליצור שיבוץ חכם ליום זה? משבצות שכבר מלאות יישארו.")
+          : confirm(
+              "לשבץ מחדש את כל היום?\n\n" +
+                "משבצות נעולות יישארו. כל השאר יימחקו ויחולקו מחדש לפי האלגוריתם.",
+            );
     if (!confirmed) return;
 
     setAutoAssigning(true);
@@ -560,7 +634,11 @@ export function BoardClient({
     const res = await fetch("/api/missions/auto-assign", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mission_date: activeDate, keep_existing: keepExisting }),
+      body: JSON.stringify({
+        mission_date: activeDate,
+        keep_existing: keepExisting,
+        constraint_policy: constraintPolicy,
+      }),
     });
     const data = await res.json();
     setAutoAssigning(false);
@@ -579,7 +657,7 @@ export function BoardClient({
     const warnings: string[] = data.warnings || [];
     const statusLine =
       status === "complete"
-        ? `${keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
+        ? `${constraintPolicy === "strict_rest" ? "חלוקה קשיחה" : keepExisting ? "שיבוץ" : "שיבוץ מחדש"} הושלם — ${assignedSeats}/${requiredSeats ?? assignedSeats} משבצות`
         : status === "infeasible"
           ? `שיבוץ לא אפשרי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות בלבד`
           : `שיבוץ חלקי — ${assignedSeats}/${requiredSeats ?? "?"} משבצות`;
@@ -660,7 +738,7 @@ export function BoardClient({
               <button
                 type="button"
                 className="btn-pri btn-sm"
-                disabled={autoAssigning || !activeDate}
+                disabled={autoAssigning || clearingBoard || !activeDate}
                 onClick={() => runAutoAssign(true)}
               >
                 {autoAssigning ? "משבץ…" : "שיבוץ חכם ליום"}
@@ -668,7 +746,16 @@ export function BoardClient({
               <button
                 type="button"
                 className="btn-sm"
-                disabled={autoAssigning || !activeDate}
+                disabled={autoAssigning || clearingBoard || !activeDate}
+                onClick={() => runAutoAssign(false, "strict_rest")}
+                title="שומר מנוחה בין שמירות ומרווח עב״ס כאילוץ קשיח. צדק פחות חשוב. שובר מנוחה רק אם אין דרך אחרת למלא את הלוח."
+              >
+                {autoAssigning ? "משבץ…" : "חלוקה קשיחה"}
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={autoAssigning || clearingBoard || !activeDate}
                 onClick={() => runAutoAssign(false)}
                 title="מוחק שיבוצים לא נעולים ומחלק מחדש את כל היום"
               >
@@ -677,7 +764,16 @@ export function BoardClient({
               <button
                 type="button"
                 className="btn-sm"
-                disabled={locksBusy || autoAssigning || !activeDate}
+                disabled={locksBusy || autoAssigning || clearingBoard || !activeDate}
+                onClick={clearDayBoard}
+                title="מוחק את כל השיבוצים ביום זה, כולל משבצות נעולות. מבנה המשמרות נשאר."
+              >
+                {clearingBoard ? "מנקה…" : "נקה לוח"}
+              </button>
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={locksBusy || autoAssigning || clearingBoard || !activeDate}
                 onClick={() => setDayLocks(true)}
                 title="נועל את כל המשבצות המשובצות ביום זה"
               >
@@ -686,7 +782,7 @@ export function BoardClient({
               <button
                 type="button"
                 className="btn-sm"
-                disabled={locksBusy || autoAssigning || !activeDate}
+                disabled={locksBusy || autoAssigning || clearingBoard || !activeDate}
                 onClick={() => setDayLocks(false)}
                 title="משחרר את כל הנעילות ביום זה"
               >

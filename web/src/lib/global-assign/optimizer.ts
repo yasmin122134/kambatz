@@ -14,6 +14,7 @@ import {
   placePerson,
   siblingDutyOfficerAssignee,
   unplacePerson,
+  type AssignConstraintPolicy,
   type ScheduleTracker,
 } from "@/lib/scheduling-engine";
 import {
@@ -85,6 +86,7 @@ function cloneTracker(tracker: ScheduleTracker): ScheduleTracker {
     periodPoints: { ...tracker.periodPoints },
     kitchenPoints: { ...tracker.kitchenPoints },
     dutyPoints: { ...tracker.dutyPoints },
+    constraintPolicy: tracker.constraintPolicy,
   };
 }
 
@@ -215,9 +217,15 @@ function seedExistingAssignments(
   rules: FairnessRules,
   crossDayMissions: MissionDay[],
   keepExisting: boolean,
+  constraintPolicy: AssignConstraintPolicy = "standard",
 ): ScheduleTracker {
   const excludeIds = new Set(missions.map((m) => m.id));
-  const tracker = buildTrackerFromMissions(crossDayMissions, rules, excludeIds);
+  const tracker = buildTrackerFromMissions(
+    crossDayMissions,
+    rules,
+    excludeIds,
+    constraintPolicy,
+  );
 
   for (const mission of missions) {
     const scheduling = schedulingFor(mission);
@@ -1582,6 +1590,7 @@ export function runGlobalAssign(input: GlobalAssignInput): GlobalAssignOutput {
     input.rules,
     crossDay,
     keepExisting,
+    input.constraintPolicy ?? "standard",
   );
   const carmelSnapshots = buildCarmelSnapshots(units, input.people, input.issues, tracker);
 

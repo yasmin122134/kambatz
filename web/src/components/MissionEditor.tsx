@@ -364,11 +364,13 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
     setMsg("עב״ס נוסף כעמדות ביום השמירות — «סנכרן מבנה משמרות» ואז «שמור»");
   }
 
-  async function runAutoAssign() {
+  async function runAutoAssign(constraintPolicy: "standard" | "strict_rest" = "standard") {
     if (!missionId) return;
     if (
       !confirm(
-        "ליצור שיבוץ חכם לפי מבנה המשמרות הנוכחי? השיבוץ ייבנה מחדש. משבצות נעולות יישארו.",
+        constraintPolicy === "strict_rest"
+          ? "חלוקה קשיחה לפי מבנה המשמרות הנוכחי? יישמרו מנוחה בין שמירות ומרווח עב״ס כאילוץ קשיח — גם במחיר חלוקה פחות מאוזנת. המנוחה תישבר רק אם אין דרך אחרת למלא את הלוח. משבצות נעולות יישארו."
+          : "ליצור שיבוץ חכם לפי מבנה המשמרות הנוכחי? השיבוץ ייבנה מחדש. משבצות נעולות יישארו.",
       )
     ) {
       return;
@@ -383,6 +385,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         mission_id: missionId,
         keep_existing: false,
         include_same_day: false,
+        constraint_policy: constraintPolicy,
       }),
     });
     const data = await res.json();
@@ -1067,14 +1070,25 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
           </button>
         )}
         {missionId && (
-          <button
-            type="button"
-            className="btn-pri"
-            disabled={autoAssigning || saving}
-            onClick={runAutoAssign}
-          >
-            {autoAssigning ? "משבץ…" : "שיבוץ חכם"}
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn-pri"
+              disabled={autoAssigning || saving}
+              onClick={() => runAutoAssign("standard")}
+            >
+              {autoAssigning ? "משבץ…" : "שיבוץ חכם"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              disabled={autoAssigning || saving}
+              onClick={() => runAutoAssign("strict_rest")}
+              title="שומר מנוחה בין שמירות ומרווח עב״ס כאילוץ קשיח. צדק פחות חשוב. שובר מנוחה רק אם אין דרך אחרת למלא."
+            >
+              {autoAssigning ? "משבץ…" : "חלוקה קשיחה"}
+            </button>
+          </>
         )}
         <Link href="/admin/missions" className="btn">
           חזרה לרשימה

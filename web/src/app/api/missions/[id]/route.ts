@@ -38,6 +38,7 @@ import {
   isSeatLocked,
   lockFilledSeats,
   reconcileLockedSeatsOnStructureChange,
+  clearMissionRoster,
   syncLockedSeats,
   withSeatLock,
 } from "@/lib/assignment-lock";
@@ -427,6 +428,11 @@ export async function PATCH(request: Request, { params }: Params) {
     updated = {
       ...hostMission,
       locked_seats: emptyLockedSeats(hostMission.positions),
+    };
+  } else if (action === "clear_all" && admin) {
+    updated = {
+      ...hostMission,
+      ...clearMissionRoster(hostMission.positions),
     };
   } else if (action === "swap_carmel_a_room" && admin) {
     if (hostMission.mission_type !== "guards") {
