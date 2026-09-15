@@ -240,7 +240,7 @@ function needsDutyGuardGap(
 }
 
 function assignmentMeta(
-  slot: Pick<FlatSlot, "positionName" | "startTime" | "endTime">,
+  slot: Pick<AssignmentOverlapMeta, "positionName" | "startTime" | "endTime">,
 ): AssignmentOverlapMeta {
   return {
     positionName: slot.positionName,
