@@ -53,6 +53,7 @@ import { downloadMissionsExcel } from "@/lib/mission-export";
 import { LuachXlsxImportButton } from "@/components/LuachXlsxImportButton";
 import { publishBoardConfirmMessage } from "@/lib/mission-publish";
 import type { Person } from "@/lib/types";
+import { useCompactOverlay } from "@/lib/use-media-query";
 
 type Props = {
   personName: string;
@@ -1035,6 +1036,22 @@ export function BoardClient({
         }`}>{msg}</p>
       )}
 
+      {swapTarget && canAssign && (
+        <div className="swap-flow-banner">
+          <span>
+            {swapMode === "swap"
+              ? "בחרו משמרת להחלפה ראש בראש"
+              : `נבחרה משמרת: ${swapTarget.label}`}
+          </span>
+          <button type="button" className="btn-sm" onClick={() => {
+            setSwapTarget(null);
+            setSwapMode(null);
+          }}>
+            ביטול
+          </button>
+        </div>
+      )}
+
       {isAdminUser && draftMissionsOnDay.length > 0 && (
         <div
           className="mb-4 rounded border px-3 py-2 text-sm"
@@ -1717,6 +1734,8 @@ function GuardTimeline({
     { length: TIMELINE_CYCLE_MIN / TIMELINE_TICK_STEP_MIN + 1 },
     (_, i) => i * TIMELINE_TICK_STEP_MIN,
   );
+  const compactUi = useCompactOverlay();
+  const [expandedSlotId, setExpandedSlotId] = useState<string | null>(null);
 
   const timelineStyle = {
     ["--timeline-height" as string]: `${TIMELINE_HEIGHT_PX}px`,
@@ -1724,7 +1743,7 @@ function GuardTimeline({
   };
 
   return (
-    <div className="guard-timeline-wrap">
+    <div className={`guard-timeline-wrap${swapMode === "swap" ? " is-swap-picking" : ""}`}>
       <div className="guard-timeline" style={timelineStyle}>
         <div className="guard-timeline-axis" aria-hidden>
           {ticks.map((cyclicMin) => (
@@ -1760,9 +1779,30 @@ function GuardTimeline({
                   {posSlots.map((slot) => (
                     <div
                       key={slot.slotId}
-                      className={`guard-timeline-slot${isTimelineShortSlot(slot) ? " is-short" : ""}`}
+                      className={`guard-timeline-slot${isTimelineShortSlot(slot) ? " is-short" : ""}${
+                        expandedSlotId === slot.slotId ? " is-expanded" : ""
+                      }`}
                       tabIndex={
-                        isAdmin && usesTimelineCompactAssignees(slot) ? 0 : undefined
+                        usesTimelineCompactAssignees(slot) && (isAdmin || canAssign)
+                          ? 0
+                          : undefined
+                      }
+                      onClick={
+                        compactUi
+                          ? (event) => {
+                              const target = event.target as HTMLElement | null;
+                              if (
+                                target?.closest(
+                                  "button, a, input, select, textarea, .name-combobox-menu, .replacement-picker-menu, .overlay-sheet",
+                                )
+                              ) {
+                                return;
+                              }
+                              setExpandedSlotId((current) =>
+                                current === slot.slotId ? null : slot.slotId,
+                              );
+                            }
+                          : undefined
                       }
                       style={{
                         top: `${cyclicToPx(slot.cyclicStart)}px`,
@@ -2500,21 +2540,28 @@ function ReplacementPicker({
       swapSeatIndex?: number;
     }[]
   >([]);
+  const compactUi = useCompactOverlay();
+  const isFill = !currentName.trim();
 
   function updateMenuBox() {
     const el = buttonRef.current;
-    if (!el) return;
+    if (!el || compactUi) return;
     const rect = el.getBoundingClientRect();
-    const width = Math.min(320, window.innerWidth - 16);
+    const vv = window.visualViewport;
+    const viewWidth = vv?.width ?? window.innerWidth;
+    const viewHeight = vv?.height ?? window.innerHeight;
+    const offsetLeft = vv?.offsetLeft ?? 0;
+    const offsetTop = vv?.offsetTop ?? 0;
+    const width = Math.min(320, viewWidth - 16);
     let left = rect.right - width;
-    if (left < 8) left = 8;
-    if (left + width > window.innerWidth - 8) {
-      left = window.innerWidth - width - 8;
+    if (left < 8 + offsetLeft) left = 8 + offsetLeft;
+    if (left + width > offsetLeft + viewWidth - 8) {
+      left = offsetLeft + viewWidth - width - 8;
     }
-    const estimatedHeight = Math.min(window.innerHeight - 16, 384);
+    const estimatedHeight = Math.min(viewHeight - 16, 384);
     let top = rect.bottom + 4;
-    if (top + 180 > window.innerHeight) {
-      top = Math.max(8, rect.top - estimatedHeight - 4);
+    if (top + 180 > offsetTop + viewHeight) {
+      top = Math.max(offsetTop + 8, rect.top - estimatedHeight - 4);
     }
     setMenuBox({ top, left });
   }
@@ -2528,32 +2575,41 @@ function ReplacementPicker({
     const onWin = () => updateMenuBox();
     window.addEventListener("resize", onWin);
     window.addEventListener("scroll", onWin, true);
+    window.visualViewport?.addEventListener("resize", onWin);
+    window.visualViewport?.addEventListener("scroll", onWin);
     return () => {
       window.removeEventListener("resize", onWin);
       window.removeEventListener("scroll", onWin, true);
+      window.visualViewport?.removeEventListener("resize", onWin);
+      window.visualViewport?.removeEventListener("scroll", onWin);
     };
-  }, [open]);
+  }, [open, compactUi]);
 
   useEffect(() => {
     if (!open) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", onKey);
+    if (compactUi) {
+      return () => document.removeEventListener("keydown", onKey);
+    }
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node | null;
       if (!target) return;
       if (buttonRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
-      if (target instanceof Element && target.closest(".name-combobox-menu")) return;
+      if (target instanceof Element && target.closest(".name-combobox-menu, .overlay-sheet")) {
+        return;
+      }
       setOpen(false);
     }
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
     document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKey);
     return () => {
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, compactUi]);
 
   async function load(nextMode: "replace" | "swap") {
     setMode(nextMode);
@@ -2576,138 +2632,157 @@ function ReplacementPicker({
     else setOptions([]);
   }
 
-  const isFill = !currentName.trim();
-
-  const panel = open && menuBox && typeof document !== "undefined"
-    ? createPortal(
-        <div
-          ref={menuRef}
-          className="replacement-picker-menu card shadow-lg p-3 text-sm"
-          style={{ top: menuBox.top, left: menuBox.left }}
+  const pickerBody = (
+    <>
+      <div className="bar spread mb-2">
+        <b>{isFill ? "שיבוץ למשבצת" : `מחליף ל${currentName}`}</b>
+        <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
+          ×
+        </button>
+      </div>
+      <div className="flex gap-1 mb-2 flex-wrap">
+        <button
+          type="button"
+          className={`btn-sm ${mode === "replace" ? "on" : ""}`}
+          onClick={() => load("replace")}
         >
-          <div className="bar spread mb-2">
-            <b>{isFill ? "שיבוץ למשבצת" : `מחליף ל${currentName}`}</b>
-            <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
-              ×
-            </button>
-          </div>
-          <div className="flex gap-1 mb-2 flex-wrap">
-            <button
-              type="button"
-              className={`btn-sm ${mode === "replace" ? "on" : ""}`}
-              onClick={() => load("replace")}
-            >
-              {isFill ? "פנויים" : "הסר + מחליף"}
-            </button>
-            {!isFill && (
+          {isFill ? "פנויים" : "הסר + מחליף"}
+        </button>
+        {!isFill && (
+          <button
+            type="button"
+            className={`btn-sm ${mode === "swap" ? "on" : ""}`}
+            onClick={() => load("swap")}
+          >
+            החלפה ראש בראש
+          </button>
+        )}
+        <button
+          type="button"
+          className={`btn-sm ${mode === "manual" ? "on" : ""}`}
+          onClick={() => {
+            setMode("manual");
+            setOpen(true);
+            setOptions([]);
+            setManualName("");
+          }}
+        >
+          בחר מהרשימה
+        </button>
+      </div>
+      {isKitchenSlot && mode !== "manual" && (
+        <p className="hint text-xs mb-2">במטבח מותרות משמרות רצופות — מנוחה יומית לא חוסמת.</p>
+      )}
+      {mode === "manual" ? (
+        <div className="space-y-2">
+          <p className="hint text-xs">
+            {isFill
+              ? "שיבוץ ידני מהרשימה — מתבצע גם אם נשברים כללים."
+              : "שיבוץ ידני — מתבצע גם אם נשברים כללים; משמרות אחרות של אותו אדם נשארות, תוצג אזהרה."}
+          </p>
+          <NameCombobox
+            value={manualName}
+            onChange={setManualName}
+            placeholder="שם מהרשימה…"
+            className="w-full"
+            allowedNames={allowedNames}
+          />
+          <button
+            type="button"
+            className="btn-pri btn-sm w-full"
+            disabled={saving || !manualName.trim() || manualName.trim() === currentName}
+            onClick={async () => {
+              setSaving(true);
+              const ok = await onApply({
+                type: "manual",
+                personName: manualName.trim(),
+              });
+              setSaving(false);
+              if (ok) setOpen(false);
+            }}
+          >
+            {saving ? "שומר…" : isFill ? "שבץ" : "החלף"}
+          </button>
+        </div>
+      ) : loading ? (
+        <p className="hint">מחפש…</p>
+      ) : options.length === 0 ? (
+        <p className="hint">{isFill ? "אין מי שפנוי למשבצת זו" : "אין מחליף שעומד בכללים"}</p>
+      ) : (
+        <ul className="space-y-2">
+          {options.map((o) => (
+            <li key={`${o.type}-${o.personName}-${o.swapSlotId || ""}`}>
               <button
                 type="button"
-                className={`btn-sm ${mode === "swap" ? "on" : ""}`}
-                onClick={() => load("swap")}
-              >
-                החלפה ראש בראש
-              </button>
-            )}
-            <button
-              type="button"
-              className={`btn-sm ${mode === "manual" ? "on" : ""}`}
-              onClick={() => {
-                setMode("manual");
-                setOpen(true);
-                setOptions([]);
-                setManualName("");
-              }}
-            >
-              בחר מהרשימה
-            </button>
-          </div>
-          {isKitchenSlot && mode !== "manual" && (
-            <p className="hint text-xs mb-2">במטבח מותרות משמרות רצופות — מנוחה יומית לא חוסמת.</p>
-          )}
-          {mode === "manual" ? (
-            <div className="space-y-2">
-              <p className="hint text-xs">
-                {isFill
-                  ? "שיבוץ ידני מהרשימה — מתבצע גם אם נשברים כללים."
-                  : "שיבוץ ידני — מתבצע גם אם נשברים כללים; משמרות אחרות של אותו אדם נשארות, תוצג אזהרה."}
-              </p>
-              <NameCombobox
-                value={manualName}
-                onChange={setManualName}
-                placeholder="שם מהרשימה…"
-                className="w-full"
-                allowedNames={allowedNames}
-              />
-              <button
-                type="button"
-                className="btn-pri btn-sm w-full"
-                disabled={saving || !manualName.trim() || manualName.trim() === currentName}
+                className="btn-sm w-full text-right"
+                disabled={saving}
                 onClick={async () => {
                   setSaving(true);
-                  const ok = await onApply({
-                    type: "manual",
-                    personName: manualName.trim(),
-                  });
+                  let ok = false;
+                  if (o.type === "direct") {
+                    ok = await onApply({ type: "direct", personName: o.personName });
+                  } else if (
+                    o.swapMissionId &&
+                    o.swapSlotId != null &&
+                    o.swapSeatIndex != null
+                  ) {
+                    if (o.ruleViolation) {
+                      const confirmed = window.confirm(
+                        `זה מפר את הכלל: ${o.ruleViolation}\n\nהאם בכל זאת תרצה להחליף?`,
+                      );
+                      if (!confirmed) {
+                        setSaving(false);
+                        return;
+                      }
+                    }
+                    ok = await onApply({
+                      type: "swap",
+                      swapMissionId: o.swapMissionId,
+                      swapSlotId: o.swapSlotId,
+                      swapSeatIndex: o.swapSeatIndex,
+                      ...(o.ruleViolation ? { force: true } : {}),
+                    });
+                  }
                   setSaving(false);
                   if (ok) setOpen(false);
                 }}
               >
-                {saving ? "שומר…" : isFill ? "שבץ" : "החלף"}
+                {saving ? "שומר…" : o.label}
               </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
+  );
+
+  const panel =
+    open && (compactUi || menuBox) && typeof document !== "undefined"
+      ? createPortal(
+          compactUi ? (
+            <div className="overlay-sheet">
+              <button
+                type="button"
+                className="overlay-sheet-backdrop"
+                aria-label="סגור"
+                onClick={() => setOpen(false)}
+              />
+              <div ref={menuRef} className="overlay-sheet-panel replacement-picker-menu card p-3 text-sm">
+                {pickerBody}
+              </div>
             </div>
-          ) : loading ? (
-            <p className="hint">מחפש…</p>
-          ) : options.length === 0 ? (
-            <p className="hint">{isFill ? "אין מי שפנוי למשבצת זו" : "אין מחליף שעומד בכללים"}</p>
           ) : (
-            <ul className="space-y-2">
-              {options.map((o) => (
-                <li key={`${o.type}-${o.personName}-${o.swapSlotId || ""}`}>
-                  <button
-                    type="button"
-                    className="btn-sm w-full text-right"
-                    disabled={saving}
-                    onClick={async () => {
-                      setSaving(true);
-                      let ok = false;
-                      if (o.type === "direct") {
-                        ok = await onApply({ type: "direct", personName: o.personName });
-                      } else if (
-                        o.swapMissionId &&
-                        o.swapSlotId != null &&
-                        o.swapSeatIndex != null
-                      ) {
-                        if (o.ruleViolation) {
-                          const confirmed = window.confirm(
-                            `זה מפר את הכלל: ${o.ruleViolation}\n\nהאם בכל זאת תרצה להחליף?`,
-                          );
-                          if (!confirmed) {
-                            setSaving(false);
-                            return;
-                          }
-                        }
-                        ok = await onApply({
-                          type: "swap",
-                          swapMissionId: o.swapMissionId,
-                          swapSlotId: o.swapSlotId,
-                          swapSeatIndex: o.swapSeatIndex,
-                          ...(o.ruleViolation ? { force: true } : {}),
-                        });
-                      }
-                      setSaving(false);
-                      if (ok) setOpen(false);
-                    }}
-                  >
-                    {saving ? "שומר…" : o.label}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>,
-        document.body,
-      )
-    : null;
+            <div
+              ref={menuRef}
+              className="replacement-picker-menu card shadow-lg p-3 text-sm"
+              style={{ top: menuBox?.top, left: menuBox?.left }}
+            >
+              {pickerBody}
+            </div>
+          ),
+          document.body,
+        )
+      : null;
 
   return (
     <div className="relative">
@@ -2923,27 +2998,41 @@ function SlotCard({
               {guardSlotBurdenLabel(slot, fairnessRules)}
             </div>
           )}
-          {summary && (
-            <div
-              className={`timeline-assignee-summary text-xs leading-snug ${
-                isAdmin ? "is-admin-preview" : ""
-              } ${summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"}`}
-              title={summary.title}
-            >
-              {summary.text}
-            </div>
-          )}
-          {isAdmin && compactAssignees ? (
-            <div className="timeline-slot-editor">
-              <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
-              {assigneeList}
-            </div>
-          ) : !compactAssignees ? (
+          {compactAssignees ? (
             <>
+              {summary && (
+                <div
+                  className={`timeline-assignee-summary text-xs leading-snug ${
+                    isAdmin || canAssign ? "is-admin-preview" : ""
+                  } ${summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"}`}
+                  title={summary.title}
+                >
+                  {summary.text}
+                </div>
+              )}
+              {(isAdmin || canAssign) && (
+                <div className="timeline-slot-editor">
+                  <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
+                  {assigneeList}
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              {summary && (
+                <div
+                  className={`timeline-assignee-summary text-xs leading-snug ${
+                    summary.text === "— פנוי —" ? "text-ink3" : "text-ink font-medium"
+                  }`}
+                  title={summary.title}
+                >
+                  {summary.text}
+                </div>
+              )}
               <PatrolAssigneeHint mission={mission} slot={slot} compact isAdmin={isAdmin} />
               {assigneeList}
             </>
-          ) : null}
+          )}
           {calendarEvent && !shortSlot && (
             <div className="mt-1">
               <AddToCalendarLink event={calendarEvent} className="btn-sm" />
@@ -3056,7 +3145,7 @@ function SwapButtons({
 }) {
   if (swapTarget?.slotId === slotId && swapTarget.seatIndex === seatIndex) {
     return (
-      <div className="flex gap-1 flex-wrap">
+      <div className="flex gap-1 flex-wrap slot-actions">
         <button type="button" className="btn-sm" onClick={() => onTake(slotId, seatIndex)}>
           קח/י משמרת
         </button>

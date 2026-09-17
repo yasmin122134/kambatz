@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useCompactOverlay } from "@/lib/use-media-query";
 
 type Props = {
   id?: string;
@@ -38,6 +39,7 @@ export function NameCombobox({
   const [names, setNames] = useState<string[]>(allowedNames || []);
   const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
+  const compactUi = useCompactOverlay();
   const [menuBox, setMenuBox] = useState<{
     top: number;
     left: number;
@@ -92,15 +94,20 @@ export function NameCombobox({
 
   function updateMenuBox() {
     const el = inputRef.current;
-    if (!el) return;
+    if (!el || compactUi) return;
     const rect = el.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom - 8;
-    const spaceAbove = rect.top - 8;
+    const vv = window.visualViewport;
+    const viewWidth = vv?.width ?? window.innerWidth;
+    const viewHeight = vv?.height ?? window.innerHeight;
+    const offsetLeft = vv?.offsetLeft ?? 0;
+    const offsetTop = vv?.offsetTop ?? 0;
+    const spaceBelow = offsetTop + viewHeight - rect.bottom - 8;
+    const spaceAbove = rect.top - offsetTop - 8;
     const maxHeight = Math.min(280, Math.max(spaceBelow, spaceAbove, 120));
     const openUp = spaceBelow < 140 && spaceAbove > spaceBelow;
     setMenuBox({
-      top: openUp ? Math.max(8, rect.top - maxHeight - 4) : rect.bottom + 4,
-      left: Math.min(rect.left, window.innerWidth - Math.max(rect.width, 180) - 8),
+      top: openUp ? Math.max(offsetTop + 8, rect.top - maxHeight - 4) : rect.bottom + 4,
+      left: Math.min(rect.left, offsetLeft + viewWidth - Math.max(rect.width, 180) - 8),
       width: Math.max(rect.width, 180),
       maxHeight,
     });
@@ -115,58 +122,89 @@ export function NameCombobox({
     const onWin = () => updateMenuBox();
     window.addEventListener("resize", onWin);
     window.addEventListener("scroll", onWin, true);
+    window.visualViewport?.addEventListener("resize", onWin);
+    window.visualViewport?.addEventListener("scroll", onWin);
     return () => {
       window.removeEventListener("resize", onWin);
       window.removeEventListener("scroll", onWin, true);
+      window.visualViewport?.removeEventListener("resize", onWin);
+      window.visualViewport?.removeEventListener("scroll", onWin);
     };
-  }, [open]);
+  }, [open, compactUi]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || compactUi) return;
     function onPointerDown(event: PointerEvent) {
       const target = event.target as Node;
       if (inputRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
+      if (target instanceof Element && target.closest(".overlay-sheet")) return;
       setOpen(false);
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  }, [open, compactUi]);
+
+  const optionList = (
+    <ul
+      ref={menuRef}
+      id={listId}
+      role="listbox"
+      className={`name-combobox-menu${compactUi ? " overlay-sheet-panel" : ""}`}
+      style={
+        compactUi
+          ? undefined
+          : menuBox
+            ? {
+                top: menuBox.top,
+                left: menuBox.left,
+                width: menuBox.width,
+                maxHeight: menuBox.maxHeight,
+              }
+            : undefined
+      }
+    >
+      {filtered.length === 0 ? (
+        <li className="name-combobox-empty">אין התאמה — אפשר להקליד שם חופשי</li>
+      ) : (
+        filtered.map((name) => (
+          <li key={name} role="option">
+            <button
+              type="button"
+              className="name-combobox-option"
+              onPointerDown={(e) => e.preventDefault()}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => commit(name)}
+            >
+              {name}
+            </button>
+          </li>
+        ))
+      )}
+    </ul>
+  );
 
   const menu =
     open &&
-    menuBox &&
+    (compactUi || menuBox) &&
     typeof document !== "undefined" &&
     createPortal(
-      <ul
-        ref={menuRef}
-        id={listId}
-        role="listbox"
-        className="name-combobox-menu"
-        style={{
-          top: menuBox.top,
-          left: menuBox.left,
-          width: menuBox.width,
-          maxHeight: menuBox.maxHeight,
-        }}
-      >
-        {filtered.length === 0 ? (
-          <li className="name-combobox-empty">אין התאמה — אפשר להקליד שם חופשי</li>
-        ) : (
-          filtered.map((name) => (
-            <li key={name} role="option">
-              <button
-                type="button"
-                className="name-combobox-option"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => commit(name)}
-              >
-                {name}
-              </button>
-            </li>
-          ))
-        )}
-      </ul>,
+      compactUi ? (
+        <div className="overlay-sheet">
+          <button
+            type="button"
+            className="overlay-sheet-backdrop"
+            aria-label="סגור"
+            onClick={() => {
+              if (commitOnSelect) tryCommitDraft();
+              else setOpen(false);
+            }}
+          />
+          {optionList}
+        </div>
+      ) : (
+        optionList
+      ),
       document.body,
     );
 
@@ -190,7 +228,10 @@ export function NameCombobox({
         }}
         onFocus={() => setOpen(true)}
         onBlur={() => {
-          if (commitOnSelect) tryCommitDraft();
+          if (compactUi && open) return;
+          if (commitOnSelect) {
+            window.setTimeout(() => tryCommitDraft(), 0);
+          }
         }}
         onKeyDown={(e) => {
           if (e.key === "Escape") {
