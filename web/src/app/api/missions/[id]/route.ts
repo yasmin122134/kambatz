@@ -33,7 +33,7 @@ import {
   reconcileAssignmentsOnStructureChange,
   resolveMissionForSlot,
 } from "@/lib/mission-utils";
-import { removeGuardSlotsForWindow } from "@/lib/guard-shift-roster";
+import { removeGuardSlotsForWindow, resizeGuardSlotsForWindow } from "@/lib/guard-shift-roster";
 import {
   emptyLockedSeats,
   isSeatLocked,
@@ -246,6 +246,8 @@ export async function PATCH(request: Request, { params }: Params) {
     target_room,
     locked,
     window_key,
+    start_time,
+    end_time,
   } = body;
 
   const admin = await isAdmin();
@@ -453,16 +455,33 @@ export async function PATCH(request: Request, { params }: Params) {
   } else if (action === "remove_guard_window" && admin) {
     if (hostMission.mission_type !== "guards") {
       return NextResponse.json(
-        { error: "מחיקת גלגול שמירה זמינה רק ביום שמירות" },
+        { error: "מחיקת גלגול שמירה או עתודה זמינה רק ביום שמירות" },
         { status: 400 },
       );
     }
     const result = removeGuardSlotsForWindow(hostMission, String(window_key || ""));
     if (!result.removedSlotIds.length) {
       return NextResponse.json(
-        { error: "לא נמצא גלגול שמירה בשעות אלה" },
+        { error: "לא נמצא גלגול שמירה או עתודה בשעות אלה" },
         { status: 400 },
       );
+    }
+    updated = result.mission;
+  } else if (action === "resize_guard_window" && admin) {
+    if (hostMission.mission_type !== "guards") {
+      return NextResponse.json(
+        { error: "עריכת שעות גלגול זמינה רק ביום שמירות" },
+        { status: 400 },
+      );
+    }
+    const result = resizeGuardSlotsForWindow(
+      hostMission,
+      String(window_key || ""),
+      String(start_time || ""),
+      String(end_time || ""),
+    );
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
     }
     updated = result.mission;
   } else if (action === "swap_carmel_a_room" && admin) {

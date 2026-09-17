@@ -762,6 +762,39 @@ button:hover,
   border-bottom: 1px solid var(--color-line2);
 }
 
+.guard-shift-roster-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-inline-start: auto;
+}
+
+.guard-shift-roster-edit {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.45rem;
+  width: 100%;
+}
+
+.guard-shift-roster-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.7rem;
+  color: var(--color-ink2);
+}
+
+.guard-shift-roster-edit-field input[type="time"] {
+  width: 7.4rem;
+  padding: 0.2rem 0.35rem;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+}
+
 .guard-shift-roster-positions {
   margin: 0;
   padding: 0;

@@ -129,7 +129,7 @@ export function BoardClient({
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [locksBusy, setLocksBusy] = useState(false);
   const [clearingBoard, setClearingBoard] = useState(false);
-  const [removingGuardWindow, setRemovingGuardWindow] = useState(false);
+  const [guardWindowBusy, setGuardWindowBusy] = useState(false);
   const [publishingBoard, setPublishingBoard] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
@@ -606,20 +606,28 @@ export function BoardClient({
     windowKey: string,
     timeLabel: string,
     names: string[],
+    reserveOnly = false,
   ) {
+    const targetLabel = reserveOnly ? "כוח העתודה" : "גלגול השמירה";
+    const structureLabel = reserveOnly
+      ? "כוח העתודה בשעות אלה יימחק מהמבנה, כולל משבצות נעולות."
+      : "עמדות השמירה וכוח העתודה בשעות אלה יימחקו מהמבנה, כולל משבצות נעולות.";
+    const emptyPreview = reserveOnly
+      ? "\n\nאין שיבוצים בעתודה בשעות אלה."
+      : "\n\nאין שיבוצים בגלגול זה.";
     const namePreview = names.length
       ? `\n\nשיבוצים שיוסרו: ${names.slice(0, 10).join(" · ")}${
           names.length > 10 ? ` · ועוד ${names.length - 10}` : ""
         }`
-      : "\n\nאין שיבוצים בגלגול זה.";
+      : emptyPreview;
     const confirmed = confirm(
-      `למחוק את גלגול השמירה ${timeLabel}?\n\n` +
-        "עמדות השמירה בשעות אלה יימחקו מהמבנה, כולל משבצות נעולות." +
+      `למחוק את ${targetLabel} ${timeLabel}?\n\n` +
+        structureLabel +
         namePreview +
-        "\n\nנקודות הצדק יתעדכנו. הגלגול לא יחזור אלא אם תסנכרנו מבנה משמרות.",
+        "\n\nנקודות הצדק יתעדכנו. השעות לא יחזרו אלא אם תסנכרנו מבנה משמרות.",
     );
     if (!confirmed) return;
-    setRemovingGuardWindow(true);
+    setGuardWindowBusy(true);
     setMsg("");
     try {
       const res = await fetch(`/api/missions/${missionId}`, {
@@ -632,7 +640,10 @@ export function BoardClient({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setMsg((data as { error?: string }).error || "שגיאה במחיקת הגלגול");
+        setMsg(
+          (data as { error?: string }).error ||
+            (reserveOnly ? "שגיאה במחיקת העתודה" : "שגיאה במחיקת הגלגול"),
+        );
         await loadMissions();
         return;
       }
@@ -640,11 +651,48 @@ export function BoardClient({
       bumpBurdenRefresh();
       setMsg(
         names.length
-          ? `נמחק גלגול ${timeLabel} — הוסרו השיבוצים של ${names.length} אנשים`
-          : `נמחק גלגול ${timeLabel}`,
+          ? `נמחק ${targetLabel} ${timeLabel} — הוסרו השיבוצים של ${names.length} אנשים`
+          : `נמחק ${targetLabel} ${timeLabel}`,
       );
     } finally {
-      setRemovingGuardWindow(false);
+      setGuardWindowBusy(false);
+    }
+  }
+
+  async function resizeGuardWindow(
+    missionId: string,
+    windowKey: string,
+    startTime: string,
+    endTime: string,
+    timeLabel: string,
+    reserveOnly = false,
+  ): Promise<boolean> {
+    const targetLabel = reserveOnly ? "כוח העתודה" : "גלגול השמירה";
+    setGuardWindowBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch(`/api/missions/${missionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "resize_guard_window",
+          window_key: windowKey,
+          start_time: startTime,
+          end_time: endTime,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה בעריכת השעות");
+        await loadMissions();
+        return false;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg(`עודכן ${targetLabel} ${timeLabel} → ${startTime}–${endTime}`);
+      return true;
+    } finally {
+      setGuardWindowBusy(false);
     }
   }
 
@@ -1079,9 +1127,25 @@ export function BoardClient({
               peopleByName={peopleByName}
               rosterNames={activeRosterNames}
               dayMissionsForAbsence={visibleDayMissions}
-              removingGuardWindow={removingGuardWindow}
-              onRemoveGuardWindow={(windowKey, timeLabel, names) =>
-                removeGuardWindow(guardsMission.id, windowKey, timeLabel, names)
+              removingGuardWindow={guardWindowBusy}
+              onRemoveGuardWindow={(windowKey, timeLabel, names, reserveOnly) =>
+                removeGuardWindow(
+                  guardsMission.id,
+                  windowKey,
+                  timeLabel,
+                  names,
+                  reserveOnly,
+                )
+              }
+              onResizeGuardWindow={(windowKey, startTime, endTime, timeLabel, reserveOnly) =>
+                resizeGuardWindow(
+                  guardsMission.id,
+                  windowKey,
+                  startTime,
+                  endTime,
+                  timeLabel,
+                  reserveOnly,
+                )
               }
               onCancelSwap={() => {
                 setSwapTarget(null);
@@ -1668,6 +1732,7 @@ function MissionPanel({
   dayMissionsForAbsence = [],
   removingGuardWindow = false,
   onRemoveGuardWindow,
+  onResizeGuardWindow,
 }: {
   mission: MissionDay;
   personName: string;
@@ -1703,7 +1768,15 @@ function MissionPanel({
     windowKey: string,
     timeLabel: string,
     names: string[],
+    reserveOnly?: boolean,
   ) => void;
+  onResizeGuardWindow?: (
+    windowKey: string,
+    startTime: string,
+    endTime: string,
+    timeLabel: string,
+    reserveOnly?: boolean,
+  ) => Promise<boolean>;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
@@ -1781,6 +1854,7 @@ function MissionPanel({
             isAdmin={isAdmin}
             removing={removingGuardWindow}
             onRemoveWindow={onRemoveGuardWindow}
+            onResizeWindow={onResizeGuardWindow}
           />
         )}
         <GuardTimeline
@@ -1843,19 +1917,42 @@ function MissionPanel({
   );
 }
 
+function toTimeInputValue(value: string): string {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return "";
+  return `${String(+match[1]).padStart(2, "0")}:${match[2]}`;
+}
+
 function GuardShiftRosterPanel({
   views,
   personName,
   isAdmin = false,
   removing = false,
   onRemoveWindow,
+  onResizeWindow,
 }: {
   views: GuardShiftRosterView[];
   personName: string;
   isAdmin?: boolean;
   removing?: boolean;
-  onRemoveWindow?: (windowKey: string, timeLabel: string, names: string[]) => void;
+  onRemoveWindow?: (
+    windowKey: string,
+    timeLabel: string,
+    names: string[],
+    reserveOnly?: boolean,
+  ) => void;
+  onResizeWindow?: (
+    windowKey: string,
+    startTime: string,
+    endTime: string,
+    timeLabel: string,
+    reserveOnly?: boolean,
+  ) => Promise<boolean>;
 }) {
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
+
   function nameChip(name: string) {
     const mine = name === personName;
     return (
@@ -1868,6 +1965,24 @@ function GuardShiftRosterPanel({
     );
   }
 
+  function startEdit(view: GuardShiftRosterView) {
+    setEditingKey(view.windowKey);
+    setEditStart(toTimeInputValue(view.startTime));
+    setEditEnd(toTimeInputValue(view.endTime));
+  }
+
+  async function saveEdit(view: GuardShiftRosterView) {
+    if (!onResizeWindow) return;
+    const ok = await onResizeWindow(
+      view.windowKey,
+      editStart,
+      editEnd,
+      view.timeLabel,
+      view.reserveOnly,
+    );
+    if (ok) setEditingKey(null);
+  }
+
   return (
     <details className="guard-shift-roster" open>
       <summary className="guard-shift-roster-summary">
@@ -1877,27 +1992,101 @@ function GuardShiftRosterPanel({
         </span>
       </summary>
       <div className="guard-shift-roster-list">
-        {views.map((view) => (
+        {views.map((view) => {
+          const editing = editingKey === view.windowKey;
+          return (
           <section key={view.windowKey} className="guard-shift-roster-block">
             <header className="guard-shift-roster-block-header">
-              <span className="mono font-semibold time-ltr" dir="ltr">
-                {view.timeLabel}
-              </span>
-              <span className="hint text-xs">
-                {view.assignedCount}/{view.seatCapacity} משובצים
-              </span>
-              {isAdmin && onRemoveWindow && (
-                <button
-                  type="button"
-                  className="btn-sm"
-                  disabled={removing}
-                  title="מוחק את גלגול השמירה הזה ואת כל השיבוצים בו — לתיקון בדיעבד כשהשמירה לא התקיימה"
-                  onClick={() =>
-                    onRemoveWindow(view.windowKey, view.timeLabel, view.allNames)
-                  }
+              {editing ? (
+                <form
+                  className="guard-shift-roster-edit"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void saveEdit(view);
+                  }}
                 >
-                  {removing ? "מוחק…" : "מחק גלגול"}
-                </button>
+                  <label className="guard-shift-roster-edit-field">
+                    <span>משעה</span>
+                    <input
+                      type="time"
+                      step={60}
+                      dir="ltr"
+                      value={editStart}
+                      disabled={removing}
+                      onChange={(e) => setEditStart(e.target.value)}
+                    />
+                  </label>
+                  <label className="guard-shift-roster-edit-field">
+                    <span>עד</span>
+                    <input
+                      type="time"
+                      step={60}
+                      dir="ltr"
+                      value={editEnd}
+                      disabled={removing}
+                      onChange={(e) => setEditEnd(e.target.value)}
+                    />
+                  </label>
+                  <div className="guard-shift-roster-actions">
+                    <button type="submit" className="btn-sm" disabled={removing}>
+                      {removing ? "שומר…" : "שמור"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-sm"
+                      disabled={removing}
+                      onClick={() => setEditingKey(null)}
+                    >
+                      ביטול
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <span className="mono font-semibold time-ltr" dir="ltr">
+                    {view.timeLabel}
+                  </span>
+                  <span className="hint text-xs">
+                    {view.assignedCount}/{view.seatCapacity} משובצים
+                  </span>
+                  {isAdmin && (
+                    <div className="guard-shift-roster-actions">
+                      {onResizeWindow && (
+                        <button
+                          type="button"
+                          className="btn-sm"
+                          disabled={removing}
+                          title="משנה את שעות הגלגול — השיבוצים נשארים"
+                          onClick={() => startEdit(view)}
+                        >
+                          ערוך שעות
+                        </button>
+                      )}
+                      {onRemoveWindow && (
+                        <button
+                          type="button"
+                          className="btn-sm"
+                          disabled={removing}
+                          title={
+                            view.reserveOnly
+                              ? "מוחק את כוח העתודה בשעות אלה ואת כל השיבוצים בו — לתיקון בדיעבד כשהעתודה לא התקיימה"
+                              : "מוחק את גלגול השמירה וכוח העתודה בשעות אלה ואת כל השיבוצים בהם — לתיקון בדיעבד כשהשמירה לא התקיימה"
+                          }
+                          onClick={() =>
+                            onRemoveWindow(
+                              view.windowKey,
+                              view.timeLabel,
+                              view.allNames,
+                              view.reserveOnly,
+                            )
+                          }
+                        >
+                          {removing ? "מוחק…" : view.reserveOnly ? "מחק עתודה" : "מחק גלגול"}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </>
               )}
             </header>
             <ul className="guard-shift-roster-positions">
@@ -1914,12 +2103,15 @@ function GuardShiftRosterPanel({
             </ul>
             {view.allNames.length > 0 && (
               <div className="guard-shift-roster-all">
-                <span className="text-xs text-ink2">עולים לשמירה:</span>
+                <span className="text-xs text-ink2">
+                  {view.reserveOnly ? "משובצים לעתודה:" : "עולים לשמירה:"}
+                </span>
                 <div className="flex flex-wrap gap-1 mt-0.5">{view.allNames.map(nameChip)}</div>
               </div>
             )}
           </section>
-        ))}
+          );
+        })}
       </div>
     </details>
   );
