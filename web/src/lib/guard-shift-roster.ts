@@ -40,6 +40,70 @@ function isGuardMissionSlot(slot: FlatSlot): boolean {
   return slot.missionType === "guards" && isGuardKind(slot.positionKind);
 }
 
+export type RemoveGuardShiftWindowResult = {
+  mission: MissionDay;
+  removedSlotIds: string[];
+  removedNames: string[];
+};
+
+/**
+ * Deletes cadet-guard slots in one time window and drops their assignments.
+ * Used to retroactively remove a rotation that did not happen.
+ */
+export function removeGuardSlotsForWindow(
+  mission: MissionDay,
+  windowKey: string,
+): RemoveGuardShiftWindowResult {
+  const key = windowKey.trim();
+  if (!key || mission.mission_type !== "guards") {
+    return { mission, removedSlotIds: [], removedNames: [] };
+  }
+
+  const slots = flattenMissionSlots(mission, effectiveBoardStartMin(mission));
+  const removedSlotIds = slots
+    .filter(
+      (slot) =>
+        slot.positionKind === "guard" &&
+        guardShiftWindowKey(slot) === key,
+    )
+    .map((slot) => slot.slotId);
+  const remove = new Set(removedSlotIds);
+  if (!remove.size) {
+    return { mission, removedSlotIds: [], removedNames: [] };
+  }
+
+  const removedNames = [
+    ...new Set(
+      removedSlotIds.flatMap((id) =>
+        (mission.assignments[id] || []).map((n) => n.trim()).filter(Boolean),
+      ),
+    ),
+  ].sort(compareNames);
+
+  const positions = mission.positions.map((pos) =>
+    pos.kind === "guard"
+      ? { ...pos, slots: pos.slots.filter((slot) => !remove.has(slot.id)) }
+      : pos,
+  );
+  const assignments = { ...mission.assignments };
+  const lockedSeats = { ...(mission.locked_seats || {}) };
+  for (const id of removedSlotIds) {
+    delete assignments[id];
+    delete lockedSeats[id];
+  }
+
+  return {
+    mission: {
+      ...mission,
+      positions,
+      assignments,
+      locked_seats: lockedSeats,
+    },
+    removedSlotIds,
+    removedNames,
+  };
+}
+
 /** רשימת גלגולי שמירה — לכל חלון זמן, מי משובץ בכל עמדת שמירה */
 export function guardShiftRosterViewsFromSlots(
   slots: FlatSlot[],

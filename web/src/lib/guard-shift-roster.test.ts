@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { guardShiftRosterViews } from "@/lib/guard-shift-roster";
+import { guardShiftRosterViews, removeGuardSlotsForWindow } from "@/lib/guard-shift-roster";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
 
@@ -91,5 +91,48 @@ describe("guardShiftRosterViews", () => {
     expect(views).toHaveLength(1);
     expect(views[0]?.allNames).toEqual(["Alice", "Bob"]);
     expect(views[0]?.allNames).not.toContain("Reserve");
+  });
+
+  it("removeGuardSlotsForWindow drops that rotation and its assignments", () => {
+    const mission = guardMission(
+      [
+        { id: "s1", start: "20:00", end: "00:00" },
+        { id: "s2", start: "00:00", end: "04:00" },
+      ],
+      {
+        s1: ["Alice"],
+        "t-s1": ["Bob"],
+        s2: ["Carl"],
+        "t-s2": ["Dana"],
+      },
+    );
+    mission.locked_seats = { s1: [true], "t-s1": [false], s2: [true], "t-s2": [false] };
+    const result = removeGuardSlotsForWindow(mission, "20:00-00:00");
+    expect(result.removedSlotIds.sort()).toEqual(["s1", "t-s1"]);
+    expect(result.removedNames).toEqual(["Alice", "Bob"]);
+    expect(result.mission.assignments.s1).toBeUndefined();
+    expect(result.mission.assignments.s2).toEqual(["Carl"]);
+    expect(result.mission.positions[0]?.slots.map((s) => s.id)).toEqual(["s2"]);
+    expect(guardShiftRosterViews(result.mission).map((v) => v.windowKey)).toEqual([
+      "00:00-04:00",
+    ]);
+  });
+
+  it("removeGuardSlotsForWindow leaves officer duty and reserve", () => {
+    const mission = guardMission(
+      [{ id: "s1", start: "08:00", end: "12:00" }],
+      { s1: ["Alice"], "t-s1": ["Bob"] },
+    );
+    mission.positions.push({
+      id: "od",
+      name: "קצין תורן",
+      kind: "officer_duty",
+      slots: [{ id: "od1", start_time: "08:00", end_time: "12:00", seat_count: 2 }],
+    });
+    mission.assignments.od1 = ["Officer"];
+    const result = removeGuardSlotsForWindow(mission, "08:00-12:00");
+    expect(result.removedNames).toEqual(["Alice", "Bob"]);
+    expect(result.mission.assignments.od1).toEqual(["Officer"]);
+    expect(result.mission.positions.some((p) => p.id === "od")).toBe(true);
   });
 });

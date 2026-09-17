@@ -129,6 +129,7 @@ export function BoardClient({
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [locksBusy, setLocksBusy] = useState(false);
   const [clearingBoard, setClearingBoard] = useState(false);
+  const [removingGuardWindow, setRemovingGuardWindow] = useState(false);
   const [publishingBoard, setPublishingBoard] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
@@ -600,6 +601,53 @@ export function BoardClient({
     }
   }
 
+  async function removeGuardWindow(
+    missionId: string,
+    windowKey: string,
+    timeLabel: string,
+    names: string[],
+  ) {
+    const namePreview = names.length
+      ? `\n\nשיבוצים שיוסרו: ${names.slice(0, 10).join(" · ")}${
+          names.length > 10 ? ` · ועוד ${names.length - 10}` : ""
+        }`
+      : "\n\nאין שיבוצים בגלגול זה.";
+    const confirmed = confirm(
+      `למחוק את גלגול השמירה ${timeLabel}?\n\n` +
+        "עמדות השמירה בשעות אלה יימחקו מהמבנה, כולל משבצות נעולות." +
+        namePreview +
+        "\n\nנקודות הצדק יתעדכנו. הגלגול לא יחזור אלא אם תסנכרנו מבנה משמרות.",
+    );
+    if (!confirmed) return;
+    setRemovingGuardWindow(true);
+    setMsg("");
+    try {
+      const res = await fetch(`/api/missions/${missionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "remove_guard_window",
+          window_key: windowKey,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה במחיקת הגלגול");
+        await loadMissions();
+        return;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg(
+        names.length
+          ? `נמחק גלגול ${timeLabel} — הוסרו השיבוצים של ${names.length} אנשים`
+          : `נמחק גלגול ${timeLabel}`,
+      );
+    } finally {
+      setRemovingGuardWindow(false);
+    }
+  }
+
   async function runAutoAssign(
     keepExisting: boolean,
     constraintPolicy: "standard" | "strict_rest" = "standard",
@@ -864,7 +912,8 @@ export function BoardClient({
           msg.includes("ננעלו") ||
           msg.includes("שוחררו") ||
           msg.includes("נשמר") ||
-          msg.includes("פורסם")
+          msg.includes("פורסם") ||
+          msg.includes("נמחק")
             ? "msg-ok"
             : "msg-err"
         }`}>{msg}</p>
@@ -1030,6 +1079,10 @@ export function BoardClient({
               peopleByName={peopleByName}
               rosterNames={activeRosterNames}
               dayMissionsForAbsence={visibleDayMissions}
+              removingGuardWindow={removingGuardWindow}
+              onRemoveGuardWindow={(windowKey, timeLabel, names) =>
+                removeGuardWindow(guardsMission.id, windowKey, timeLabel, names)
+              }
               onCancelSwap={() => {
                 setSwapTarget(null);
                 setSwapMode(null);
@@ -1613,6 +1666,8 @@ function MissionPanel({
   dormRooms,
   peopleByName,
   dayMissionsForAbsence = [],
+  removingGuardWindow = false,
+  onRemoveGuardWindow,
 }: {
   mission: MissionDay;
   personName: string;
@@ -1643,6 +1698,12 @@ function MissionPanel({
   onSwapCarmelRoom?: (missionId: string, room: string) => Promise<void>;
   dormRooms?: string[];
   peopleByName?: Record<string, Person>;
+  removingGuardWindow?: boolean;
+  onRemoveGuardWindow?: (
+    windowKey: string,
+    timeLabel: string,
+    names: string[],
+  ) => void;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
@@ -1714,7 +1775,13 @@ function MissionPanel({
     return (
       <div className="space-y-4">
         {guardShiftRoster.length > 0 && (
-          <GuardShiftRosterPanel views={guardShiftRoster} personName={personName} />
+          <GuardShiftRosterPanel
+            views={guardShiftRoster}
+            personName={personName}
+            isAdmin={isAdmin}
+            removing={removingGuardWindow}
+            onRemoveWindow={onRemoveGuardWindow}
+          />
         )}
         <GuardTimeline
           mission={mission}
@@ -1779,9 +1846,15 @@ function MissionPanel({
 function GuardShiftRosterPanel({
   views,
   personName,
+  isAdmin = false,
+  removing = false,
+  onRemoveWindow,
 }: {
   views: GuardShiftRosterView[];
   personName: string;
+  isAdmin?: boolean;
+  removing?: boolean;
+  onRemoveWindow?: (windowKey: string, timeLabel: string, names: string[]) => void;
 }) {
   function nameChip(name: string) {
     const mine = name === personName;
@@ -1813,6 +1886,19 @@ function GuardShiftRosterPanel({
               <span className="hint text-xs">
                 {view.assignedCount}/{view.seatCapacity} משובצים
               </span>
+              {isAdmin && onRemoveWindow && (
+                <button
+                  type="button"
+                  className="btn-sm"
+                  disabled={removing}
+                  title="מוחק את גלגול השמירה הזה ואת כל השיבוצים בו — לתיקון בדיעבד כשהשמירה לא התקיימה"
+                  onClick={() =>
+                    onRemoveWindow(view.windowKey, view.timeLabel, view.allNames)
+                  }
+                >
+                  {removing ? "מוחק…" : "מחק גלגול"}
+                </button>
+              )}
             </header>
             <ul className="guard-shift-roster-positions">
               {view.positions.map((pos) => (
