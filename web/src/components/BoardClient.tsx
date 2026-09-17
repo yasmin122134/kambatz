@@ -29,7 +29,7 @@ import { collectRosterWarnings } from "@/lib/scheduling-engine";
 import type { ReplacementApplyOption } from "@/lib/replacement-apply";
 import { calendarEventFromFlatSlot } from "@/lib/calendar-ics";
 import { pickTypedDayMission, resolveBoardDate } from "@/lib/board-day-mission";
-import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind } from "@/lib/mission-utils";
+import { virtualBaseWorkMission, effectiveBoardStartMin, flattenMissionSlots, isGuardKind, isStandbyKind } from "@/lib/mission-utils";
 import { clearMissionRoster, emptyLockedSeats, isSeatLocked, lockFilledSeats, withSeatLock } from "@/lib/assignment-lock";
 import { getBaseWorkSlotLeader, isBaseWorkFlatSlot } from "@/lib/base-work-template";
 import { findCarmelASlot, inferRoomFromAssignees } from "@/lib/carmel-room-sync";
@@ -696,6 +696,44 @@ export function BoardClient({
     }
   }
 
+  async function punchCarmelHole(
+    missionId: string,
+    startTime: string,
+    endTime: string,
+  ): Promise<boolean> {
+    const confirmed = confirm(
+      `למחוק את הטווח ${startTime}–${endTime} מכרמל א׳ וכרמל ב׳?\n\n` +
+        "הכוננות תימשך לפני ואחרי החור. השיבוצים יישארו במקטעים שנשארים.\n" +
+        "בשעות החור הצוערים לא יהיו בכרמל.",
+    );
+    if (!confirmed) return false;
+    setGuardWindowBusy(true);
+    setMsg("");
+    try {
+      const res = await fetch(`/api/missions/${missionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "punch_carmel_hole",
+          start_time: startTime,
+          end_time: endTime,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה במחיקת טווח כרמל");
+        await loadMissions();
+        return false;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg(`נפתח חור בכרמל א׳/ב׳ ${startTime}–${endTime}`);
+      return true;
+    } finally {
+      setGuardWindowBusy(false);
+    }
+  }
+
   async function runAutoAssign(
     keepExisting: boolean,
     constraintPolicy: "standard" | "strict_rest" = "standard",
@@ -1146,6 +1184,9 @@ export function BoardClient({
                   timeLabel,
                   reserveOnly,
                 )
+              }
+              onPunchCarmelHole={(startTime, endTime) =>
+                punchCarmelHole(guardsMission.id, startTime, endTime)
               }
               onCancelSwap={() => {
                 setSwapTarget(null);
@@ -1733,6 +1774,7 @@ function MissionPanel({
   removingGuardWindow = false,
   onRemoveGuardWindow,
   onResizeGuardWindow,
+  onPunchCarmelHole,
 }: {
   mission: MissionDay;
   personName: string;
@@ -1777,6 +1819,7 @@ function MissionPanel({
     timeLabel: string,
     reserveOnly?: boolean,
   ) => Promise<boolean>;
+  onPunchCarmelHole?: (startTime: string, endTime: string) => Promise<boolean>;
 }) {
   const boardStartMin = missionBoardStartMin(mission);
   const slots = flattenMissionSlots(mission, boardStartMin);
@@ -1857,6 +1900,11 @@ function MissionPanel({
             onResizeWindow={onResizeGuardWindow}
           />
         )}
+        {isAdmin &&
+          onPunchCarmelHole &&
+          (mission.positions || []).some((p) => p.kind && isStandbyKind(p.kind)) && (
+          <CarmelHolePanel busy={removingGuardWindow} onPunch={onPunchCarmelHole} />
+        )}
         <GuardTimeline
           mission={mission}
           slots={slots}
@@ -1921,6 +1969,74 @@ function toTimeInputValue(value: string): string {
   const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
   if (!match) return "";
   return `${String(+match[1]).padStart(2, "0")}:${match[2]}`;
+}
+
+function CarmelHolePanel({
+  busy = false,
+  onPunch,
+}: {
+  busy?: boolean;
+  onPunch: (startTime: string, endTime: string) => Promise<boolean>;
+}) {
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+
+  async function save() {
+    if (!start || !end) return;
+    const ok = await onPunch(start, end);
+    if (ok) {
+      setStart("");
+      setEnd("");
+    }
+  }
+
+  return (
+    <form
+      className="carmel-hole-panel"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save();
+      }}
+    >
+      <div className="carmel-hole-panel-copy">
+        <span className="font-semibold">חור בכרמל א׳/ב׳</span>
+        <span className="hint text-xs">
+          מוחק טווח שעות משתי עמדות הכוננות — הן ממשיכות לפני ואחרי
+        </span>
+      </div>
+      <div className="guard-shift-roster-edit">
+        <label className="guard-shift-roster-edit-field">
+          <span>משעה</span>
+          <input
+            type="time"
+            step={60}
+            dir="ltr"
+            value={start}
+            disabled={busy}
+            onChange={(e) => setStart(e.target.value)}
+            required
+          />
+        </label>
+        <label className="guard-shift-roster-edit-field">
+          <span>עד</span>
+          <input
+            type="time"
+            step={60}
+            dir="ltr"
+            value={end}
+            disabled={busy}
+            onChange={(e) => setEnd(e.target.value)}
+            required
+          />
+        </label>
+        <div className="guard-shift-roster-actions">
+          <button type="submit" className="btn-sm" disabled={busy || !start || !end}>
+            {busy ? "מוחק…" : "מחק טווח"}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
 }
 
 function GuardShiftRosterPanel({

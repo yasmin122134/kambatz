@@ -34,6 +34,7 @@ import {
   resolveMissionForSlot,
 } from "@/lib/mission-utils";
 import { removeGuardSlotsForWindow, resizeGuardSlotsForWindow } from "@/lib/guard-shift-roster";
+import { punchCarmelCoverageHole } from "@/lib/carmel-coverage";
 import {
   emptyLockedSeats,
   isSeatLocked,
@@ -477,6 +478,22 @@ export async function PATCH(request: Request, { params }: Params) {
     const result = resizeGuardSlotsForWindow(
       hostMission,
       String(window_key || ""),
+      String(start_time || ""),
+      String(end_time || ""),
+    );
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    updated = result.mission;
+  } else if (action === "punch_carmel_hole" && admin) {
+    if (hostMission.mission_type !== "guards") {
+      return NextResponse.json(
+        { error: "חור בכרמל זמין רק ביום שמירות" },
+        { status: 400 },
+      );
+    }
+    const result = punchCarmelCoverageHole(
+      hostMission,
       String(start_time || ""),
       String(end_time || ""),
     );

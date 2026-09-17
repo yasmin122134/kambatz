@@ -972,7 +972,8 @@ function overlapsSlot(
         b.missionType,
         assignmentMeta(slot),
         assignmentMeta(b),
-      )
+      ) &&
+      intervalsOverlap(slotIv, blockInterval(b))
     ) {
       return true;
     }
@@ -1784,7 +1785,8 @@ function collectSpacingAndRestWarnings(
         b.missionType,
         assignmentMeta(slot),
         assignmentMeta(b),
-      )
+      ) &&
+      intervalsOverlap(slotIv, blockInterval(b))
     ) {
       msgs.push(
         `${personName}: כרמל חוסם עב״ס לכל יום המשימה (${describeAssignmentBlock(b)} / ${slot.positionName} ${slot.timeLabel})`,
@@ -3139,6 +3141,27 @@ export function findReplacements(input: {
   return options.slice(0, REPLACEMENT_SWAP_LIMIT);
 }
 
+function namesOnPositionKind(
+  mission: MissionDay,
+  slots: FlatSlot[],
+  kind: MissionPositionKind,
+): Set<string> {
+  const names = new Set<string>();
+  for (const slot of slots) {
+    if (slot.positionKind !== kind) continue;
+    for (const name of mission.assignments[slot.slotId] || []) {
+      if (name) names.add(name);
+    }
+  }
+  return names;
+}
+
+function sharedCarmelABNames(mission: MissionDay, slots: FlatSlot[]): string[] {
+  const setA = namesOnPositionKind(mission, slots, "standby_carmel_a");
+  if (!setA.size) return [];
+  return [...namesOnPositionKind(mission, slots, "standby_carmel_b")].filter((n) => setA.has(n));
+}
+
 function blockLabel(block: BusyBlock): string {
   if (block.positionKind === "standby_carmel_a") return "כרמל א׳";
   if (block.positionKind === "standby_carmel_b") return "כרמל ב׳";
@@ -3171,16 +3194,9 @@ function collectStructuralRosterWarnings(mission: MissionDay): string[] {
     }
   }
 
-  const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a");
-  const carmelB = slots.find((s) => s.positionKind === "standby_carmel_b");
-  if (carmelA && carmelB) {
-    const setA = new Set((mission.assignments[carmelA.slotId] || []).filter(Boolean));
-    const shared = (mission.assignments[carmelB.slotId] || []).filter(
-      (n) => n && setA.has(n),
-    );
-    if (shared.length) {
-      messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${shared.join(", ")}`);
-    }
+  const sharedCarmel = sharedCarmelABNames(mission, slots);
+  if (sharedCarmel.length) {
+    messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${sharedCarmel.join(", ")}`);
   }
 
   for (const slot of slots) {
@@ -3326,16 +3342,9 @@ export function findAssignmentConflicts(
     }
   }
 
-  const carmelA = slots.find((s) => s.positionKind === "standby_carmel_a");
-  const carmelB = slots.find((s) => s.positionKind === "standby_carmel_b");
-  if (carmelA && carmelB) {
-    const setA = new Set((mission.assignments[carmelA.slotId] || []).filter(Boolean));
-    const shared = (mission.assignments[carmelB.slotId] || []).filter(
-      (n) => n && setA.has(n),
-    );
-    if (shared.length) {
-      messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${shared.join(", ")}`);
-    }
+  const sharedCarmel = sharedCarmelABNames(mission, slots);
+  if (sharedCarmel.length) {
+    messages.push(`כרמל א׳ וב׳ — אותם צוערים: ${sharedCarmel.join(", ")}`);
   }
 
   const tracker: ScheduleTracker = createEmptyScheduleTracker();
@@ -3593,7 +3602,8 @@ export function validateNoPersonOverlaps(
             b.missionType,
             assignmentMetaOf(a),
             assignmentMetaOf(b),
-          )
+          ) &&
+          visibleTimeOverlap(a, b)
         ) {
           messages.push(
             `חפיפה עב״ס: ${person} — ${a.label} ∩ ${b.label} (כרמל א׳ חוסם עב״ס לכל היום)`,

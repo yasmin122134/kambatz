@@ -21,7 +21,11 @@ export type SwapCarmelARoomResult =
   | { ok: false; error: string };
 
 export function findCarmelASlot(mission: MissionDay): FlatSlot | undefined {
-  return flattenMissionSlots(mission).find((s) => s.positionKind === "standby_carmel_a");
+  return findCarmelASlots(mission)[0];
+}
+
+export function findCarmelASlots(mission: MissionDay): FlatSlot[] {
+  return flattenMissionSlots(mission).filter((s) => s.positionKind === "standby_carmel_a");
 }
 
 export function findCarmelBSlot(mission: MissionDay): FlatSlot | undefined {
@@ -218,7 +222,8 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
   }
 
   const peopleByName = Object.fromEntries(input.people.map((p) => [p.name, p]));
-  const carmelSlot = findCarmelASlot(input.guardsMission);
+  const carmelSlots = findCarmelASlots(input.guardsMission);
+  const carmelSlot = carmelSlots[0];
   if (!carmelSlot) {
     return { ok: false, error: "לא נמצאה עמדת כרמל א׳ ביום השמירות" };
   }
@@ -264,11 +269,12 @@ export function swapCarmelARoom(input: SwapCarmelARoomInput): SwapCarmelARoomRes
       };
     }
     const seats = Array.from({ length: carmelSlot.seatCount }, (_, i) => newCarmelNames[i] || "");
+    const carmelAssignments = Object.fromEntries(carmelSlots.map((slot) => [slot.slotId, [...seats]]));
     missions[guardsIdx] = {
       ...missions[guardsIdx],
       assignments: {
         ...missions[guardsIdx].assignments,
-        [carmelSlot.slotId]: seats,
+        ...carmelAssignments,
       },
     };
     return {
