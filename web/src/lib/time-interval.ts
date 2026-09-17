@@ -31,13 +31,29 @@ export function normalizeTimeLabel(s: string): string {
 }
 
 export function parseTimeMinutes(s: string): number | null {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim());
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(s || "").trim());
   if (!m) return null;
   const h = +m[1];
   const min = +m[2];
   if (h === 24 && min === 0) return 1440;
   if (h < 0 || h > 23 || min < 0 || min > 59) return null;
   return h * 60 + min;
+}
+
+/** Value safe for `<input type="time">` (HH:MM). */
+export function timeInputValue(s: string): string {
+  const n = normalizeTimeLabel(s);
+  return /^\d{2}:\d{2}$/.test(n) ? n : "";
+}
+
+/** YYYY-MM-DD in Israel, not UTC. */
+export function israelCalendarDate(at = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: MISSION_WALL_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
 }
 
 export function fmtTimeLabel(ms: number, timeZone = MISSION_WALL_TZ): string {

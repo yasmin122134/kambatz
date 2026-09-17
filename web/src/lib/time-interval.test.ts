@@ -3,9 +3,25 @@ import { baseWorkWallClockInterval } from "@/lib/base-work-template";
 import { flattenMissionSlots } from "@/lib/mission-utils";
 import { validateMissionStructureForAssignment } from "@/lib/mission-slot-structure";
 import { buildGuardDayPositions, carmelSlotFromMission } from "@/lib/guard-day-template";
-import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval, sameMissionInstant } from "@/lib/time-interval";
+import { resolveCanonicalSlotInterval, resolveSlotAbsoluteInterval, sameMissionInstant, parseTimeMinutes, timeInputValue, wallClockIntervalOnCalendarDate } from "@/lib/time-interval";
 import type { MissionDay } from "@/lib/types";
 import { DEFAULT_MISSION_SCHEDULING_RULES } from "@/lib/types";
+
+describe("parseTimeMinutes", () => {
+  it("accepts HTML time values with seconds", () => {
+    expect(parseTimeMinutes("09:00:00")).toBe(9 * 60);
+    expect(parseTimeMinutes("11:30:00")).toBe(11 * 60 + 30);
+    expect(timeInputValue("09:00:00")).toBe("09:00");
+  });
+});
+
+describe("wallClockIntervalOnCalendarDate", () => {
+  it("keeps overnight blocks on the constraint calendar day", () => {
+    const iv = wallClockIntervalOnCalendarDate("2026-03-01", "21:00:00", "07:00:00");
+    expect(iv).not.toBeNull();
+    expect(iv!.endMs - iv!.startMs).toBe(10 * 3_600_000);
+  });
+});
 
 describe("sameMissionInstant", () => {
   it("treats +03:00 and UTC Z as the same minute", () => {

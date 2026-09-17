@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { NameCombobox } from "@/components/NameCombobox";
 import {
   ISSUE_TYPE_LABELS,
@@ -11,6 +11,7 @@ import {
   type Person,
   type PersonalFlags,
 } from "@/lib/types";
+import { israelCalendarDate, timeInputValue } from "@/lib/time-interval";
 
 const FLAG_KEYS = Object.keys(PERSONAL_FLAG_LABELS) as (keyof PersonalFlags)[];
 
@@ -42,9 +43,7 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
   const [flags, setFlags] = useState<PersonalFlags>(EMPTY_FLAGS);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
-  const [constraintDate, setConstraintDate] = useState(
-    () => new Date().toISOString().slice(0, 10),
-  );
+  const [constraintDate, setConstraintDate] = useState(israelCalendarDate);
   const [issueType, setIssueType] = useState<IssueType>("trial");
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -52,6 +51,7 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
   const [error, setError] = useState("");
 
   const selected = people.find((p) => p.name === personName);
+  const rosterNames = useMemo(() => people.map((p) => p.name), [people]);
 
   useEffect(() => {
     if (defaultDate) setConstraintDate(defaultDate.slice(0, 10));
@@ -97,7 +97,10 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
 
   async function saveBlock(e: FormEvent) {
     e.preventDefault();
-    if (!personName.trim()) return;
+    if (!selected) {
+      setError("בחרו צוער מהרשימה");
+      return;
+    }
     setSaving(true);
     setMessage("");
     setError("");
@@ -106,10 +109,10 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        person_name: personName,
+        person_name: selected.name,
         constraint_date: constraintDate,
-        start_time: startTime,
-        end_time: endTime,
+        start_time: timeInputValue(startTime) || startTime,
+        end_time: timeInputValue(endTime) || endTime,
         issue_type: issueType,
         note: note.trim(),
         approved: true,
@@ -167,8 +170,13 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
           id="constraint-person"
           value={personName}
           onChange={setPersonName}
+          allowedNames={rosterNames}
+          required
           placeholder="בחרו שם מהמחזור"
         />
+        {personName.trim() && !selected && (
+          <p className="hint">אין התאמה מדויקת — בחרו שם מהרשימה</p>
+        )}
       </div>
 
       {mode === "flags" ? (
@@ -246,10 +254,11 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
               <input
                 id="c-start"
                 type="time"
+                step={60}
                 required
                 className="mono"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
+                value={timeInputValue(startTime) || startTime}
+                onChange={(e) => setStartTime(timeInputValue(e.target.value) || e.target.value)}
               />
             </div>
             <div className="field">
@@ -257,10 +266,11 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
               <input
                 id="c-end"
                 type="time"
+                step={60}
                 required
                 className="mono"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
+                value={timeInputValue(endTime) || endTime}
+                onChange={(e) => setEndTime(timeInputValue(e.target.value) || e.target.value)}
               />
             </div>
           </div>
@@ -296,7 +306,7 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
           <button
             type="submit"
             className="btn-pri btn-sm"
-            disabled={saving || !personName.trim() || !note.trim()}
+            disabled={saving || !selected || !note.trim()}
           >
             {saving ? "שומר…" : "הוסף חסימה מאושרת"}
           </button>
@@ -307,8 +317,8 @@ export function AdminManualConstraints({ people, onSaved, defaultDate }: Props) 
       {message && <p className="msg-ok mt-3">{message}</p>}
 
       <p className="hint mt-4">
-        סימונים נשמרים ישירות בפרופיל ובמחולל. חסימות שעות נכנסות מיד ללשונית 06
-        · חסימות.
+        סימונים נשמרים ישירות בפרופיל ובמחולל. חסימת שעות מאושרת נכנסת מיד לשיבוץ
+        ולא מחכה לאישור.
       </p>
     </section>
   );

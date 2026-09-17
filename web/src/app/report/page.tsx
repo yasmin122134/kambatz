@@ -13,6 +13,7 @@ import {
   type IssueType,
   type Person,
 } from "@/lib/types";
+import { israelCalendarDate, timeInputValue } from "@/lib/time-interval";
 
 const TIME_PRESETS = [
   { label: "בוקר (07:00–12:00)", start: "07:00", end: "12:00" },
@@ -25,9 +26,7 @@ export default function ReportPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [myIssues, setMyIssues] = useState<Issue[]>([]);
   const [personName, setPersonName] = useState("");
-  const [constraintDate, setConstraintDate] = useState(
-    () => new Date().toISOString().slice(0, 10),
-  );
+  const [constraintDate, setConstraintDate] = useState(israelCalendarDate);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("11:00");
   const [issueType, setIssueType] = useState<IssueType>("trial");
@@ -84,8 +83,8 @@ export default function ReportPage() {
       body: JSON.stringify({
         person_name: personName,
         constraint_date: constraintDate,
-        start_time: startTime,
-        end_time: endTime,
+        start_time: timeInputValue(startTime) || startTime,
+        end_time: timeInputValue(endTime) || endTime,
         issue_type: issueType,
         note: note || null,
       }),
@@ -168,10 +167,11 @@ export default function ReportPage() {
             <input
               id="start"
               type="time"
+              step={60}
               required
               className="mono"
-              value={startTime}
-              onChange={(e) => setStartTime(e.target.value)}
+              value={timeInputValue(startTime) || startTime}
+              onChange={(e) => setStartTime(timeInputValue(e.target.value) || e.target.value)}
             />
           </div>
           <div className="field">
@@ -179,10 +179,11 @@ export default function ReportPage() {
             <input
               id="end"
               type="time"
+              step={60}
               required
               className="mono"
-              value={endTime}
-              onChange={(e) => setEndTime(e.target.value)}
+              value={timeInputValue(endTime) || endTime}
+              onChange={(e) => setEndTime(timeInputValue(e.target.value) || e.target.value)}
             />
           </div>
         </div>

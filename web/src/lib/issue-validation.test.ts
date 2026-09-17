@@ -29,4 +29,21 @@ describe("parseIssuePayload", () => {
     });
     expect(out).toEqual({ error: "יש לכתוב הערה קצרה שמסבירה את החסימה" });
   });
+
+  it("accepts HTML time values with seconds", () => {
+    const out = parseIssuePayload({
+      constraint_date: "2026-03-01",
+      start_time: "09:00:00",
+      end_time: "11:30:00",
+      issue_type: "trial",
+      note: "התנסות",
+    });
+    expect(out).toEqual({
+      constraint_date: "2026-03-01",
+      start_time: "09:00",
+      end_time: "11:30",
+      issue_type: "trial",
+      note: "התנסות",
+    });
+  });
 });
