@@ -12,6 +12,8 @@ type Props = {
   className?: string;
   /** אם מוגדר — רק שמות אלו מוצעים (למשל קצינים תורנים) */
   allowedNames?: string[];
+  /** שומר רק בבחירה מהרשימה / Enter / יציאה עם שם מדויק — לא בכל הקשה */
+  commitOnSelect?: boolean;
 };
 
 function matchesName(name: string, query: string): boolean {
@@ -27,12 +29,14 @@ export function NameCombobox({
   placeholder = "הקלידו שם…",
   className,
   allowedNames,
+  commitOnSelect = false,
 }: Props) {
   const rawId = useId();
   const listId = `names-${rawId.replace(/:/g, "")}`;
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
   const [names, setNames] = useState<string[]>(allowedNames || []);
+  const [draft, setDraft] = useState(value);
   const [open, setOpen] = useState(false);
   const [menuBox, setMenuBox] = useState<{
     top: number;
@@ -56,8 +60,35 @@ export function NameCombobox({
       .catch(() => {});
   }, [allowedNames]);
 
-  const query = value.trim();
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const shown = commitOnSelect ? draft : value;
+  const query = shown.trim();
   const filtered = names.filter((name) => matchesName(name, query));
+
+  function commit(next: string) {
+    onChange(next);
+    setDraft(next);
+    setOpen(false);
+  }
+
+  function tryCommitDraft() {
+    if (!commitOnSelect) return;
+    const q = draft.trim();
+    if (!q) {
+      if (value) commit("");
+      else setOpen(false);
+      return;
+    }
+    const exact =
+      names.find((n) => n === q) ??
+      names.find((n) => n.toLowerCase() === q.toLowerCase());
+    if (exact) commit(exact);
+    else setDraft(value);
+    setOpen(false);
+  }
 
   function updateMenuBox() {
     const el = inputRef.current;
@@ -128,10 +159,7 @@ export function NameCombobox({
                 type="button"
                 className="name-combobox-option"
                 onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  onChange(name);
-                  setOpen(false);
-                }}
+                onClick={() => commit(name)}
               >
                 {name}
               </button>
@@ -154,14 +182,34 @@ export function NameCombobox({
         required={required}
         className="w-full"
         placeholder={placeholder}
-        value={value}
+        value={shown}
         onChange={(e) => {
-          onChange(e.target.value);
+          if (commitOnSelect) setDraft(e.target.value);
+          else onChange(e.target.value);
           setOpen(true);
         }}
         onFocus={() => setOpen(true)}
+        onBlur={() => {
+          if (commitOnSelect) tryCommitDraft();
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Escape") setOpen(false);
+          if (e.key === "Escape") {
+            if (commitOnSelect) setDraft(value);
+            setOpen(false);
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (commitOnSelect) {
+              const exact =
+                filtered.find((n) => n === query) ??
+                (filtered.length === 1 ? filtered[0] : undefined);
+              if (exact) commit(exact);
+              else tryCommitDraft();
+            } else if (filtered.length === 1) {
+              onChange(filtered[0]);
+              setOpen(false);
+            }
+          }
         }}
       />
       {menu}

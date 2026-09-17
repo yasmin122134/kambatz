@@ -41,7 +41,10 @@ export async function POST(request: Request, { params }: Params) {
   const removeName = String(body.remove_name || "").trim();
   const mode = body.mode === "swap" ? "swap" : "replace";
 
-  if (!slotId || Number.isNaN(seatIndex) || !removeName) {
+  if (!slotId || Number.isNaN(seatIndex)) {
+    return NextResponse.json({ error: "חסרים פרמטרים" }, { status: 400 });
+  }
+  if (mode === "swap" && !removeName) {
     return NextResponse.json({ error: "חסרים פרמטרים" }, { status: 400 });
   }
 

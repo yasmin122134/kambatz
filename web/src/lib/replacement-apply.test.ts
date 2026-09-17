@@ -259,4 +259,42 @@ describe("applyReplacementAssignment", () => {
       }),
     ).rejects.toThrow(/השיבוץ השתנה/);
   });
+
+  it("fills an empty seat with a direct assignment", async () => {
+    const mission = guardMission({ g1: [""], g2: ["Bob"] });
+    const peopleByName = { Bob: person("Bob"), Carl: person("Carl") };
+
+    const result = await applyReplacementAssignment({
+      sourceMission: mission,
+      sameDayMissions: [mission],
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "",
+      option: { type: "direct", personName: "Carl" },
+      peopleByName,
+      issues: [],
+      rules,
+    });
+    expect(result.missions[0].assignments.g1).toEqual(["Carl"]);
+    expect(result.missions[0].assignments.g2).toEqual(["Bob"]);
+  });
+
+  it("rejects filling a seat that is no longer empty", async () => {
+    const mission = guardMission({ g1: ["Bob"], g2: [""] });
+    const peopleByName = { Bob: person("Bob"), Carl: person("Carl") };
+
+    await expect(
+      applyReplacementAssignment({
+        sourceMission: mission,
+        sameDayMissions: [mission],
+        slotId: "g1",
+        seatIndex: 0,
+        removeName: "",
+        option: { type: "direct", personName: "Carl" },
+        peopleByName,
+        issues: [],
+        rules,
+      }),
+    ).rejects.toThrow(/השיבוץ השתנה/);
+  });
 });

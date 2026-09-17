@@ -450,7 +450,7 @@ export function BoardClient({
     if (Array.isArray(data.warnings) && data.warnings.length) {
       setMsg(`ההחלפה נשמרה · אזהרה: ${data.warnings.join(" · ")}`);
     } else {
-      setMsg("ההחלפה נשמרה");
+      setMsg(removeName ? "ההחלפה נשמרה" : "השיבוץ נשמר");
     }
     return true;
   }
@@ -2470,6 +2470,7 @@ function ReplacementPicker({
   seatIndex,
   currentName,
   isKitchenSlot,
+  allowedNames,
   onApply,
 }: {
   missionId: string;
@@ -2477,6 +2478,7 @@ function ReplacementPicker({
   seatIndex: number;
   currentName: string;
   isKitchenSlot?: boolean;
+  allowedNames?: string[];
   onApply: (option: ReplacementApplyOption) => Promise<boolean>;
 }) {
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -2574,7 +2576,7 @@ function ReplacementPicker({
     else setOptions([]);
   }
 
-  if (!currentName) return null;
+  const isFill = !currentName.trim();
 
   const panel = open && menuBox && typeof document !== "undefined"
     ? createPortal(
@@ -2584,7 +2586,7 @@ function ReplacementPicker({
           style={{ top: menuBox.top, left: menuBox.left }}
         >
           <div className="bar spread mb-2">
-            <b>מחליף ל{currentName}</b>
+            <b>{isFill ? "שיבוץ למשבצת" : `מחליף ל${currentName}`}</b>
             <button type="button" className="btn-sm" onClick={() => setOpen(false)}>
               ×
             </button>
@@ -2595,15 +2597,17 @@ function ReplacementPicker({
               className={`btn-sm ${mode === "replace" ? "on" : ""}`}
               onClick={() => load("replace")}
             >
-              הסר + מחליף
+              {isFill ? "פנויים" : "הסר + מחליף"}
             </button>
-            <button
-              type="button"
-              className={`btn-sm ${mode === "swap" ? "on" : ""}`}
-              onClick={() => load("swap")}
-            >
-              החלפה ראש בראש
-            </button>
+            {!isFill && (
+              <button
+                type="button"
+                className={`btn-sm ${mode === "swap" ? "on" : ""}`}
+                onClick={() => load("swap")}
+              >
+                החלפה ראש בראש
+              </button>
+            )}
             <button
               type="button"
               className={`btn-sm ${mode === "manual" ? "on" : ""}`}
@@ -2623,13 +2627,16 @@ function ReplacementPicker({
           {mode === "manual" ? (
             <div className="space-y-2">
               <p className="hint text-xs">
-                שיבוץ ידני — מתבצע גם אם נשברים כללים; משמרות אחרות של אותו אדם נשארות, תוצג אזהרה.
+                {isFill
+                  ? "שיבוץ ידני מהרשימה — מתבצע גם אם נשברים כללים."
+                  : "שיבוץ ידני — מתבצע גם אם נשברים כללים; משמרות אחרות של אותו אדם נשארות, תוצג אזהרה."}
               </p>
               <NameCombobox
                 value={manualName}
                 onChange={setManualName}
                 placeholder="שם מהרשימה…"
                 className="w-full"
+                allowedNames={allowedNames}
               />
               <button
                 type="button"
@@ -2645,13 +2652,13 @@ function ReplacementPicker({
                   if (ok) setOpen(false);
                 }}
               >
-                {saving ? "שומר…" : "החלף"}
+                {saving ? "שומר…" : isFill ? "שבץ" : "החלף"}
               </button>
             </div>
           ) : loading ? (
             <p className="hint">מחפש…</p>
           ) : options.length === 0 ? (
-            <p className="hint">אין מחליף שעומד בכללים</p>
+            <p className="hint">{isFill ? "אין מי שפנוי למשבצת זו" : "אין מחליף שעומד בכללים"}</p>
           ) : (
             <ul className="space-y-2">
               {options.map((o) => (
@@ -2710,7 +2717,7 @@ function ReplacementPicker({
         className="btn-sm"
         onClick={() => load("replace")}
       >
-        מחליף
+        {isFill ? "שבץ" : "מחליף"}
       </button>
       {panel}
     </div>
@@ -2814,6 +2821,7 @@ function SlotCard({
                       ? dutyOfficerNames
                       : undefined
                   }
+                  commitOnSelect
                   className="flex-1 min-w-[100px]"
                 />
                 {name && onToggleLock && (
@@ -2840,23 +2848,26 @@ function SlotCard({
                     ☆ אחראי/ת
                   </button>
                 )}
-                {name && (
-                  <ReplacementPicker
-                    missionId={missionId}
-                    slotId={slot.slotId}
-                    seatIndex={seatIndex}
-                    currentName={name}
-                    isKitchenSlot={
-                      (slot.missionType === "kitchen" && slot.positionKind === "kitchen") ||
-                      (slot.missionType === "guards" &&
-                        slot.positionKind === "kitchen" &&
-                        isHamagshiyotPositionName(slot.positionName))
-                    }
-                    onApply={(option) =>
-                      onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
-                    }
-                  />
-                )}
+                <ReplacementPicker
+                  missionId={missionId}
+                  slotId={slot.slotId}
+                  seatIndex={seatIndex}
+                  currentName={name}
+                  allowedNames={
+                    slot.positionKind === "officer_duty" || slot.positionKind === "patrol"
+                      ? dutyOfficerNames
+                      : undefined
+                  }
+                  isKitchenSlot={
+                    (slot.missionType === "kitchen" && slot.positionKind === "kitchen") ||
+                    (slot.missionType === "guards" &&
+                      slot.positionKind === "kitchen" &&
+                      isHamagshiyotPositionName(slot.positionName))
+                  }
+                  onApply={(option) =>
+                    onApplyReplacement(missionId, slot.slotId, seatIndex, name, option)
+                  }
+                />
               </>
             ) : (
               <span className={isMySeat || displayName === personName ? "schedule-you font-semibold" : ""}>

@@ -283,4 +283,75 @@ describe("findReplacements", () => {
     expect(options.every((o) => o.label.includes("עומס תורנות"))).toBe(true);
     expect(options.every((o) => !o.label.includes("עומס שמירה"))).toBe(true);
   });
+
+  it("suggests people for an empty seat without a current assignee", () => {
+    const mission = guardMission(
+      [{ id: "g1", start: "08:00", end: "12:00" }],
+      { g1: [""] },
+    );
+    const people = [person("Alex"), person("Bob")];
+    const options = findReplacements({
+      missions: [mission],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "",
+      mode: "replace",
+    });
+    expect(options.map((o) => o.personName).sort()).toEqual(["Alex", "Bob"]);
+    expect(options.every((o) => o.type === "direct")).toBe(true);
+  });
+
+  it("does not suggest someone already overlapping the empty seat", () => {
+    const mission = guardMission(
+      [{ id: "g1", start: "08:00", end: "12:00" }],
+      { g1: [""], g2: ["Alex"] },
+    );
+    mission.positions.push({
+      id: "p2",
+      name: "תצפיתן",
+      kind: "guard",
+      same_room: false,
+      same_gender: false,
+      slots: [{ id: "g2", start_time: "08:00", end_time: "12:00", seat_count: 1 }],
+    });
+    const people = [person("Alex"), person("Bob")];
+    const options = findReplacements({
+      missions: [mission],
+      people,
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "",
+      mode: "replace",
+    });
+    expect(options.map((o) => o.personName)).toEqual(["Bob"]);
+  });
+
+  it("does not offer swaps when filling an empty seat", () => {
+    const mission = guardMission(
+      [
+        { id: "g1", start: "08:00", end: "12:00" },
+        { id: "g2", start: "16:00", end: "20:00" },
+      ],
+      { g1: [""], g2: ["Alex"] },
+    );
+    const options = findReplacements({
+      missions: [mission],
+      people: [person("Alex"), person("Bob")],
+      issues: [],
+      rules,
+      missionId: mission.id,
+      slotId: "g1",
+      seatIndex: 0,
+      removeName: "",
+      mode: "swap",
+    });
+    expect(options).toEqual([]);
+  });
 });

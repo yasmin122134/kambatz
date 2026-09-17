@@ -2945,6 +2945,7 @@ export function replacementBurdenLabel(bucket: FairnessBurdenBucket): string {
 }
 
 const REPLACEMENT_DIRECT_LIMIT = 12;
+const FILL_DIRECT_LIMIT = 40;
 const REPLACEMENT_SWAP_LIMIT = 200;
 
 /** lower = better swap suggestion (adjacent / same post preferred) */
@@ -3002,11 +3003,14 @@ export function findReplacements(input: {
     (input.people.length || 1);
 
   const tracker = buildTrackerFromMissions(input.missions, input.rules);
-  const removeBlocks = (tracker.busy[input.removeName] || []).filter(
-    (b) => !(b.missionId === mission.id && b.slotId === input.slotId),
-  );
-  tracker.busy[input.removeName] = removeBlocks;
-  rebuildGuardShiftsForPerson(input.removeName, tracker);
+  const removeName = input.removeName.trim();
+  if (removeName) {
+    const removeBlocks = (tracker.busy[removeName] || []).filter(
+      (b) => !(b.missionId === mission.id && b.slotId === input.slotId),
+    );
+    tracker.busy[removeName] = removeBlocks;
+    rebuildGuardShiftsForPerson(removeName, tracker);
+  }
 
   const mates = (mission.assignments[input.slotId] || []).filter(
     (n, i) => n && i !== input.seatIndex,
@@ -3019,7 +3023,7 @@ export function findReplacements(input: {
 
   if (input.mode === "replace") {
     for (const p of input.people) {
-      if (p.name === input.removeName) continue;
+      if (removeName && p.name === removeName) continue;
       if ((mission.assignments[input.slotId] || []).includes(p.name)) continue;
       if (
         !fitsPerson(p, target, tracker, input.issues, scheduling, mates, peopleByName)
@@ -3042,8 +3046,10 @@ export function findReplacements(input: {
       });
     }
     options.sort((a, b) => a.cost - b.cost);
-    return options.slice(0, REPLACEMENT_DIRECT_LIMIT);
+    return options.slice(0, removeName ? REPLACEMENT_DIRECT_LIMIT : FILL_DIRECT_LIMIT);
   }
+
+  if (!removeName) return [];
 
   const seen = new Set<string>();
 

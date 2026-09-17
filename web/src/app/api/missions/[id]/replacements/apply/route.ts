@@ -26,7 +26,10 @@ export async function POST(request: Request, { params }: Params) {
   const removeName = String(body.remove_name || "").trim();
   const option = normalizeReplacementApplyOption(body.option, body.force === true);
 
-  if (!slotId || !Number.isFinite(seatIndex) || !removeName || !option) {
+  if (!slotId || !Number.isFinite(seatIndex) || !option) {
+    return NextResponse.json({ error: "חסרים פרמטרים" }, { status: 400 });
+  }
+  if (option.type === "swap" && !removeName) {
     return NextResponse.json({ error: "חסרים פרמטרים" }, { status: 400 });
   }
 
