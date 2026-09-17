@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { isAdmin } from "@/lib/auth";
+import { embedDefaultBaseWork, isBaseWorkPosition } from "@/lib/base-work-template";
 import { consolidateGuardDayMission } from "@/lib/guard-day-bundle";
-import { getMissionDay } from "@/lib/missions";
+import { getMissionDay, saveMissionDay } from "@/lib/missions";
 
 export async function POST(
   _request: Request,
@@ -21,8 +22,14 @@ export async function POST(
   }
 
   try {
-    const consolidated = await consolidateGuardDayMission(guards);
-    return NextResponse.json({ guards: consolidated });
+    let guardsDay = await consolidateGuardDayMission(guards);
+    if (!(guardsDay.positions || []).some(isBaseWorkPosition)) {
+      const { mission } = await saveMissionDay(embedDefaultBaseWork(guardsDay), {
+        validateAssignments: false,
+      });
+      guardsDay = mission;
+    }
+    return NextResponse.json({ guards: guardsDay });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "שגיאה" },

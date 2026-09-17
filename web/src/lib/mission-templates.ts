@@ -167,14 +167,7 @@ export function finalizeGuardMissionPositions(
           input.endsAt,
           input.missionDate,
         )
-      : materializeBaseWorkPositions(
-          defaultBaseWorkPositions({
-            seatsPerShift: input.scheduling?.base_work?.seats_per_shift,
-          }),
-          input.startsAt,
-          input.endsAt,
-          input.missionDate,
-        );
+      : [];
   const patrol =
     patrolPositions.length > 0
       ? materializePatrolPositions(patrolPositions, input.missionDate, {
@@ -308,7 +301,6 @@ const GUARD_DAY_REQUIRED_POSITIONS = [
   "בונקר",
   "כוח עתודה",
   "קצין תורן",
-  "עבודות בסיס",
   "פטרולים",
   "חמגשיות",
 ] as const;

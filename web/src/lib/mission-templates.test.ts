@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { isBaseWorkPosition } from "@/lib/base-work-template";
 import { buildGuardDayPositions } from "@/lib/guard-day-template";
 import {
   defaultMissionWindow,
   defaultSchedulingForType,
+  generateGuardMissionStructure,
   missionPositionsNeedTemplateFill,
   resolveMissionPositions,
   shouldRegenerateGuardStructure,
@@ -113,6 +115,38 @@ describe("missionPositionsNeedTemplateFill", () => {
         : pos,
     );
     expect(missionPositionsNeedTemplateFill("guards", customized)).toBe(false);
+  });
+
+  it("does not treat a guard day without עב״ס as a missing template", () => {
+    const positions = buildGuardDayPositions({
+      boardStart: "09:00",
+      shiftHours: 4,
+      missionStartsAt: "2026-09-11T09:00:00+03:00",
+      missionEndsAt: "2026-09-12T09:00:00+03:00",
+    }).filter((p) => !isBaseWorkPosition(p));
+    expect(positions.some(isBaseWorkPosition)).toBe(false);
+    expect(missionPositionsNeedTemplateFill("guards", positions)).toBe(false);
+  });
+});
+
+describe("generateGuardMissionStructure keeps deleted עב״ס gone", () => {
+  it("does not restore default ABAS windows after they were stripped", () => {
+    const startsAt = "2026-09-11T09:00:00+03:00";
+    const endsAt = "2026-09-12T09:00:00+03:00";
+    const positions = standardMissionPositions({
+      missionType: "guards",
+      startsAt,
+      endsAt,
+      scheduling: defaultSchedulingForType("guards", startsAt),
+      missionDate: "2026-09-11",
+    }).filter((p) => !isBaseWorkPosition(p));
+    expect(positions.some(isBaseWorkPosition)).toBe(false);
+    const regenerated = generateGuardMissionStructure(positions, {
+      missionDate: "2026-09-11",
+      startsAt,
+      endsAt,
+    });
+    expect(regenerated.some(isBaseWorkPosition)).toBe(false);
   });
 });
 

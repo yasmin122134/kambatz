@@ -130,6 +130,7 @@ export function BoardClient({
   const [locksBusy, setLocksBusy] = useState(false);
   const [clearingBoard, setClearingBoard] = useState(false);
   const [guardWindowBusy, setGuardWindowBusy] = useState(false);
+  const [removingBaseWork, setRemovingBaseWork] = useState(false);
   const [publishingBoard, setPublishingBoard] = useState(false);
   const [showBurden, setShowBurden] = useState(false);
   const [burdenRefreshKey, setBurdenRefreshKey] = useState(0);
@@ -656,6 +657,35 @@ export function BoardClient({
       );
     } finally {
       setGuardWindowBusy(false);
+    }
+  }
+
+  async function removeBaseWorkFromDay() {
+    const hostId = guardsMission?.id ?? baseMission?.id;
+    if (!hostId) return;
+    const confirmed = confirm(
+      "למחוק את עב״ס מיום זה?\n\nכל חלונות עבודות הבסיס והשיבוצים בהם יימחקו. אפשר להוסיף שוב מעורך המשימה.",
+    );
+    if (!confirmed) return;
+    setRemovingBaseWork(true);
+    setMsg("");
+    try {
+      const res = await fetch(`/api/missions/${hostId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "remove_base_work" }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMsg((data as { error?: string }).error || "שגיאה במחיקת עב״ס");
+        await loadMissions();
+        return;
+      }
+      await loadMissions();
+      bumpBurdenRefresh();
+      setMsg("עב״ס נמחק מיום זה");
+    } finally {
+      setRemovingBaseWork(false);
     }
   }
 
@@ -1196,7 +1226,24 @@ export function BoardClient({
           )}
         </PanelSection>
 
-        <PanelSection title="עבודות בסיס" mission={baseMission ?? undefined} empty="אין עב״ס ביום זה">
+        <PanelSection
+          title="עבודות בסיס"
+          mission={baseMission ?? undefined}
+          empty="אין עב״ס ביום זה"
+          headerExtra={
+            isAdminUser && baseMission ? (
+              <button
+                type="button"
+                className="btn-sm"
+                disabled={removingBaseWork}
+                title="מוחק את חלונות עב״ס מהיום כשאין עבודות בסיס בפועל"
+                onClick={removeBaseWorkFromDay}
+              >
+                {removingBaseWork ? "מוחק…" : "מחק עב״ס מהיום"}
+              </button>
+            ) : null
+          }
+        >
           {baseMission && baseWorkMissionId && (
             <MissionPanel
               mission={baseMission}
@@ -1292,16 +1339,25 @@ function PanelSection({
   title,
   mission,
   empty,
+  headerExtra,
   children,
 }: {
   title: string;
   mission?: MissionDay;
   empty: string;
+  headerExtra?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="card">
-      <h3 className="font-display text-lg mb-3">{title}</h3>
+      {headerExtra ? (
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="font-display text-lg">{title}</h3>
+          {headerExtra}
+        </div>
+      ) : (
+        <h3 className="font-display text-lg mb-3">{title}</h3>
+      )}
       {!mission ? <p className="hint">{empty}</p> : children}
     </section>
   );

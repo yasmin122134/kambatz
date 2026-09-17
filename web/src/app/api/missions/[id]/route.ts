@@ -49,6 +49,8 @@ import { getAuthSession } from "@/lib/session";
 import type { Person } from "@/lib/types";
 import {
   isBaseWorkFlatSlot,
+  isBaseWorkPosition,
+  stripBaseWorkFromMission,
   withBaseWorkSlotLeader,
 } from "@/lib/base-work-template";
 import { swapCarmelARoom } from "@/lib/carmel-room-sync";
@@ -501,6 +503,51 @@ export async function PATCH(request: Request, { params }: Params) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     updated = result.mission;
+  } else if (action === "remove_base_work" && admin) {
+    const guards =
+      hostMission.mission_type === "guards"
+        ? hostMission
+        : sameDay.find((m) => m.mission_type === "guards") ?? null;
+    const extras = sameDay.filter((m) => m.mission_type === "base_work");
+    const hadEmbedded = Boolean(
+      guards && (guards.positions || []).some(isBaseWorkPosition),
+    );
+
+    if (!guards) {
+      if (hostMission.mission_type === "base_work") {
+        await deleteMissionDay(hostMission.id);
+        return NextResponse.json({ ok: true });
+      }
+      return NextResponse.json(
+        { error: "מחיקת עב״ס זמינה מיום שמירות" },
+        { status: 400 },
+      );
+    }
+
+    if (!hadEmbedded && extras.length === 0) {
+      return NextResponse.json({ error: "אין עב״ס ביום זה" }, { status: 400 });
+    }
+
+    let next = stripBaseWorkFromMission(guards);
+    if (next.scheduling_rules?.linked_mission_id) {
+      const scheduling_rules = { ...next.scheduling_rules };
+      delete scheduling_rules.linked_mission_id;
+      next = { ...next, scheduling_rules };
+    }
+
+    try {
+      const { mission: saved } = await saveMissionDay(
+        { ...next, id: next.id },
+        { validateAssignments: false },
+      );
+      await Promise.all(extras.map((m) => deleteMissionDay(m.id).catch(() => undefined)));
+      return NextResponse.json(saved);
+    } catch (e) {
+      return NextResponse.json(
+        { error: e instanceof Error ? e.message : "שגיאה" },
+        { status: 500 },
+      );
+    }
   } else if (action === "swap_carmel_a_room" && admin) {
     if (hostMission.mission_type !== "guards") {
       return NextResponse.json({ error: "החלפת חדר כרמל א׳ זמינה רק ביום שמירות" }, { status: 400 });

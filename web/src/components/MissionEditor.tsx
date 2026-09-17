@@ -125,6 +125,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
   );
   const [autoAssigning, setAutoAssigning] = useState(false);
   const [linkingBaseWork, setLinkingBaseWork] = useState(false);
+  const [removingBaseWork, setRemovingBaseWork] = useState(false);
   const [fairnessRefreshKey, setFairnessRefreshKey] = useState(0);
 
   function applyStandardTemplate(
@@ -394,7 +395,34 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
       return;
     }
     await load();
-    setMsg("עב״ס נוסף כעמדות ביום השמירות — «סנכרן מבנה משמרות» ואז «שמור»");
+    setMsg("עב״ס נוסף כעמדות ביום השמירות");
+  }
+
+  async function removeLinkedBaseWork() {
+    if (!missionId || missionType !== "guards") return;
+    if (
+      !confirm(
+        "למחוק את עב״ס מיום זה? כל השיבוצים בחלונות עב״ס יימחקו. אפשר להוסיף שוב אחר כך.",
+      )
+    ) {
+      return;
+    }
+    setRemovingBaseWork(true);
+    setErr("");
+    setMsg("");
+    const res = await fetch(`/api/missions/${missionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "remove_base_work" }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setRemovingBaseWork(false);
+    if (!res.ok) {
+      setErr((data as { error?: string }).error || "שגיאה במחיקת עב״ס");
+      return;
+    }
+    await load();
+    setMsg("עב״ס נמחק מיום זה");
   }
 
   async function runAutoAssign(constraintPolicy: "standard" | "strict_rest" = "standard") {
@@ -642,7 +670,7 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
         </p>
         {missionType === "guards" &&
           missionId &&
-          !positions.some((p) => p.name.includes("עבודות בסיס") || p.name.includes("עב״ס")) && (
+          !positions.some(isBaseWorkPosition) && (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
               <p className="mb-2">
                 ליום זה חסרות עמדות עב״ס. לחצו כדי להוסיף אותן ליום השמירות (לא משימה נפרדת).
@@ -657,6 +685,19 @@ export function MissionEditor({ missionId }: { missionId?: string }) {
               </button>
             </div>
           )}
+        {missionType === "guards" && missionId && positions.some(isBaseWorkPosition) && (
+          <div className="rounded-lg border border-stone-200 bg-stone-50 px-4 py-3 text-sm">
+            <p className="mb-2">אם אין עב״ס ביום זה אפשר למחוק את החלונות מהלוח.</p>
+            <button
+              type="button"
+              className="btn-sm"
+              disabled={removingBaseWork}
+              onClick={removeLinkedBaseWork}
+            >
+              {removingBaseWork ? "מוחק…" : "מחק עב״ס מהיום"}
+            </button>
+          </div>
+        )}
         <div className="rowf">
           <div className="field">
             <label>מנוחה מינימלית (שעות)</label>

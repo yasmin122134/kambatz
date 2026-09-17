@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultBaseWorkPositions,
+  embedDefaultBaseWork,
   ensureBaseWorkLeaders,
   getBaseWorkSlotLeader,
+  isBaseWorkPosition,
+  stripBaseWorkFromMission,
   withBaseWorkSlotLeader,
 } from "@/lib/base-work-template";
 import { emptyAssignments } from "@/lib/mission-utils";
@@ -60,5 +63,35 @@ describe("base work slot leaders", () => {
     };
     next = ensureBaseWorkLeaders(next);
     expect(getBaseWorkSlotLeader(next, slotId)).toBe("Alice");
+  });
+});
+
+describe("strip and embed base work", () => {
+  it("removes ABAS positions, assignments, locks, and leaders", () => {
+    const mission = baseWorkMission({});
+    const slotId = firstAbasSlotId(mission);
+    mission.assignments[slotId] = ["Alice", "Bob", ""];
+    let next = withBaseWorkSlotLeader(mission, slotId, "Alice");
+    next = { ...next, locked_seats: { [slotId]: [true, false, false] } };
+    const stripped = stripBaseWorkFromMission(next);
+    expect(stripped.positions.some(isBaseWorkPosition)).toBe(false);
+    expect(stripped.assignments[slotId]).toBeUndefined();
+    expect(stripped.locked_seats?.[slotId]).toBeUndefined();
+    expect(getBaseWorkSlotLeader(stripped, slotId)).toBe(null);
+  });
+
+  it("returns the same mission when there is no ABAS", () => {
+    const mission = stripBaseWorkFromMission(baseWorkMission({}));
+    expect(mission.positions.some(isBaseWorkPosition)).toBe(false);
+    expect(stripBaseWorkFromMission(mission)).toBe(mission);
+  });
+
+  it("embeds the three default windows when missing", () => {
+    const mission = stripBaseWorkFromMission(baseWorkMission({}));
+    const embedded = embedDefaultBaseWork(mission);
+    const abas = embedded.positions.filter(isBaseWorkPosition);
+    expect(abas).toHaveLength(1);
+    expect(abas[0].slots).toHaveLength(3);
+    expect(embedDefaultBaseWork(embedded)).toBe(embedded);
   });
 });

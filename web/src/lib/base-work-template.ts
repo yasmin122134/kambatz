@@ -239,6 +239,65 @@ export function withBaseWorkSlotLeader(
   };
 }
 
+export function missionHasBaseWork(mission: Pick<MissionDay, "positions">): boolean {
+  return (mission.positions || []).some(isBaseWorkPosition);
+}
+
+/** מסיר את עמדות עב״ס, השיבוצים והאחראים — בלי לגעת בעמדות השמירה. */
+export function stripBaseWorkFromMission(mission: MissionDay): MissionDay {
+  const removedIds = new Set<string>();
+  const positions = (mission.positions || []).filter((pos) => {
+    if (!isBaseWorkPosition(pos)) return true;
+    for (const slot of pos.slots || []) removedIds.add(slot.id);
+    return false;
+  });
+  if (!removedIds.size) return mission;
+
+  const assignments = { ...mission.assignments };
+  const locked = { ...(mission.locked_seats || {}) };
+  for (const id of removedIds) {
+    delete assignments[id];
+    delete locked[id];
+  }
+
+  const rules = normalizeSchedulingRules(mission.scheduling_rules);
+  const slotLeaders = { ...(rules.base_work?.slot_leaders ?? {}) };
+  for (const id of removedIds) delete slotLeaders[id];
+  const scheduling_rules = {
+    ...rules,
+    base_work: {
+      ...rules.base_work!,
+      slot_leaders: Object.keys(slotLeaders).length ? slotLeaders : undefined,
+    },
+  };
+  delete scheduling_rules.linked_mission_id;
+
+  return {
+    ...mission,
+    positions,
+    assignments,
+    locked_seats: locked,
+    scheduling_rules,
+  };
+}
+
+/** מוסיף את שלושת חלונות ברירת המחדל אם חסרים. */
+export function embedDefaultBaseWork(mission: MissionDay): MissionDay {
+  if (missionHasBaseWork(mission)) return mission;
+  const extras = materializeBaseWorkPositions(
+    defaultBaseWorkPositions({
+      seatsPerShift: mission.scheduling_rules?.base_work?.seats_per_shift,
+    }),
+    mission.starts_at,
+    mission.ends_at,
+    mission.mission_date,
+  );
+  return {
+    ...mission,
+    positions: [...(mission.positions || []), ...extras],
+  };
+}
+
 /** מסיר אחראים שלא משובצים; ממלא אחראי ראשון אם חסר בחלון עם צוות. */
 export function ensureBaseWorkLeaders(mission: MissionDay): MissionDay {
   const rules = normalizeSchedulingRules(mission.scheduling_rules);
